@@ -1,0 +1,34 @@
+# Python/runtime cache
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Streamlit and local generated cache
+cache/
+cache_result/
+.streamlit/secrets.toml
+
+# Logs
+*.log
+streamlit_*_stdout.log
+streamlit_*_stderr.log
+
+# Local packaging/build output
+_internal/
+dist/
+build/
+*.spec
+*.exe
+
+# Local environment
+.venv/
+venv/
+env/
+.env
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

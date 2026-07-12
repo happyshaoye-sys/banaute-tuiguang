@@ -1,0 +1,266 @@
+"""日期区间与周期环比计算。"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+
+import pandas as pd
+
+from .schema import safe_div, to_num
+
+
+PERIOD_SPECS = [
+    (1, "日环比"),
+    (3, "3日环比"),
+    (7, "7日环比"),
+    (15, "15日环比"),
+]
+
+COMPARISON_FIELDS = []
+
+
+def build_period_ranges(date_str):
+    """基于单个前端日期生成所有当前周期和对比周期。"""
+    base_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    periods = {}
+
+    for n, label in PERIOD_SPECS:
+        cur_end = base_date
+        cur_start = base_date - timedelta(days=n - 1)
+        prev_end = cur_start - timedelta(days=1)
+        prev_start = prev_end - timedelta(days=n - 1)
+
+        periods[label] = {
+            "current_start": cur_start.strftime("%Y-%m-%d"),
+            "current_end": cur_end.strftime("%Y-%m-%d"),
+            "prev_start": prev_start.strftime("%Y-%m-%d"),
+            "prev_end": prev_end.strftime("%Y-%m-%d"),
+            "days": n,
+        }
+
+    return periods
+
+
+def iter_dates(start_date, end_date):
+    """逐日返回 YYYY-MM-DD 字符串。"""
+    cur = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    while cur <= end:
+        yield cur.strftime("%Y-%m-%d")
+        cur += timedelta(days=1)
+
+
+def aggregate_period_frame(df, period_days=7):
+    """把多日执行表按宝贝ID累计，并重新计算 ROI、点击率等比率字段。"""
+    if df is None or len(df) == 0:
+        return pd.DataFrame()
+    if "宝贝ID" not in df.columns:
+        return df.copy()
+
+    sum_cols = [
+        "GMV", "推广成交金额", "付费", "关键词", "人群", "全站", "店铺直达",
+        "v9.3推广花费", "v9.3推广成交金额", "v9.3推广加购数", "v9.3推广访客数",
+        "关键词归因成交", "人群归因成交", "全站归因成交", "店铺直达归因成交",
+        "商品访客数", "支付买家数", "支付件数", "商品加购件数", "推广加购数",
+        "成功退款金额", "搜索引导访客数", "直购数量", "直购成本",
+        "展现", "点击",
+    ]
+    first_cols = ["款式主图", "货号", "商品名称", "统计日期", "淘宝类目", "创建时间", "推广明细"]
+    stable_numeric_cols = ["在仓库存", "在途", "成本价（含税）", "日销7", "日销3", "日销15",
+                           "花费3", "花费7", "花费15", "退款率"]
+    numeric_cols = set(sum_cols + stable_numeric_cols)
+
+    work = df.copy()
+    for col in numeric_cols:
+        if col in work.columns:
+            # 退款率需保留 NaN(聚水潭未覆盖=无数据≠0%),to_num 会把 NaN 压成 0
+            if col == "退款率":
+                work[col] = pd.to_numeric(work[col], errors="coerce")
+            else:
+                work[col] = _numeric_series(work[col])
+
+    agg = {}
+    for col in sum_cols:
+        if col in work.columns:
+            agg[col] = "sum"
+    for col in first_cols:
+        if col in work.columns:
+            agg[col] = _first_non_empty
+    for col in stable_numeric_cols:
+        if col in work.columns:
+            agg[col] = "max"
+
+    grouped = work.groupby("宝贝ID", as_index=False).agg(agg)
+
+    for col in sum_cols + stable_numeric_cols:
+        if col not in grouped.columns:
+            grouped[col] = float("nan") if col == "退款率" else 0.0
+        elif col == "退款率":
+            grouped[col] = pd.to_numeric(grouped[col], errors="coerce")
+        else:
+            grouped[col] = _numeric_series(grouped[col])
+
+    gmv = grouped["GMV"]
+    spend = grouped["付费"]
+    visitors = grouped["商品访客数"]
+    buyers = grouped["支付买家数"]
+    units = grouped["支付件数"]
+    refund = grouped["成功退款金额"]
+    cost = grouped["成本价（含税）"]
+    add_cart = grouped["商品加购件数"]
+    views = grouped["展现"]
+    clicks = grouped["点击"]
+
+    # 退款率=聚水潭 30日cohort 唯一口径(与 merge._finalize_result 一致),
+    # 上方清洗已保留 NaN,此处无需再转换
+    # 双投产口径(与 merge._finalize_result 一致):推广投产=归因成交÷花费,链接投产=GMV÷花费
+    grouped["推广投产"] = _ratio_series(grouped["推广成交金额"], spend)
+    grouped["推广实际投产"] = grouped["推广投产"] * (1 - grouped["退款率"].fillna(0.0))
+    grouped["件单价"] = _ratio_series(gmv, units)
+    grouped["利润率"] = _ratio_series(grouped["件单价"] - cost, grouped["件单价"])
+    grouped["预估利润"] = (gmv - refund) * grouped["利润率"]
+    grouped["倍率"] = _ratio_series(grouped["件单价"], cost)
+    grouped["商品支付转化率"] = _ratio_series(buyers, visitors)
+    grouped["访客平均价值"] = _ratio_series(gmv, visitors)
+    grouped["购物车价值"] = _ratio_series(gmv, add_cart)
+    grouped["链接投产"] = _ratio_series(gmv, spend)
+    grouped["链接实际投产"] = grouped["链接投产"] * (1 - grouped["退款率"].fillna(0.0))
+    days = max(int(period_days or 1), 1)
+    grouped["日均消耗"] = spend / days
+    grouped["点击率"] = _ratio_series(clicks, views)
+    grouped["转化率"] = _ratio_series(buyers, clicks)
+    grouped["CPC"] = _ratio_series(spend, clicks)
+    grouped["CPM"] = _ratio_series(spend, views) * 1000
+    daily_sales = grouped["日销7"]
+    grouped["可售天数"] = (grouped["在仓库存"] / daily_sales.where(daily_sales > 0)).round(1)
+
+    return grouped
+
+
+def apply_period_comparisons(df, comparisons):
+    """把每个周期的累计环比写回当前执行表。"""
+    out = df.copy()
+    if "宝贝ID" not in out.columns:
+        return out
+
+    for label, payload in comparisons.items():
+        cur = payload.get("current")
+        prev = payload.get("previous")
+        suffix = label
+        cur_map = _frame_by_pid(cur)
+        prev_map = _frame_by_pid(prev)
+
+        for metric_name, source_col in COMPARISON_FIELDS:
+            col_name = f"{metric_name}_{suffix}"
+            out[col_name] = out["宝贝ID"].apply(
+                lambda pid: _compare_metric(pid, source_col, cur_map, prev_map)
+            )
+
+        if label == "7日环比":
+            out["上周期金额"] = out["宝贝ID"].apply(lambda pid: _lookup_metric(pid, "GMV", prev_map))
+            out["上周期付费"] = out["宝贝ID"].apply(lambda pid: _lookup_metric(pid, "付费", prev_map))
+            out["上周期人群"] = out["宝贝ID"].apply(lambda pid: _lookup_metric(pid, "人群", prev_map))
+            out["上周期关键词"] = out["宝贝ID"].apply(lambda pid: _lookup_metric(pid, "关键词", prev_map))
+            out["上周期全站"] = out["宝贝ID"].apply(lambda pid: _lookup_metric(pid, "全站", prev_map))
+
+    return out
+
+
+def _ratio_series(num, den):
+    n = _numeric_series(num)
+    d = _numeric_series(den)
+    return n.where(d != 0, 0.0) / d.where(d != 0, 1.0)
+
+
+def _numeric_series(values):
+    return pd.Series(values).map(to_num).astype(float)
+
+
+def _first_non_empty(values):
+    for value in values:
+        if pd.notna(value) and str(value).strip() not in ("", "nan", "None"):
+            return value
+    return ""
+
+
+def _frame_by_pid(df):
+    if df is None or len(df) == 0 or "宝贝ID" not in df.columns:
+        return {}
+    return {str(row["宝贝ID"]): row for _, row in df.iterrows()}
+
+
+def _lookup_metric(pid, source_col, row_map):
+    row = row_map.get(str(pid))
+    if row is None:
+        return 0.0
+    return to_num(row.get(source_col, 0))
+
+
+def _compare_metric(pid, source_col, cur_map, prev_map):
+    cur_val = _lookup_metric(pid, source_col, cur_map)
+    prev_val = _lookup_metric(pid, source_col, prev_map)
+    return safe_div(cur_val - prev_val, prev_val)
+
+
+ROLLING_SALES_SPECS = [
+    (3, "日销3", "支付件数"),
+    # 日销7 原为聚水潭库存源"近7日日均销量";款式级快照直连后该列无来源恒空,
+    # 2026-07-10 改为与日销3/15 同族的滚动口径(生意参谋04 支付件数),有库存源值也统一覆盖
+    (7, "日销7", "支付件数"),
+    (15, "日销15", "支付件数"),
+]
+ROLLING_SPEND_SPECS = [
+    (3, "花费3", "付费"),
+    (7, "花费7", "付费"),
+    (15, "花费15", "付费"),
+]
+
+
+def _window_metric_sums(day_map, end_date, window_days, metric):
+    """近 N 个完整日(含 end_date)按宝贝ID求和。缺失日跳过(该日贡献 0)。"""
+    end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    start = (end - timedelta(days=window_days - 1)).isoformat()
+    frames = []
+    for day in iter_dates(start, end_date):
+        entry = day_map.get(day)
+        if not entry or entry[0] is None or len(entry[0]) == 0:
+            continue
+        frame = entry[0]
+        if "宝贝ID" not in frame.columns or metric not in frame.columns:
+            continue
+        part = frame[["宝贝ID", metric]].copy()
+        part["宝贝ID"] = part["宝贝ID"].astype(str).str.strip()
+        part[metric] = pd.to_numeric(part[metric], errors="coerce").fillna(0.0)
+        frames.append(part)
+    if not frames:
+        return pd.DataFrame(columns=["宝贝ID", metric])
+    return frames[0] if len(frames) == 1 else (
+        pd.concat(frames, ignore_index=True).groupby("宝贝ID", as_index=False)[metric].sum()
+    )
+
+
+def apply_rolling_daily_metrics(df, day_map, date_str):
+    """挂载滚动日均字段(固定以分析日为终点,不受主表周期口径影响)。
+
+    - 日销3/日销7/日销15: 生意参谋04 支付件数, 近 N 日累计 ÷ N
+    - 花费3/花费7/花费15: 无界15天转化行 付费, 近 N 日累计 ÷ N
+    """
+    if df is None or len(df) == 0 or "宝贝ID" not in df.columns:
+        return df
+    out = df.copy()
+    out["宝贝ID"] = out["宝贝ID"].astype(str).str.strip()
+
+    for window_days, out_col, metric in ROLLING_SALES_SPECS + ROLLING_SPEND_SPECS:
+        summed = _window_metric_sums(day_map, date_str, window_days, metric)
+        if summed.empty:
+            out[out_col] = 0.0
+            continue
+        merged = out[["宝贝ID"]].merge(summed, on="宝贝ID", how="left")
+        out[out_col] = (merged[metric].fillna(0.0) / window_days).astype(float)
+
+    # 日销7 改口径后重算可售天数(此前在 aggregate_period_frame 用旧日销7 算,彼时恒空)
+    if "在仓库存" in out.columns:
+        stock = _numeric_series(out["在仓库存"])
+        daily = _numeric_series(out["日销7"])
+        out["可售天数"] = (stock / daily.where(daily > 0)).round(1)
+
+    return out

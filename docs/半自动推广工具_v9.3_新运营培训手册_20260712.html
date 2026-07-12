@@ -1,0 +1,1173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>半自动推广工具与 v9.3 新运营培训手册（2026-07-12版）</title>
+  <style>
+    :root {
+      --bg: #f6f7fb;
+      --paper: #ffffff;
+      --ink: #172033;
+      --muted: #687186;
+      --line: #dfe4ef;
+      --brand: #d92f3a;
+      --brand-dark: #a61f2a;
+      --blue: #1f5f99;
+      --green: #1c7b56;
+      --amber: #b56617;
+      --soft-red: #fff0f1;
+      --soft-blue: #eef6ff;
+      --soft-green: #eefaf4;
+      --soft-amber: #fff7e9;
+      --code: #101827;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", Arial, sans-serif;
+      line-height: 1.72;
+      letter-spacing: 0;
+    }
+    .shell {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      padding: 28px 22px;
+      background: #1d2433;
+      color: #f5f7fb;
+      border-right: 1px solid #30394d;
+    }
+    aside h2 {
+      margin: 0 0 10px;
+      font-size: 20px;
+      line-height: 1.35;
+    }
+    aside p {
+      margin: 0 0 18px;
+      color: #b8c0d3;
+      font-size: 13px;
+    }
+    nav a {
+      display: block;
+      color: #f5f7fb;
+      text-decoration: none;
+      padding: 8px 10px;
+      margin: 3px 0;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    nav a:hover { background: #30394d; }
+    main {
+      width: min(1180px, 100%);
+      padding: 40px 46px 70px;
+    }
+    .hero {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-left: 6px solid var(--brand);
+      border-radius: 8px;
+      padding: 30px 34px;
+      box-shadow: 0 14px 35px rgba(23, 32, 51, 0.08);
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 34px;
+      line-height: 1.25;
+    }
+    h2 {
+      margin: 46px 0 14px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--line);
+      font-size: 24px;
+    }
+    h3 {
+      margin: 28px 0 10px;
+      font-size: 19px;
+    }
+    p { margin: 8px 0 13px; }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 4px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f8fafc;
+      color: #344054;
+      font-size: 13px;
+    }
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px 20px;
+      margin: 16px 0;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .note { background: var(--soft-blue); border-left: 4px solid var(--blue); }
+    .good { background: var(--soft-green); border-left: 4px solid var(--green); }
+    .warn { background: var(--soft-amber); border-left: 4px solid var(--amber); }
+    .danger { background: var(--soft-red); border-left: 4px solid var(--brand); }
+    .card h3 { margin-top: 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 22px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #edf1f8;
+      color: #1f2937;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    tr:nth-child(even) td { background: #fbfcff; }
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #edf1f8;
+      color: var(--code);
+      font-family: Consolas, "Microsoft YaHei", monospace;
+      font-size: 0.94em;
+    }
+    .flow {
+      display: grid;
+      gap: 10px;
+      margin: 14px 0 22px;
+    }
+    .step {
+      display: grid;
+      grid-template-columns: 42px 1fr;
+      gap: 12px;
+      align-items: start;
+      padding: 14px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: var(--brand);
+      color: white;
+      font-weight: 700;
+    }
+    .muted { color: var(--muted); }
+    .small { font-size: 13px; }
+    .kbd {
+      border: 1px solid #c8d0df;
+      border-bottom-width: 2px;
+      border-radius: 5px;
+      padding: 1px 6px;
+      background: white;
+      font-size: 13px;
+    }
+    footer {
+      margin-top: 48px;
+      padding-top: 22px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 980px) {
+      .shell { grid-template-columns: 1fr; }
+      aside { position: static; height: auto; }
+      main { padding: 28px 18px 54px; }
+      .grid, .grid-3 { grid-template-columns: 1fr; }
+      h1 { font-size: 28px; }
+      table { font-size: 13px; }
+      th, td { padding: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <h2>培训手册</h2>
+      <p>半自动推广工具 + v9.3 信号体系<br>版本：2026-07-12</p>
+      <nav>
+        <a href="#goal">1. 文档定位</a>
+        <a href="#logic">2. 工具核心逻辑</a>
+        <a href="#sop">3. 标准使用流程</a>
+        <a href="#sources">4. 数据源与字段来源</a>
+        <a href="#metrics">5. 指标口径与公式</a>
+        <a href="#period">6. 周期与环比</a>
+        <a href="#segmentation">7. 商品分层逻辑</a>
+        <a href="#v93">8. v9.3 信号与算法</a>
+        <a href="#order">9. 推广策略调整顺序</a>
+        <a href="#examples">10. 实战案例</a>
+        <a href="#export">11. 导出与交接</a>
+        <a href="#maintenance">12. 维护入口</a>
+        <a href="#checklist">13. 新运营清单</a>
+      </nav>
+    </aside>
+
+    <main>
+      <section class="hero" id="goal">
+        <h1>半自动推广工具与 v9.3 新运营培训手册</h1>
+        <p>
+          这份文档用于培训新运营快速上手当前最新版半自动推广工具。重点不是让运营背代码，
+          而是让运营知道：数据从哪里来、工具如何判断商品、v9.3 命中标签该按什么优先级处理，
+          以及当“算法建议”和“商品分层/库存/退款”冲突时该怎么决策。
+        </p>
+        <div class="meta">
+          <span class="pill">适用工具：半自动推广工具_离线版_20260706_173620</span>
+          <span class="pill">适用算法：内置 v9.3 重算 + v9.3 日报信号解析</span>
+          <span class="pill">默认业务口径：7天为主，单日/3天/15天辅助</span>
+          <span class="pill">文档日期：2026-07-12</span>
+        </div>
+      </section>
+
+      <section id="logic">
+        <h2>1. 工具核心逻辑</h2>
+        <div class="card good">
+          <h3>一句话理解</h3>
+          <p>
+            半自动推广工具把“商品经营数据、无界推广数据、库存/成本/退款、v9.3 日报信号”合并到一张执行表，
+            再用商品分层和 v9.3 算法命中结果，帮助运营决定哪些品放量、保护、观察、削减，哪些品先处理库存和退款风险。
+          </p>
+        </div>
+
+        <div class="grid">
+          <div class="card">
+            <h3>工具本身解决什么</h3>
+            <p>把每天分散在多个文件里的商品、推广、库存、退款信息统一到商品粒度。</p>
+            <p>按“流量规模 + UV价值”做 6 档商品分层，并映射到 36 宫格策略。</p>
+            <p>计算周期口径、环比、推广投产、链接投产、渠道花费、渠道成交、退款后投产等指标。</p>
+            <p>在执行表里提供可筛选、可导出的运营动作建议。</p>
+          </div>
+          <div class="card">
+            <h3>工具不自动替你做什么</h3>
+            <p>不会直接改后台预算，也不会替代运营最终判断。</p>
+            <p>不会保证 v9.3 日报和本地重算完全一致，因为两者可能使用不同文件批次或字段来源。</p>
+            <p>不会在库存缺货、高退款、衰退期时自动否决所有加预算标签；这部分需要运营按规则复核。</p>
+            <p>不会修复源文件缺失或口径错误，只会把缺失和异常尽量暴露出来。</p>
+          </div>
+        </div>
+
+        <h3>四层判断框架</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>层级</th>
+              <th>回答的问题</th>
+              <th>主要字段/模块</th>
+              <th>运营动作含义</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>数据底座</td>
+              <td>这个商品真实规模、花费、成交、库存、退款是多少？</td>
+              <td>04商品经营投产比、无界商品主体、聚水潭库存/退款、商品资料</td>
+              <td>先确认数据可信，避免基于缺字段做动作。</td>
+            </tr>
+            <tr>
+              <td>商品分层</td>
+              <td>这个商品在店铺内属于高流量/低流量、高价值/低价值哪一类？</td>
+              <td><code>core/segmentation.py</code>、<code>MATRIX_36</code></td>
+              <td>决定它天然适合放量、优化、观察还是淘汰。</td>
+            </tr>
+            <tr>
+              <td>v9.3 信号</td>
+              <td>v9.3 原日报是否点名这个商品？点名原因是什么？</td>
+              <td><code>core/v93_signal.py</code> 解析日报文本</td>
+              <td>作为“外部雷达”，提醒运营重点关注。</td>
+            </tr>
+            <tr>
+              <td>v9.3 算法命中</td>
+              <td>用当前工具加载的数据重算，是否命中 v9.3 门槛？</td>
+              <td><code>core/v93_algorithm.py</code></td>
+              <td>作为“本地复核”，辅助判断今天该怎么调。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="sop">
+        <h2>2. 标准使用流程</h2>
+        <div class="flow">
+          <div class="step">
+            <div class="num">1</div>
+            <div>
+              <strong>选择数据根目录、日期、时间周期。</strong>
+              <p class="muted">默认路径通常是共享盘商品/推广数据目录；日期填分析日，如 <code>2026-07-09</code>；新运营日常优先看 <code>7天</code>。</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="num">2</div>
+            <div>
+              <strong>确认可选数据源路径。</strong>
+              <p class="muted">商品资料、库存快照、退款率、v9.3 日报路径一般已有默认值。缺失时工具仍可跑，但库存/退款/信号相关判断会变弱。</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="num">3</div>
+            <div>
+              <strong>点击“加载并处理数据”。</strong>
+              <p class="muted">等待执行表生成。大批量多日期首次读取会慢，缓存命中后会明显变快。</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="num">4</div>
+            <div>
+              <strong>先看概览，再看执行表。</strong>
+              <p class="muted">先确认总 GMV、总花费、ROI、退款、库存风险是否异常，再进入商品推广执行表筛选具体商品。</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="num">5</div>
+            <div>
+              <strong>按 v9.3 标签和商品分层共同决策。</strong>
+              <p class="muted">筛选 <code>v9.3算法命中</code>、<code>v9.3信号</code>、<code>综合等级</code>、<code>商品周期</code>、<code>风险标签</code>，不要只看单列。</p>
+            </div>
+          </div>
+          <div class="step">
+            <div class="num">6</div>
+            <div>
+              <strong>导出执行表并记录动作。</strong>
+              <p class="muted">导出后在 <code>操作</code>、<code>运营备注</code> 中写明加预算、控投、观察、库存处理、退款处理等动作。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card warn">
+          <h3>新运营默认工作口径</h3>
+          <p>
+            日常调预算优先使用 <strong>7天</strong> 口径，因为它能过滤单日波动，又与 v9.3 原版算法的商品窗口更接近。
+            单日适合发现昨天异常，3天适合看短期动量，15天适合看生命周期和稳定性。
+          </p>
+        </div>
+      </section>
+
+      <section id="sources">
+        <h2>3. 数据源与字段来源</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>数据源</th>
+              <th>工具里承担的角色</th>
+              <th>关键字段</th>
+              <th>注意事项</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>生意参谋：商品经营投产比（04）</td>
+              <td>商品经营主数据，也是 v9.3 严格字段的主要来源。</td>
+              <td>宝贝ID、统计日期、支付金额、商品访客数、支付买家数、支付件数、商品加购件数、成功退款金额、搜索引导访客数、推广消耗金额、推广引导总成交金额、推广总加购数、关键词/人群/场景推广访客数与加购数。</td>
+              <td>GMV、访客、加购、退款按商品经营口径；推广消耗/推广引导成交是 v9.3 算法优先使用的严格字段。</td>
+            </tr>
+            <tr>
+              <td>无界：商品主体</td>
+              <td>广告计划、渠道花费、渠道成交、推广明细来源。</td>
+              <td>主体ID/商品ID、计划ID、花费、投入产出比、总成交金额、直接成交笔数、总成交成本、展现、点击、点击率、转化率、场景名字、转化周期。</td>
+              <td>工具只取 <code>转化周期=15</code> 的行。场景名字会归类为关键词、人群、全站、店铺直达。</td>
+            </tr>
+            <tr>
+              <td>聚水潭库存快照</td>
+              <td>判断库存风险、可售天数、是否能放量。</td>
+              <td>在仓库存、在途、近7日日均销量、款式编码。</td>
+              <td>库存多为款式级，不一定是单链接专属库存；缺库存时放量建议必须人工复核。</td>
+            </tr>
+            <tr>
+              <td>聚水潭退款率</td>
+              <td>判断高退款和退款后投产。</td>
+              <td>30日 cohort 退款率。</td>
+              <td>未覆盖商品保留空值，不简单按 0% 处理。高退款商品即使 ROI 高，也要谨慎放量。</td>
+            </tr>
+            <tr>
+              <td>商品资料/款式映射</td>
+              <td>补齐主图、货号、创建时间、成本价。</td>
+              <td>宝贝ID、线上款式编码、款式主图、创建时间、成本价（含税）。</td>
+              <td>一款多链接时，库存和成本可能共享同一款式池。</td>
+            </tr>
+            <tr>
+              <td>v9.3 每日复盘报告 txt</td>
+              <td>生成执行表的 <code>v9.3信号</code> 列。</td>
+              <td>明日之星、潜力款、爆发、亏损风险、加预算、饱和观察、保护持有、削减、溢出等信号段。</td>
+              <td>这是文本解析，不是本地重算。找不到当日日报时该列为空，属于预期。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="card note">
+          <h3>v9.3 严格字段优先级</h3>
+          <p>
+            最新版内置 v9.3 算法已经优先使用 04 表里的严格字段：
+            <code>v9.3推广花费</code> 来自 <code>推广消耗金额</code>，
+            <code>v9.3推广成交金额</code> 来自 <code>推广引导总成交金额</code>，
+            <code>v9.3推广加购数</code> 来自关键词/人群/场景推广加购人数或推广总加购数，
+            <code>v9.3推广访客数</code> 来自关键词/人群/场景推广访客数。
+            当这些严格字段缺失时，才使用无界推广字段兜底。
+          </p>
+        </div>
+      </section>
+
+      <section id="metrics">
+        <h2>4. 指标口径与公式</h2>
+        <h3>核心规模指标</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>指标</th>
+              <th>来源/公式</th>
+              <th>运营解读</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>GMV</td>
+              <td>04 商品经营投产比中的 <code>支付金额</code>，周期口径为窗口逐日求和。</td>
+              <td>商品真实成交规模，不等于广告归因成交。</td>
+            </tr>
+            <tr>
+              <td>商品访客数</td>
+              <td>04 表 <code>商品访客数</code> 求和。</td>
+              <td>全链接访客，不是广告访客。用于流量分层。</td>
+            </tr>
+            <tr>
+              <td>商品加购件数</td>
+              <td>04 表 <code>商品加购件数</code> 求和。</td>
+              <td>反映商品兴趣强弱，是 v9.3 识别潜力/爆发的重要基础。</td>
+            </tr>
+            <tr>
+              <td>支付买家数 / 支付件数</td>
+              <td>04 表对应字段求和。</td>
+              <td>用于商品支付转化率、件单价等计算。</td>
+            </tr>
+            <tr>
+              <td>成功退款金额</td>
+              <td>04 表 <code>成功退款金额</code> 求和。</td>
+              <td>按退款发生日记账，单日可能与当天 GMV 跨期错配。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>推广与投产指标</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>指标</th>
+              <th>来源/公式</th>
+              <th>容易误读的点</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>付费</td>
+              <td>无界商品主体 <code>花费</code>，只取 15天转化行，按宝贝ID求和。</td>
+              <td>这是无界广告花费，不是 04 表 v9.3 严格花费。</td>
+            </tr>
+            <tr>
+              <td>推广成交金额</td>
+              <td>无界 <code>总成交金额</code>；缺失时用 <code>花费 × 投入产出比</code> 回推。</td>
+              <td>广告归因成交，用于推广投产。</td>
+            </tr>
+            <tr>
+              <td>推广投产</td>
+              <td><code>推广成交金额 ÷ 付费</code></td>
+              <td>广告归因 ROI，与链接整体 GMV 口径不同。</td>
+            </tr>
+            <tr>
+              <td>推广实际投产</td>
+              <td><code>推广投产 × (1 - 退款率)</code></td>
+              <td>退款率为空时按空值处理链路，运营解读要看退款覆盖情况。</td>
+            </tr>
+            <tr>
+              <td>链接投产</td>
+              <td><code>GMV ÷ 付费</code></td>
+              <td>衡量广告花费撬动整个链接 GMV 的能力，通常大于广告归因 ROI。</td>
+            </tr>
+            <tr>
+              <td>链接实际投产</td>
+              <td><code>链接投产 × (1 - 退款率)</code></td>
+              <td>适合结合退款风险看真实经营质量。</td>
+            </tr>
+            <tr>
+              <td>v9.3推广花费</td>
+              <td>优先来自 04 表 <code>推广消耗金额</code>。</td>
+              <td>内置 v9.3 算法优先使用它，而不是无界 <code>付费</code>。</td>
+            </tr>
+            <tr>
+              <td>v9.3推广成交金额</td>
+              <td>优先来自 04 表 <code>推广引导总成交金额</code>。</td>
+              <td>用于 v9.3 的 ROI、溢出、亏损风险等判断。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>效率、利润与库存指标</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>指标</th>
+              <th>公式</th>
+              <th>运营用途</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>访客平均价值</td>
+              <td><code>GMV ÷ 商品访客数</code></td>
+              <td>也可理解为 UV 价值；决定商品价值分层。</td>
+            </tr>
+            <tr>
+              <td>商品支付转化率</td>
+              <td><code>支付买家数 ÷ 商品访客数</code></td>
+              <td>判断流量承接能力。</td>
+            </tr>
+            <tr>
+              <td>购物车价值</td>
+              <td><code>GMV ÷ 商品加购件数</code></td>
+              <td>判断加购人群的成交价值。</td>
+            </tr>
+            <tr>
+              <td>件单价</td>
+              <td><code>GMV ÷ 支付件数</code></td>
+              <td>用于利润率和价格层级判断。</td>
+            </tr>
+            <tr>
+              <td>利润率</td>
+              <td><code>(件单价 - 成本价（含税）) ÷ 件单价</code></td>
+              <td>仅为估算，成本为当前成本价。</td>
+            </tr>
+            <tr>
+              <td>预估利润</td>
+              <td><code>(GMV - 成功退款金额) × 利润率</code></td>
+              <td>粗看商品贡献，不能替代财务利润。</td>
+            </tr>
+            <tr>
+              <td>倍率</td>
+              <td><code>件单价 ÷ 成本价（含税）</code></td>
+              <td>辅助判断价格空间。</td>
+            </tr>
+            <tr>
+              <td>点击率</td>
+              <td><code>点击 ÷ 展现</code></td>
+              <td>广告素材/人群吸引力。</td>
+            </tr>
+            <tr>
+              <td>转化率</td>
+              <td><code>支付买家数 ÷ 点击</code></td>
+              <td>广告点击后的成交效率。</td>
+            </tr>
+            <tr>
+              <td>CPC</td>
+              <td><code>付费 ÷ 点击</code></td>
+              <td>点击成本。</td>
+            </tr>
+            <tr>
+              <td>CPM</td>
+              <td><code>付费 ÷ 展现 × 1000</code></td>
+              <td>千次展现成本。</td>
+            </tr>
+            <tr>
+              <td>可售天数</td>
+              <td><code>在仓库存 ÷ 近7日日均销量</code></td>
+              <td>决定能不能放量；可售天数不足时先补货。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="period">
+        <h2>5. 周期与环比口径</h2>
+        <div class="grid">
+          <div class="card">
+            <h3>主表周期</h3>
+            <p>侧边栏时间周期支持 <code>当日</code>、<code>3天</code>、<code>7天</code>、<code>15天</code>。</p>
+            <p>选择 7天时，当前窗口为“分析日往前推 7 天含当天”，例如分析日 2026-07-09，则当前窗口为 2026-07-03 至 2026-07-09。</p>
+            <p>上一周期为等长前置窗口，用于环比和上周期字段。</p>
+          </div>
+          <div class="card">
+            <h3>周期聚合</h3>
+            <p>GMV、花费、访客、加购、点击、展现、渠道花费、渠道成交等可加字段按窗口求和。</p>
+            <p>ROI、点击率、转化率、UV价值、CPC、CPM 等比率字段在聚合后重新计算，不是简单平均。</p>
+            <p>日均消耗按 <code>窗口付费 ÷ 窗口天数</code> 重算。</p>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>字段类型</th>
+              <th>计算方式</th>
+              <th>示例</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>环比字段</td>
+              <td><code>(当前窗口指标 - 上一窗口指标) ÷ 上一窗口指标</code></td>
+              <td>GMV_7日环比、花费_7日环比、ROI_7日环比。</td>
+            </tr>
+            <tr>
+              <td>上周期字段</td>
+              <td>上一等长窗口的累计值。</td>
+              <td>上周期金额、上周期付费、上周期人群、上周期关键词、上周期全站。</td>
+            </tr>
+            <tr>
+              <td>滚动日销/花费</td>
+              <td>固定从分析日往前取 3/7/15 天。</td>
+              <td>日销3、日销7、日销15、花费3、花费7、花费15。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="card warn">
+          <h3>为什么周期计算会比 v9.3 打标慢</h3>
+          <p>
+            v9.3 算法打标本身只是对已合并好的表做阈值判断，通常是秒级。
+            半自动推广工具慢在前置的数据读取和周期环比：它要读取多个日期的 04 表、无界表、库存/退款补充数据，
+            再分别生成当前窗口、上一窗口、滚动窗口和分层结果。首次跑 30 天或网络盘读取时会明显变慢。
+          </p>
+        </div>
+      </section>
+
+      <section id="segmentation">
+        <h2>6. 商品分层逻辑</h2>
+        <p>
+          商品分层是工具的“底盘策略”。它不等同于 v9.3 点名，而是回答：这个商品从店铺整体经营视角看，应该被当作什么类型来管理。
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>分层维度</th>
+              <th>指标</th>
+              <th>默认分档</th>
+              <th>含义</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>流量定位</td>
+              <td>商品访客数</td>
+              <td>滞销款、待改善、潜力款、冲刺款、金牛款、明星款</td>
+              <td>商品当前获得多少流量。</td>
+            </tr>
+            <tr>
+              <td>价值定位</td>
+              <td>访客平均价值 = GMV ÷ 商品访客数</td>
+              <td>滞销款、待改善、潜力款、冲刺款、金牛款、明星款</td>
+              <td>每个访客带来的成交价值。</td>
+            </tr>
+            <tr>
+              <td>组合</td>
+              <td>流量定位 + 价值定位</td>
+              <td>例如：明星款潜力款、冲刺款金牛款</td>
+              <td>进入 36 宫格矩阵。</td>
+            </tr>
+            <tr>
+              <td>商品定位/综合等级/商品周期</td>
+              <td>36 宫格查表</td>
+              <td>S、A+、A、B、C、D</td>
+              <td>给出放量、适当放量、上升验证、待优化、观察、淘汰等策略。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>风险标签与预算优先级</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>风险/优先级</th>
+              <th>触发逻辑</th>
+              <th>运营处理</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>极高退款 / 高退款</td>
+              <td>退款率 &gt; 0.5 为极高；退款率 &gt; 0.4 为高。</td>
+              <td>先看退款原因、尺码/质量/描述问题，再决定是否控投。</td>
+            </tr>
+            <tr>
+              <td>缺货 / 库存不足</td>
+              <td>在仓库存为 0 且在途为 0 是缺货；库存 &lt; 10 是库存不足。</td>
+              <td>缺货品不建议直接加预算，先补货或控投保护自然权重。</td>
+            </tr>
+            <tr>
+              <td>流量低迷</td>
+              <td>商品访客数 &lt; 10 且有花费。</td>
+              <td>排查计划、素材、人群、价格和标题承接。</td>
+            </tr>
+            <tr>
+              <td>亏损投放</td>
+              <td>ROI &lt; 1 且花费 &gt; 100。</td>
+              <td>先削减低效计划，保留必要测试量。</td>
+            </tr>
+            <tr>
+              <td>高ROI</td>
+              <td>ROI &gt; 10。</td>
+              <td>可进入加预算候选，但仍要看库存、退款、生命周期。</td>
+            </tr>
+            <tr>
+              <td>P1-P4</td>
+              <td>由综合等级、商品周期、退款、库存、ROI 共同决定。</td>
+              <td>P1 优先处理放量，P4 优先控风险或观察。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="v93">
+        <h2>7. v9.3 信号与 v9.3 算法命中</h2>
+        <div class="grid">
+          <div class="card note">
+            <h3>v9.3信号</h3>
+            <p>来源：v9.3 每日复盘 txt。</p>
+            <p>实现位置：<code>core/v93_signal.py</code>。</p>
+            <p>作用：把日报里点名的宝贝ID映射到执行表。</p>
+            <p>特点：它是“解析结果”，不是半自动工具本地重新计算的结果。</p>
+          </div>
+          <div class="card good">
+            <h3>v9.3算法命中</h3>
+            <p>来源：半自动工具按当前加载数据本地重算。</p>
+            <p>实现位置：<code>core/v93_algorithm.py</code>。</p>
+            <p>作用：把 v9.3 核心门槛复制进执行表，给出标签、分数、原因。</p>
+            <p>特点：优先使用 04 表严格 v9.3 字段，缺失时才使用无界兜底。</p>
+          </div>
+        </div>
+
+        <h3>为什么两列可能不一致</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>情况</th>
+              <th>原因</th>
+              <th>运营怎么处理</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>v9.3信号</code> 有，<code>v9.3算法命中</code> 空</td>
+              <td>日报来自上游批次或不同源文件；本地当前数据没达到门槛；或严格字段缺失/口径不同。</td>
+              <td>查看算法原因、7天 GMV/花费/加购/访客，必要时回看原日报。</td>
+            </tr>
+            <tr>
+              <td><code>v9.3算法命中</code> 有，<code>v9.3信号</code> 空</td>
+              <td>未加载当日日报、日报未点名，或本地新版算法已用当前数据重算命中。</td>
+              <td>按本地命中做候选，但必须结合库存、退款、商品周期。</td>
+            </tr>
+            <tr>
+              <td>两列标签不同</td>
+              <td>一个是“日报解析”，一个是“当前数据重算”；数据源、窗口、字段优先级可能不同。</td>
+              <td>不争谁绝对正确，先看具体门槛和业务风险。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>v9.3 算法核心门槛</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>标签</th>
+              <th>核心判断</th>
+              <th>运营含义</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>明日之星 / 强主推</td>
+              <td>7天自然访客、7天加购、昨日自然访客、昨日加购、昨日加购率、3日动量、7日花费上限、计划数和计划 ROI 共同打分。</td>
+              <td>低投放、高兴趣、有自然动能的重点候选；强主推优先级更高。</td>
+            </tr>
+            <tr>
+              <td>近3日潜力</td>
+              <td>近3日加购不少于 20、近3日花费低于 200、加购率不低于 8%，且未进入明日之星。</td>
+              <td>短期动量刚起来，可小步测试和观察承接。</td>
+            </tr>
+            <tr>
+              <td>爆发</td>
+              <td>基线加购不少于 10、当前加购不少于 20、总增长超过 30%，再区分自然爆发、潜力爆发、投放拉动。</td>
+              <td>需要快速确认库存、价格、承接和预算空间。</td>
+            </tr>
+            <tr>
+              <td>亏损风险</td>
+              <td>最低花费 200；结合店铺 ROI 线、3日/7日 ROI 双低、溢出豁免等规则判断。</td>
+              <td>优先止损，削减低效计划，不做盲目放量。</td>
+            </tr>
+            <tr>
+              <td>加预算</td>
+              <td>最低花费 50；ROI 高于店铺线或分位线，或 ROI 尚可且自然强、CPA 好。</td>
+              <td>可加预算候选，但还要过库存、退款、商品周期三道闸。</td>
+            </tr>
+            <tr>
+              <td>保护持有</td>
+              <td>CPA 较低、加购率好、自然流量强，或不适合加预算但值得保留。</td>
+              <td>维持当前预算，不轻易削掉有效流量。</td>
+            </tr>
+            <tr>
+              <td>饱和观察</td>
+              <td>近3日花费已上升，边际 ROI 低于线，继续加预算可能效率下降。</td>
+              <td>暂停继续加，观察边际回报和库存承接。</td>
+            </tr>
+            <tr>
+              <td>削减</td>
+              <td>ROI 低且 CPA 高，无法通过自然强度或溢出解释。</td>
+              <td>减少预算或关闭低效计划。</td>
+            </tr>
+            <tr>
+              <td>溢出</td>
+              <td>有一定投放花费，同时自然 GMV / 花费表现突出。</td>
+              <td>说明广告可能带动自然流量；单独出现时更多是保护/观察，不等于直接加预算。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="card warn">
+          <h3>v9.3 原版窗口</h3>
+          <p>
+            v9.3 原版商品判断以 7天商品窗口为核心，近3日用于短期动量和边际变化。
+            因此在半自动推广工具里，运营复盘 v9.3 标签时应优先选择 <code>7天</code> 主表口径，再用 <code>当日</code> 或 <code>3天</code> 看异常变化。
+          </p>
+        </div>
+      </section>
+
+      <section id="order">
+        <h2>8. v9.3 命中后的推广策略调整顺序</h2>
+        <div class="card danger">
+          <h3>第一优先级：风险硬闸</h3>
+          <p>
+            先处理 <code>亏损风险</code>、<code>削减</code>、高退款、缺货、库存不足。
+            如果一个商品同时显示 <code>加预算</code> 和 <code>衰退期/缺货/高退款</code>，
+            不要直接加预算，先确认库存和退款问题是否会吞掉新增流量。
+          </p>
+        </div>
+
+        <div class="grid-3">
+          <div class="card">
+            <h3>正向强信号</h3>
+            <p><code>强主推</code>、<code>明日之星</code>、<code>爆发</code> 优先级高。</p>
+            <p>动作：查库存、查退款、查主图详情承接；条件满足再放量。</p>
+          </div>
+          <div class="card">
+            <h3>预算再平衡</h3>
+            <p><code>加预算</code> 是候选，不是命令；<code>保护持有</code> 是保留有效流量；<code>饱和观察</code> 是暂停加码；<code>削减</code> 是止损。</p>
+          </div>
+          <div class="card">
+            <h3>辅助信号</h3>
+            <p><code>溢出</code> 说明投放可能撬动自然流量。</p>
+            <p>如果只出现溢出，通常先保护和观察；若同时出现加预算/爆发，信号更强。</p>
+          </div>
+        </div>
+
+        <h3>运营推荐调整顺序</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>顺序</th>
+              <th>筛选条件</th>
+              <th>操作建议</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>亏损风险、削减、高退款、缺货、库存不足</td>
+              <td>先控风险：降预算、关低效计划、补库存、查退款原因。</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>强主推、明日之星、爆发，且库存/退款正常</td>
+              <td>优先加预算或扩计划，保持观察日销和转化。</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>加预算，且商品周期不是衰退/淘汰，库存可承接</td>
+              <td>小步加预算，优先加到 ROI 好、CPA 好的计划。</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>保护持有、溢出</td>
+              <td>不轻易砍预算，观察自然流量和成交是否稳定。</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>饱和观察</td>
+              <td>暂停继续加预算，看边际 ROI、CPC、转化是否恶化。</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>无 v9.3 命中但分层为 S/A+/A 的商品</td>
+              <td>作为备选池，结合商品周期和趋势做人工筛选。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="examples">
+        <h2>9. 实战案例与冲突处理</h2>
+        <div class="card warn">
+          <h3>案例 A：算法命中加预算，但商品分层显示衰退期</h3>
+          <p>
+            宝贝ID <code>950528147557</code> 曾出现 <code>v9.3算法命中=加预算</code>，
+            但半自动推广工具商品周期为 <code>衰退期</code>，综合等级为 <code>C</code>。
+            排查后看到它的 v9.3 命中原因是高 ROI，说明从广告效率看值得关注；
+            但商品分层又提示它在流量/价值矩阵中处于待改善或衰退状态，同时存在库存或生命周期风险。
+          </p>
+          <p>
+            正确做法：不直接加大预算。先看库存、退款、近3日/7日趋势、详情承接和是否缺货；
+            如果库存安全且近3日回升，可以小步测试；如果缺货或退款异常，应优先控投和处理商品问题。
+          </p>
+        </div>
+
+        <div class="card note">
+          <h3>案例 B：v9.3信号命中，但 v9.3算法命中不同</h3>
+          <p>
+            宝贝ID <code>932192042609</code> 曾在执行表里出现 <code>v9.3信号=加预算|溢出</code>，
+            而本地严格字段重算后更接近 <code>保护持有|溢出</code>。
+            这种情况通常不是系统错误，而是“日报解析”和“本地重算”使用的数据批次、字段优先级或窗口略有差异。
+          </p>
+          <p>
+            正确做法：看 <code>v9.3算法原因</code> 和 7天核心指标。如果高 ROI 仍成立但不够加预算门槛，则先保护持有；
+            如果日报原文点名强烈，可以人工加入观察池，但不要覆盖库存/退款硬闸。
+          </p>
+        </div>
+
+        <h3>常见冲突处理表</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>冲突</th>
+              <th>优先判断</th>
+              <th>建议动作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>加预算 + 缺货</td>
+              <td>库存优先于预算。</td>
+              <td>先补货或降低预算保护流量，不做放量。</td>
+            </tr>
+            <tr>
+              <td>加预算 + 高退款</td>
+              <td>退款质量优先于 ROI。</td>
+              <td>查退款原因，必要时只保留低预算测试。</td>
+            </tr>
+            <tr>
+              <td>爆发 + 库存不足</td>
+              <td>确认可售天数。</td>
+              <td>有在途可短期保护，没有在途则控投。</td>
+            </tr>
+            <tr>
+              <td>保护持有 + 分层 S/A+</td>
+              <td>商品底盘强，但边际加码未必划算。</td>
+              <td>维持预算，优化计划结构和素材。</td>
+            </tr>
+            <tr>
+              <td>溢出单独出现</td>
+              <td>溢出是辅助信号。</td>
+              <td>保护有效投放，暂不按加预算处理。</td>
+            </tr>
+            <tr>
+              <td>v9.3信号为空</td>
+              <td>先确认日报是否加载。</td>
+              <td>如果日报缺失，看本地 v9.3算法命中和商品分层。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="export">
+        <h2>10. 导出与交接</h2>
+        <p>
+          执行表用于日常落地。导出后，运营不要只保留系统列，还要补充人工动作和复盘结论。
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>交接字段</th>
+              <th>填写要求</th>
+              <th>示例</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>操作</td>
+              <td>写明确动作，不写模糊判断。</td>
+              <td>加预算20%、保护持有、削减50%、暂停计划、补货后再放量。</td>
+            </tr>
+            <tr>
+              <td>运营备注</td>
+              <td>写动作原因和复查点。</td>
+              <td>高ROI但库存不足，先补货；3日加购回升，明天复看转化。</td>
+            </tr>
+            <tr>
+              <td>推广明细</td>
+              <td>看计划级花费、投产、加购。</td>
+              <td>优先加到高 ROI 计划，不把预算平均撒给所有计划。</td>
+            </tr>
+            <tr>
+              <td>风险标签</td>
+              <td>必须在动作前复核。</td>
+              <td>缺货、高退款、亏损投放、库存不足。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="card good">
+          <h3>推荐复盘节奏</h3>
+          <p>
+            每天：看当日异常、v9.3 新命中、爆发/亏损风险。
+            每周：用 7天口径复盘加预算后的 ROI、GMV、库存和退款。
+            每月：看商品分层迁移，淘汰长期低价值低流量且无改善的商品。
+          </p>
+        </div>
+      </section>
+
+      <section id="maintenance">
+        <h2>11. 维护入口：算法和字段在哪里改</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>想改什么</th>
+              <th>文件位置</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>v9.3 本地算法门槛</td>
+              <td><code>半自动推广工具_离线版_20260706_173620/core/v93_algorithm.py</code></td>
+              <td>修改明日之星、近3日潜力、爆发、亏损、再平衡、溢出等门槛。</td>
+            </tr>
+            <tr>
+              <td>v9.3 日报信号解析</td>
+              <td><code>core/v93_signal.py</code></td>
+              <td>修改日报文本段落如何识别、哪些标签写入 <code>v9.3信号</code>。</td>
+            </tr>
+            <tr>
+              <td>字段别名和导出列</td>
+              <td><code>core/schema.py</code></td>
+              <td>新增源文件字段别名、调整执行表字段顺序、维护 36 宫格矩阵。</td>
+            </tr>
+            <tr>
+              <td>数据合并与派生字段</td>
+              <td><code>core/merge.py</code></td>
+              <td>控制 04 表、无界、库存、退款如何合并，推广成交/渠道成交如何生成。</td>
+            </tr>
+            <tr>
+              <td>周期聚合和环比</td>
+              <td><code>core/periods.py</code></td>
+              <td>控制 3/7/15 天窗口、求和字段、重算比例字段、上周期字段。</td>
+            </tr>
+            <tr>
+              <td>商品分层和风险标签</td>
+              <td><code>core/segmentation.py</code></td>
+              <td>控制流量/价值分档、风险标签、P1-P4 优先级。</td>
+            </tr>
+            <tr>
+              <td>页面入口和加载流程</td>
+              <td><code>app.py</code></td>
+              <td>控制侧边栏、加载按钮、缓存、表格展示、信号填充。</td>
+            </tr>
+            <tr>
+              <td>导出 Excel</td>
+              <td><code>core/exporter.py</code></td>
+              <td>控制导出样式、列格式、图片等。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="card danger">
+          <h3>修改算法前的最低要求</h3>
+          <p>
+            不要只改阈值就上线。每次修改 v9.3 或分层算法后，至少要抽查：
+            命中数量是否异常、典型商品是否符合业务判断、加预算/削减是否有反向案例、库存和退款闸门是否仍生效。
+          </p>
+        </div>
+      </section>
+
+      <section id="checklist">
+        <h2>12. 新运营上手清单</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>检查项</th>
+              <th>合格标准</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>会加载数据</td>
+              <td>能正确选择根目录、日期、周期，并知道日报缺失时 <code>v9.3信号</code> 为空。</td>
+            </tr>
+            <tr>
+              <td>会读执行表</td>
+              <td>能同时看 <code>v9.3算法命中</code>、<code>v9.3信号</code>、<code>商品周期</code>、<code>综合等级</code>、<code>风险标签</code>。</td>
+            </tr>
+            <tr>
+              <td>会解释核心指标</td>
+              <td>能区分 GMV、推广成交金额、付费、推广投产、链接投产、退款后投产。</td>
+            </tr>
+            <tr>
+              <td>会处理冲突</td>
+              <td>遇到加预算但缺货/高退款/衰退期时，不盲目加，能先复核硬闸。</td>
+            </tr>
+            <tr>
+              <td>会调预算</td>
+              <td>按风险、强正向、再平衡、辅助信号的顺序处理，而不是只按表格排序。</td>
+            </tr>
+            <tr>
+              <td>会做复盘</td>
+              <td>导出后能填写操作和运营备注，并在次日/周复盘动作效果。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="card good">
+          <h3>最重要的判断原则</h3>
+          <p>
+            v9.3 命中负责告诉你“哪里可能有机会或风险”，商品分层负责告诉你“这个商品在店铺底盘里处于什么位置”，
+            库存和退款负责告诉你“能不能承接”。三者一致时动作可以果断；三者冲突时，先保护现金和库存安全，再做小步测试。
+          </p>
+        </div>
+      </section>
+
+      <footer>
+        <p>本手册根据当前半自动推广工具源码、v9.3 内置算法、执行表字段口径和近期排查结论整理。若后续修改 <code>core/v93_algorithm.py</code>、<code>core/schema.py</code>、<code>core/merge.py</code> 或 <code>core/periods.py</code>，需同步更新本文档。</p>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

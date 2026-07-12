@@ -1,0 +1,15 @@
+[theme]
+base="dark"
+primaryColor="#ff4b4b"
+backgroundColor="#0e1117"
+secondaryBackgroundColor="#262730"
+textColor="#fafafa"
+font="sans serif"
+
+[client]
+# 关闭开发者快捷键/菜单(含 C=清缓存、R=重跑),避免表格复制 Ctrl+C 误触弹窗
+toolbarMode = "viewer"
+
+[server]
+headless=false
+port=8765
