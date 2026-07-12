@@ -1,6 +1,6 @@
 # Python/runtime cache
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
 .pytest_cache/
 
@@ -15,11 +15,9 @@ streamlit_*_stdout.log
 streamlit_*_stderr.log
 
 # Local packaging/build output
-_internal/
 dist/
 build/
 *.spec
-*.exe
 
 # Local environment
 .venv/
