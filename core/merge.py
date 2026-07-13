@@ -20,12 +20,12 @@ SUM_COLS = [
     'GMV', '商品访客数', '支付买家数', '支付件数', '成功退款金额',
     '商品加购件数', '搜索引导访客数',
 ]
-V93_PRODUCT_SUM_COLS = ['v9.3推广花费', 'v9.3推广成交金额', 'v9.3推广加购数', 'v9.3推广访客数']
+V93_PRODUCT_SUM_COLS = ['v9.3推广成交金额', 'v9.3推广加购数', 'v9.3推广访客数']
 V93_VISITOR_COLS = ['关键词推广访客数', '人群推广访客数', '场景推广访客数']
 V93_CART_PEOPLE_COLS = ['关键词推广加购人数', '人群推广加购人数', '场景推广加购人数']
 V93_CART_COUNT_COLS = ['关键词推广加购数', '人群推广加购数', '场景推广加购数']
 FIRST_COLS = ['淘宝类目', '统计日期', '商品名称', '创建时间']
-WUJIE_SUM_COLS = ['付费', '推广加购数', '直购数量', '直购成本', '展现', '点击']
+WUJIE_SUM_COLS = ['付费', 'v9.3推广花费', '推广加购数', '直购数量', '直购成本', '展现', '点击']
 CHANNEL_COLS = ['关键词', '人群', '全站', '店铺直达']
 # 渠道归因成交(2026-07-11):渠道分析 ROI=渠道归因成交÷渠道花费,与渠道花费同源同口径
 CHANNEL_ATTR_COLS = [f'{ch}归因成交' for ch in CHANNEL_COLS]
@@ -122,8 +122,6 @@ def _product_roi_agg(sources):
     if work.empty:
         return pd.DataFrame(columns=['宝贝ID'])
 
-    if '推广消耗金额' in work.columns:
-        work['v9.3推广花费'] = work['推广消耗金额']
     if '推广引导总成交金额' in work.columns:
         work['v9.3推广成交金额'] = work['推广引导总成交金额']
     visitor_cols = [col for col in V93_VISITOR_COLS if col in work.columns]
@@ -172,6 +170,8 @@ def _wujie_agg(work):
     agg = {}
     if '商品加购件数' in work.columns and '推广加购数' not in work.columns:
         work['推广加购数'] = work['商品加购件数']
+    if '付费' in work.columns:
+        work['v9.3推广花费'] = work['付费']
     for col in WUJIE_SUM_COLS:
         if col in work.columns:
             work[col] = _numeric_series(work[col])
