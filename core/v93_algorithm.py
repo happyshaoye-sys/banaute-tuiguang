@@ -659,16 +659,16 @@ def _rebalance_result(item, ctx, thresholds):
         and org_share >= ctx["org_share_high"]
         and cpa <= cpa_line
     ):
-        return {"label": "加预算", "score": 40, "reason": f"有机强+CPA优:ROI{roi7:.1f}≥良线{ctx['roi_ok']:.1f},自然GMV占比{org_share:.0%},CPA{cpa:.1f}≤{cpa_line:.1f}"}
+        return {"label": "加预算", "score": 40, "reason": f"有机强+加购成本优:ROI{roi7:.1f}≥良线{ctx['roi_ok']:.1f},自然GMV占比{org_share:.0%},加购成本{cpa:.1f}≤{cpa_line:.1f}"}
     if saturated and (roi7 >= ctx["roi_ok"] or org_share >= ctx["org_share_high"]):
         return {"label": "饱和观察", "score": 5, "reason": f"饱和观察:mROI{item['mroi']:.1f}<3,3日增投{item['spend_change']:.0f},7日ROI{roi7:.1f}"}
     if cpa <= cpa_line * REBALANCE_GATE["cpa_good_factor"] and cart_rate >= ctx["cart_rate_high"]:
-        return {"label": "保护持有", "score": 15, "reason": f"低CPA:CPA{cpa:.1f}≤红线{cpa_line:.1f}*0.8,加购率{cart_rate:.1%}"}
+        return {"label": "保护持有", "score": 15, "reason": f"低加购成本:加购成本{cpa:.1f}≤红线{cpa_line:.1f}*0.8,加购率{cart_rate:.1%}"}
     if org_share >= ctx["org_share_high"]:
         return {"label": "保护持有", "score": 10, "reason": f"有机贡献:自然GMV占比{org_share:.0%}≥{ctx['org_share_high']:.0%}"}
     if roi7 < ctx["store_roi"] * REBALANCE_GATE["roi_low_factor"] and cpa > cpa_line * REBALANCE_GATE["cpa_ok_factor"]:
-        return {"label": "削减", "score": -30, "reason": f"低ROI高CPA:7日ROI{roi7:.1f}<店铺基准{ctx['store_roi']:.1f}*0.3,CPA{cpa:.1f}>{cpa_line:.1f}"}
-    return {"label": "保护持有", "score": 0, "reason": f"稳定持有:7日ROI{roi7:.1f},自然GMV占比{org_share:.0%},CPA{_format_cpa(cpa)}"}
+        return {"label": "削减", "score": -30, "reason": f"低ROI高加购成本:7日ROI{roi7:.1f}<店铺基准{ctx['store_roi']:.1f}*0.3,加购成本{cpa:.1f}>{cpa_line:.1f}"}
+    return {"label": "保护持有", "score": 0, "reason": f"稳定持有:7日ROI{roi7:.1f},自然GMV占比{org_share:.0%},加购成本{_format_cpa(cpa)}"}
 
 
 def _spillover_result(item):

@@ -138,9 +138,12 @@ def test_original_v93_rebalance_buckets_and_spillover():
 
     check("rebalance high ROI uses original 加预算 bucket", "加预算" in by_pid.loc["add", "v9.3算法命中"], by_pid.loc["add", "v9.3算法命中"])
     check("saturated good item uses original 饱和观察 bucket", "饱和观察" in by_pid.loc["observe", "v9.3算法命中"], by_pid.loc["observe", "v9.3算法命中"])
-    check("low CPA item uses original 保护持有 bucket", "保护持有" in by_pid.loc["protect", "v9.3算法命中"], by_pid.loc["protect", "v9.3算法命中"])
-    check("low ROI high CPA item uses original 削减 bucket", "削减" in by_pid.loc["reduce", "v9.3算法命中"], by_pid.loc["reduce", "v9.3算法命中"])
+    check("low add-to-cart-cost item uses original 保护持有 bucket", "保护持有" in by_pid.loc["protect", "v9.3算法命中"], by_pid.loc["protect", "v9.3算法命中"])
+    check("low ROI high add-to-cart-cost item uses original 削减 bucket", "削减" in by_pid.loc["reduce", "v9.3算法命中"], by_pid.loc["reduce", "v9.3算法命中"])
     check("spillover section uses fixed 7 day spend and organic GMV", "溢出" in by_pid.loc["add", "v9.3算法命中"], by_pid.loc["add", "v9.3算法命中"])
+    reasons = " | ".join(by_pid["v9.3算法原因"].astype(str).tolist())
+    check("algorithm reasons use 加购成本 label", "加购成本" in reasons, reasons)
+    check("algorithm reasons no longer expose CPA label", "CPA" not in reasons, reasons)
 
 
 def test_original_v93_fields_override_wujie_attribution_fields():
