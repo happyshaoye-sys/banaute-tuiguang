@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from core.loader import read_prepared_source
-from core.merge import merge_sources
+from core.merge import build_shared_dimensions, merge_sources
 from core.periods import (
     aggregate_period_frame,
     apply_period_comparisons,
@@ -138,8 +138,49 @@ def _read_sources_for_date(
     return sources, files_info, copied, len(file_list)
 
 
+def _load_shared_dimensions(product_folder, cache_root, jst_entry=None,
+                            jst_refund_entry=None):
+    """一次加载并预聚合周期内每天共用的商品资料、库存和退款率维度。"""
+    sources, info, copied, total = _read_sources_for_date(
+        None, None, product_folder, Path(cache_root) / '_shared_dimensions',
+        '共享维度', include_product=True,
+    )
+    sources = {
+        src: entries for src, entries in sources.items()
+        if src in (SOURCE_PRODUCT_INFO, SOURCE_STOCK)
+    }
+
+    if jst_entry is not None:
+        jst_name, jst_df = jst_entry
+        legacy_stock = sources.pop(SOURCE_STOCK, None) or []
+        kept_legacy = []
+        for leg_name, leg_df in legacy_stock:
+            leg = leg_df.copy()
+            for drop_col in ('在仓库存', '在途'):
+                if drop_col in leg.columns:
+                    leg = leg.drop(columns=[drop_col])
+            if len(leg.columns) > 0:
+                kept_legacy.append((leg_name, leg))
+        sources[SOURCE_STOCK] = [(jst_name, jst_df)] + kept_legacy
+        info.append({'name': jst_name, 'source': SOURCE_STOCK,
+                     'rows': len(jst_df), 'cols': len(jst_df.columns),
+                     'period': '共享维度'})
+        total += 1
+
+    if jst_refund_entry is not None:
+        jr_name, jr_df = jst_refund_entry
+        sources.setdefault(SOURCE_PRODUCT_INFO, []).append((jr_name, jr_df))
+        info.append({'name': jr_name, 'source': SOURCE_PRODUCT_INFO,
+                     'rows': len(jr_df), 'cols': len(jr_df.columns),
+                     'period': '共享维度'})
+        total += 1
+
+    return build_shared_dimensions(sources), (info, copied, total)
+
+
 def _load_single_day(base_root, day, year, shop, product_folder, cache_root,
-                     include_product, label_prefix, jst_entry=None, jst_refund_entry=None):
+                     include_product, label_prefix, jst_entry=None, jst_refund_entry=None,
+                     shared_dimensions=None, shared_dimension_meta=None):
     """加载单日数据：扫描→读文件→合并→返回 day_df"""
     biz_folder, wujie_folder = _build_paths(base_root, day, year, shop)
     if not os.path.isdir(str(biz_folder)) and not os.path.isdir(str(wujie_folder)):
@@ -148,11 +189,12 @@ def _load_single_day(base_root, day, year, shop, product_folder, cache_root,
     day_cache = cache_root / day
     sources, info, copied, total = _read_sources_for_date(
         biz_folder, wujie_folder, product_folder, day_cache,
-        f"{label_prefix}:{day}", include_product=include_product,
+        f"{label_prefix}:{day}",
+        include_product=include_product and shared_dimensions is None,
     )
 
     # 聚水潭快照直连:在仓库存=款式级经营库存(多链接共享同一池)
-    if include_product and jst_entry is not None:
+    if shared_dimensions is None and include_product and jst_entry is not None:
         jst_name, jst_df = jst_entry
         legacy_stock = sources.pop(SOURCE_STOCK, None) or []
         kept_legacy = []
@@ -170,7 +212,7 @@ def _load_single_day(base_root, day, year, shop, product_folder, cache_root,
                      'period': f'{label_prefix}:{day}'})
 
     # 聚水潭退款率直连:30日 cohort 退款率,注入商品资料源
-    if include_product and jst_refund_entry is not None:
+    if shared_dimensions is None and include_product and jst_refund_entry is not None:
         jr_name, jr_df = jst_refund_entry
         sources.setdefault(SOURCE_PRODUCT_INFO, []).append((jr_name, jr_df))
         info.append({'name': jr_name, 'source': SOURCE_PRODUCT_INFO,
@@ -180,7 +222,13 @@ def _load_single_day(base_root, day, year, shop, product_folder, cache_root,
     if not sources:
         return None, info, copied, total, set()
 
-    day_df, day_plan_ids = merge_sources(sources)
+    if include_product and shared_dimension_meta is not None:
+        shared_info, shared_copied, shared_total = shared_dimension_meta
+        info.extend(shared_info)
+        copied += shared_copied
+        total += shared_total
+
+    day_df, day_plan_ids = merge_sources(sources, dimensions=shared_dimensions)
     if day_df is None or len(day_df) == 0:
         return None, info, copied, total, set(day_plan_ids)
 
@@ -295,6 +343,11 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
         else:
             jst_refund_note = f"⚠️ 聚水潭退款率目录中未找到 {date_str} 及其前7天快照,本次退款率列为空(已统一聚水潭口径,不回退生意参谋)"
 
+    shared_dimensions, shared_dimension_meta = _load_shared_dimensions(
+        product_folder, cache_root, jst_entry=jst_entry,
+        jst_refund_entry=jst_refund_entry,
+    )
+
     periods = build_period_ranges(date_str)
     sel_label = PERIOD_LABEL_MAP.get(period_choice, "日环比")
     comparison_labels = [sel_label] if sel_label in periods else ["日环比"]
@@ -324,7 +377,9 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
         include_product = (day == date_str)  # 只有本期首日加载商品资料
         entry = _load_single_day(
             base_root, day, year, shop, product_folder, cache_root,
-            include_product, '周期', jst_entry=jst_entry, jst_refund_entry=jst_refund_entry
+            include_product, '周期', jst_entry=jst_entry, jst_refund_entry=jst_refund_entry,
+            shared_dimensions=shared_dimensions,
+            shared_dimension_meta=shared_dimension_meta,
         )
         day_map[day] = entry
         if include_product and entry[0] is not None:

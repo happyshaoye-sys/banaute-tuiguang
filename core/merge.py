@@ -354,6 +354,23 @@ def _stock_agg(sources):
     return pid_agg, sku_agg
 
 
+def build_shared_dimensions(sources):
+    """预聚合跨日期复用的商品资料与库存维度。
+
+    周期分析中的宝贝可能只出现在较早日期。维度若只挂到周期结束日，
+    这些宝贝会进入累计结果却丢失货号、主图和库存。这里把稳定维度
+    一次聚合后复用于每个日帧，避免重复读取和重复 groupby 大映射表。
+    """
+    product_info_by_pid, product_info_by_sku = _product_info_agg(sources)
+    stock_by_pid, stock_by_sku = _stock_agg(sources)
+    return {
+        'product_info_by_pid': product_info_by_pid,
+        'product_info_by_sku': product_info_by_sku,
+        'stock_by_pid': stock_by_pid,
+        'stock_by_sku': stock_by_sku,
+    }
+
+
 def _merge_dimension(base, dim, on, suffix):
     if dim.empty or on not in dim.columns:
         return base
@@ -453,7 +470,7 @@ def _finalize_result(base):
     return result_df
 
 
-def merge_sources(sources):
+def merge_sources(sources, dimensions=None):
     """
     sources: {source_type: [(filepath, df), ...]}
     返回: 合并后的执行表 DataFrame
@@ -476,8 +493,11 @@ def merge_sources(sources):
     base = base.merge(wujie, on='宝贝ID', how='left', suffixes=('', '_wujie'))
     base = base.merge(promotion_detail, on='宝贝ID', how='left')
 
-    product_info_by_pid, product_info_by_sku = _product_info_agg(sources)
-    stock_by_pid, stock_by_sku = _stock_agg(sources)
+    dims = dimensions if dimensions is not None else build_shared_dimensions(sources)
+    product_info_by_pid = dims['product_info_by_pid']
+    product_info_by_sku = dims['product_info_by_sku']
+    stock_by_pid = dims['stock_by_pid']
+    stock_by_sku = dims['stock_by_sku']
 
     base = _merge_dimension(base, product_info_by_pid, '宝贝ID', '_info_pid')
     base = _merge_dimension(base, stock_by_pid, '宝贝ID', '_stock_pid')
