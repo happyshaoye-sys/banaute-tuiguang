@@ -28,6 +28,7 @@ from core.v93_algorithm import apply_v93_algorithm
 from core.jst_stock import find_snapshot, load_snapshot_as_stock
 from core.jst_refund import find_refund_snapshot, load_refund_rates
 from core.exporter import export_execution_table, export_all_sheets, style_execution_table
+from core.version_control import find_repository, get_status, save_version
 from core.schema import (
     ALLOWED_SOURCE_TYPES, SOURCE_PRODUCT_INFO, SOURCE_PRODUCT_ROI, SOURCE_STOCK,
     SOURCE_WUJIE_SUBJECT, classify_file, EXPORT_COLS, ACTION_RULES, compute_bounds,
@@ -842,6 +843,58 @@ with st.sidebar:
             st.session_state.df = df
             st.session_state.kpis = calc_kpis(df, st.session_state.plan_ids)
             st.rerun()
+
+    st.divider()
+    with st.expander("Git 版本管理", expanded=False):
+        git_repo = find_repository(Path(__file__).resolve().parent)
+        if git_repo is None:
+            st.warning("未找到 Git 仓库，暂时不能创建版本")
+        else:
+            git_status = get_status(git_repo)
+            if git_status.error:
+                st.error(f"读取 Git 状态失败：{git_status.error}")
+            else:
+                st.caption(f"仓库：{git_repo}")
+                st.caption(
+                    f"分支：{git_status.branch} | 本地领先 {git_status.ahead} | "
+                    f"远端领先 {git_status.behind}"
+                )
+                if git_status.remote_url:
+                    st.caption(f"远端：{git_status.remote_url}")
+
+                if git_status.changed_files:
+                    st.write(f"待保存改动：{len(git_status.changed_files)} 个")
+                    st.code("\n".join(git_status.changed_files[:12]), language=None)
+                    if len(git_status.changed_files) > 12:
+                        st.caption(f"另有 {len(git_status.changed_files) - 12} 个文件未展开")
+                else:
+                    st.success("当前代码已是最新保存状态")
+
+                version_note = st.text_input(
+                    "版本备注", placeholder="例如：修复多日货号匹配",
+                    key="git_version_note",
+                )
+                push_to_github = st.checkbox(
+                    "保存后同步 GitHub", value=True, key="git_push_to_github",
+                )
+                if st.button("保存新版本", use_container_width=True, key="git_save_version"):
+                    with st.spinner("正在创建版本..."):
+                        git_result = save_version(git_repo, version_note, push=push_to_github)
+                    st.session_state["git_action_result"] = git_result
+
+                git_result = st.session_state.get("git_action_result")
+                if git_result:
+                    if git_result.ok:
+                        st.success(f"{git_result.message}（{git_result.commit}）")
+                    else:
+                        st.error(git_result.message)
+                    if git_result.details:
+                        st.code(git_result.details[:2000], language=None)
+
+                if git_status.recent_commits:
+                    st.write("最近版本")
+                    for commit, subject, commit_date in git_status.recent_commits:
+                        st.caption(f"{commit_date} · {commit} · {subject}")
 
 # ══════════════════════════════════════════════════════════
 # 主内容区
