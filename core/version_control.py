@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
+import re
 import subprocess
 from typing import Iterable
 
@@ -37,6 +38,7 @@ class GitStatus:
     ahead: int = 0
     behind: int = 0
     recent_commits: list[tuple[str, str, str]] = field(default_factory=list)
+    current_version: str = ""
     error: str = ""
 
 
@@ -46,6 +48,7 @@ class GitActionResult:
     message: str
     commit: str = ""
     pushed: bool = False
+    version: str = ""
     details: str = ""
 
 
@@ -86,7 +89,35 @@ def find_repository(app_dir: str | Path) -> Path | None:
     return None
 
 
-def get_status(repo: str | Path, limit: int = 5) -> GitStatus:
+def _project_versions(repo: Path, project_name: str) -> list[tuple[int, int, str]]:
+    if not project_name:
+        return []
+    tag_text = _run_git(repo, "tag", "--list", f"{project_name}*", check=False)
+    pattern = re.compile(rf"^{re.escape(project_name)}(\d+)\.(\d+)$")
+    versions = []
+    for tag in tag_text.splitlines():
+        match = pattern.fullmatch(tag.strip())
+        if match:
+            versions.append((int(match.group(1)), int(match.group(2)), tag.strip()))
+    return sorted(versions)
+
+
+def next_version_name(repo: str | Path, project_name: str, change_kind: str) -> str:
+    """首次为 1.0；小改递增小数位，大改递增整数位并归零小数位。"""
+    repo_path = Path(repo).resolve()
+    versions = _project_versions(repo_path, project_name)
+    if not versions:
+        major, minor = 1, 0
+    else:
+        major, minor, _ = versions[-1]
+        if change_kind == "major":
+            major, minor = major + 1, 0
+        else:
+            minor += 1
+    return f"{project_name}{major}.{minor}"
+
+
+def get_status(repo: str | Path, limit: int = 5, project_name: str = "") -> GitStatus:
     repo_path = Path(repo).resolve()
     status = GitStatus(repo_path=repo_path)
     try:
@@ -107,6 +138,9 @@ def get_status(repo: str | Path, limit: int = 5) -> GitStatus:
             parts = line.split("\t", 2)
             if len(parts) == 3:
                 status.recent_commits.append((parts[0], parts[1], parts[2]))
+        versions = _project_versions(repo_path, project_name)
+        if versions:
+            status.current_version = versions[-1][2]
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         status.error = str(exc)
     return status
@@ -136,22 +170,32 @@ def _stage_code_changes(repo: Path) -> None:
         _run_git(repo, "add", "--", *safe_new_files)
 
 
-def save_version(repo: str | Path, note: str, push: bool = True) -> GitActionResult:
+def save_version(
+    repo: str | Path,
+    note: str,
+    push: bool = True,
+    project_name: str = "半自动推广工具",
+    change_kind: str = "minor",
+) -> GitActionResult:
     repo_path = Path(repo).resolve()
     clean_note = " ".join(note.strip().split())
     if len(clean_note) < 2:
         return GitActionResult(False, "请填写至少 2 个字的版本备注")
     if len(clean_note) > 100:
         return GitActionResult(False, "版本备注不能超过 100 个字")
+    if change_kind not in {"minor", "major"}:
+        return GitActionResult(False, "版本类型只能是小改或大改")
 
     try:
+        version = next_version_name(repo_path, project_name, change_kind)
+        _run_git(repo_path, "check-ref-format", f"refs/tags/{version}")
         _stage_code_changes(repo_path)
         staged = _run_git(repo_path, "diff", "--cached", "--name-status")
         if not staged.strip():
             return GitActionResult(False, "没有可保存的代码改动；数据文件和缓存不会纳入版本")
 
         commit_message = (
-            f"保存可回退版本：{clean_note}\n\n"
+            f"保存可回退版本 {version}：{clean_note}\n\n"
             "Constraint: In-app manual version snapshot\n"
             "Confidence: high\n"
             "Scope-risk: narrow\n"
@@ -161,26 +205,30 @@ def save_version(repo: str | Path, note: str, push: bool = True) -> GitActionRes
         )
         _run_git(repo_path, "commit", "-m", commit_message, timeout=60)
         commit = _run_git(repo_path, "rev-parse", "--short", "HEAD")
+        _run_git(repo_path, "tag", "-a", version, "-m", f"{version}：{clean_note}")
 
         if not push:
-            return GitActionResult(True, "版本已保存在本机", commit=commit, details=staged)
+            return GitActionResult(
+                True, "版本已保存在本机", commit=commit, version=version, details=staged,
+            )
 
         branch = _run_git(repo_path, "branch", "--show-current")
         remote = _run_git(repo_path, "config", "--get", "remote.origin.url", check=False)
         if not branch or not remote:
             return GitActionResult(
                 True, "版本已保存在本机，但仓库未配置 GitHub 远端",
-                commit=commit, details=staged,
+                commit=commit, version=version, details=staged,
             )
         try:
-            _run_git(repo_path, "push", "origin", branch, timeout=120)
+            _run_git(repo_path, "push", "--atomic", "origin", branch, version, timeout=120)
         except (RuntimeError, subprocess.TimeoutExpired) as exc:
             return GitActionResult(
                 False, "版本已保存在本机，但同步 GitHub 失败",
-                commit=commit, details=str(exc),
+                commit=commit, version=version, details=str(exc),
             )
         return GitActionResult(
-            True, "版本已保存并同步到 GitHub", commit=commit, pushed=True, details=staged,
+            True, "版本已保存并同步到 GitHub", commit=commit, pushed=True,
+            version=version, details=staged,
         )
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         return GitActionResult(False, "创建版本失败", details=str(exc))

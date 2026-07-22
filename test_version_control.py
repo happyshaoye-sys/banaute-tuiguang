@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 import unittest
 
-from core.version_control import find_repository, get_status, save_version
+from core.version_control import find_repository, get_status, next_version_name, save_version
 
 
 def _git(repo, *args):
@@ -35,14 +35,31 @@ class VersionControlTest(unittest.TestCase):
         (self.repo / "business_data.csv").write_text("id,value\n1,2\n", encoding="utf-8")
         (self.repo / ".env").write_text("TOKEN=hidden\n", encoding="utf-8")
 
-        result = save_version(self.repo, "新增版本管理", push=False)
+        result = save_version(
+            self.repo, "新增版本管理", push=False, project_name="测试项目", change_kind="minor",
+        )
 
         self.assertTrue(result.ok, result.details)
+        self.assertEqual(result.version, "测试项目1.0")
+        self.assertEqual(_git(self.repo, "tag", "--list"), "测试项目1.0")
         committed = _git(self.repo, "show", "--pretty=", "--name-only", "HEAD").splitlines()
         self.assertIn("app.py", committed)
         self.assertIn("new_feature.py", committed)
         self.assertNotIn("business_data.csv", committed)
         self.assertNotIn(".env", committed)
+
+        (self.repo / "app.py").write_text("print('v3')\n", encoding="utf-8")
+        minor = save_version(
+            self.repo, "小改", push=False, project_name="测试项目", change_kind="minor",
+        )
+        self.assertEqual(minor.version, "测试项目1.1")
+
+        (self.repo / "app.py").write_text("print('v4')\n", encoding="utf-8")
+        major = save_version(
+            self.repo, "大改", push=False, project_name="测试项目", change_kind="major",
+        )
+        self.assertEqual(major.version, "测试项目2.0")
+        self.assertEqual(next_version_name(self.repo, "测试项目", "minor"), "测试项目2.1")
 
     def test_status_and_repository_discovery(self):
         nested = self.repo / "nested"

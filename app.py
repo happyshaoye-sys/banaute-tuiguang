@@ -28,7 +28,7 @@ from core.v93_algorithm import apply_v93_algorithm
 from core.jst_stock import find_snapshot, load_snapshot_as_stock
 from core.jst_refund import find_refund_snapshot, load_refund_rates
 from core.exporter import export_execution_table, export_all_sheets, style_execution_table
-from core.version_control import find_repository, get_status, save_version
+from core.version_control import find_repository, get_status, next_version_name, save_version
 from core.schema import (
     ALLOWED_SOURCE_TYPES, SOURCE_PRODUCT_INFO, SOURCE_PRODUCT_ROI, SOURCE_STOCK,
     SOURCE_WUJIE_SUBJECT, classify_file, EXPORT_COLS, ACTION_RULES, compute_bounds,
@@ -36,6 +36,7 @@ from core.schema import (
 
 st.set_page_config(page_title="半自动推广工具", layout="wide")
 st.title("半自动推广工具")
+GIT_PROJECT_NAME = "半自动推广工具"
 
 # ── 初始化 Session State ─────────────────────────────────
 for key in ['df','prev_df','kpis','plan_ids','cur_date','prev_date',
@@ -850,7 +851,7 @@ with st.sidebar:
         if git_repo is None:
             st.warning("未找到 Git 仓库，暂时不能创建版本")
         else:
-            git_status = get_status(git_repo)
+            git_status = get_status(git_repo, project_name=GIT_PROJECT_NAME)
             if git_status.error:
                 st.error(f"读取 Git 状态失败：{git_status.error}")
             else:
@@ -861,6 +862,7 @@ with st.sidebar:
                 )
                 if git_status.remote_url:
                     st.caption(f"远端：{git_status.remote_url}")
+                st.write(f"当前版本：{git_status.current_version or '尚未建立（首次为1.0）'}")
 
                 if git_status.changed_files:
                     st.write(f"待保存改动：{len(git_status.changed_files)} 个")
@@ -874,18 +876,30 @@ with st.sidebar:
                     "版本备注", placeholder="例如：修复多日货号匹配",
                     key="git_version_note",
                 )
+                change_label = st.radio(
+                    "版本调整", ["小改（小数位 +0.1）", "大改（整数位 +1.0）"],
+                    horizontal=True, key="git_change_kind",
+                )
+                change_kind = "major" if change_label.startswith("大改") else "minor"
+                next_version = next_version_name(git_repo, GIT_PROJECT_NAME, change_kind)
+                st.info(f"本次版本：{next_version}")
                 push_to_github = st.checkbox(
                     "保存后同步 GitHub", value=True, key="git_push_to_github",
                 )
                 if st.button("保存新版本", use_container_width=True, key="git_save_version"):
                     with st.spinner("正在创建版本..."):
-                        git_result = save_version(git_repo, version_note, push=push_to_github)
+                        git_result = save_version(
+                            git_repo, version_note, push=push_to_github,
+                            project_name=GIT_PROJECT_NAME, change_kind=change_kind,
+                        )
                     st.session_state["git_action_result"] = git_result
 
                 git_result = st.session_state.get("git_action_result")
                 if git_result:
                     if git_result.ok:
-                        st.success(f"{git_result.message}（{git_result.commit}）")
+                        st.success(
+                            f"{git_result.message}：{git_result.version}（{git_result.commit}）"
+                        )
                     else:
                         st.error(git_result.message)
                     if git_result.details:
