@@ -34,6 +34,26 @@ def calc_kpis(df, plan_ids):
     }
 
 
+KPI_MOM_KEYS = (
+    'GMV', '本期花费', '本期在推广计划',
+    '店铺ROI', '在推广商品数量', '加购件数',
+)
+
+
+def calc_kpi_mom_percent(current_kpis, previous_kpis):
+    """计算看板6个核心指标的环比百分数；上期为0时沿用项目除零口径返回0。"""
+    return {
+        key: round(
+            safe_div(
+                float(current_kpis.get(key, 0)) - float(previous_kpis.get(key, 0)),
+                float(previous_kpis.get(key, 0)),
+            ) * 100,
+            2,
+        )
+        for key in KPI_MOM_KEYS
+    }
+
+
 def grade_distribution(df):
     """等级分布（6张卡片数据）"""
     grades = []

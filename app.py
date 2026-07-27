@@ -19,7 +19,7 @@ from core.periods import (
 )
 from core.segmentation import segment_products
 from core.analysis import (
-    calc_kpis, grade_distribution, channel_summary,
+    calc_kpis, calc_kpi_mom_percent, grade_distribution, channel_summary,
     segment_summary, category_analysis, refund_risk, channel_top, inventory_actions,
 )
 from core.acceptance import build_source_status
@@ -39,7 +39,7 @@ st.title("半自动推广工具")
 GIT_PROJECT_NAME = "半自动推广工具"
 
 # ── 初始化 Session State ─────────────────────────────────
-for key in ['df','prev_df','kpis','plan_ids','cur_date','prev_date',
+for key in ['df','prev_df','kpis','prev_kpis','kpi_mom','plan_ids','prev_plan_ids','cur_date','prev_date',
             'sources_info','traffic_bounds','value_bounds','traffic_ref','value_ref',
             'loaded','processing_msg','timings','total_time','period_logs','cat_ctx']:
     if key not in st.session_state:
@@ -398,13 +398,14 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
     cur_result = load_period_data(current_days, day_map)
     df = cur_result['df']
     if df is None or len(df) == 0:
-        return None, None, [], set(), timings, period_logs, {}
+        return None, None, [], set(), set(), timings, period_logs, {}
 
     files_info = first_day_sources[1] if first_day_sources else []
     plan_ids = cur_result['plan_ids']
 
     # ── 4. 各周期环比（纯拼接，不读文件）──
     sel_prev_frame = None
+    sel_prev_plan_ids = set()
     comparisons = {}
     for label in comparison_labels:
         p = periods[label]
@@ -419,6 +420,7 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
         }
         if label == sel_label:
             sel_prev_frame = prev_result_p['df']
+            sel_prev_plan_ids = prev_result_p['plan_ids']
             if period_choice != "当日" and cur_result_p['df'] is not None \
                     and len(cur_result_p['df']) > 0:
                 # 主表切换为所选周期的累计口径(单日帧仅作回退)
@@ -479,7 +481,7 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
         'h7_prev_gmv': _cat_sum(comparisons['7日环比']['previous'], 'GMV'),
     }
 
-    return df, None, files_info, plan_ids, timings, period_logs, cat_ctx
+    return df, sel_prev_frame, files_info, plan_ids, sel_prev_plan_ids, timings, period_logs, cat_ctx
 
 
 # ── 缓存：分层（分界点变化时重新计算）─────────────────────
@@ -734,8 +736,8 @@ with st.sidebar:
                 biz_folder, wujie_folder = _build_paths(root, date_str, year, shop)
 
                 # ── 4. 校验目录是否存在 ──
-                df, prev_df, files_info, plan_ids, timings, period_logs, cat_ctx = \
-                    None, None, [], set(), [], [], {}
+                df, prev_df, files_info, plan_ids, prev_plan_ids, timings, period_logs, cat_ctx = \
+                    None, None, [], set(), set(), [], [], {}
                 errors = []
                 if not os.path.isdir(str(biz_folder)):
                     errors.append(f"商品目录不存在：{biz_folder}")
@@ -759,7 +761,7 @@ with st.sidebar:
                     # ── 6. 加载当天数据，并自动计算日/3日/7日/15日环比 ──
                     with st.spinner("读取文件中..."):
                         t_load = time.perf_counter()
-                        df, prev_df, files_info, plan_ids, timings, period_logs, cat_ctx = \
+                        df, prev_df, files_info, plan_ids, prev_plan_ids, timings, period_logs, cat_ctx = \
                             _load_folder_cached(
                                 root, year, shop, date_str, product_folder,
                                 cache_dir=str(file_cache_dir),
@@ -810,7 +812,12 @@ with st.sidebar:
                     st.session_state.df = df
                     st.session_state.prev_df = prev_df
                     st.session_state.plan_ids = plan_ids
+                    st.session_state.prev_plan_ids = prev_plan_ids
                     st.session_state.kpis = calc_kpis(df, plan_ids)
+                    st.session_state.prev_kpis = calc_kpis(prev_df, prev_plan_ids)
+                    st.session_state.kpi_mom = calc_kpi_mom_percent(
+                        st.session_state.kpis, st.session_state.prev_kpis
+                    )
                     st.session_state.cur_date = date_str
                     st.session_state.prev_date = None
                     st.session_state.sources_info = files_info
@@ -843,6 +850,9 @@ with st.sidebar:
             df = _apply_segmentation(st.session_state.df, tb, vb)
             st.session_state.df = df
             st.session_state.kpis = calc_kpis(df, st.session_state.plan_ids)
+            st.session_state.kpi_mom = calc_kpi_mom_percent(
+                st.session_state.kpis, st.session_state.prev_kpis
+            )
             st.rerun()
 
     st.divider()
@@ -931,6 +941,7 @@ if st.session_state.get('period_logs'):
 
 df = st.session_state.df
 kpis = st.session_state.kpis
+kpi_mom = st.session_state.kpi_mom or calc_kpi_mom_percent(kpis, {})
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📈 数据看板", "📋 数据验收", "📊 执行表", "🎯 商品分层",
@@ -940,12 +951,12 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
 # ── Tab 1: 数据看板 ───────────────────────────────────────
 with tab1:
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("GMV", f"¥{kpis['GMV']/1e4:.2f}万")
-    c2.metric("本期花费", f"¥{kpis['本期花费']/1e4:.2f}万")
-    c3.metric("在推广计划", kpis['本期在推广计划'])
-    c4.metric("店铺ROI", f"{kpis['店铺ROI']:.2f}")
-    c5.metric("在推广商品", kpis['在推广商品数量'])
-    c6.metric("加购件数", f"{kpis['加购件数']:,}")
+    c1.metric("GMV", f"¥{kpis['GMV']/1e4:.2f}万", f"{kpi_mom['GMV']:.2f}% 环比")
+    c2.metric("本期花费", f"¥{kpis['本期花费']/1e4:.2f}万", f"{kpi_mom['本期花费']:.2f}% 环比")
+    c3.metric("在推广计划", kpis['本期在推广计划'], f"{kpi_mom['本期在推广计划']:.2f}% 环比")
+    c4.metric("店铺ROI", f"{kpis['店铺ROI']:.2f}", f"{kpi_mom['店铺ROI']:.2f}% 环比")
+    c5.metric("在推广商品", kpis['在推广商品数量'], f"{kpi_mom['在推广商品数量']:.2f}% 环比")
+    c6.metric("加购件数", f"{kpis['加购件数']:,}", f"{kpi_mom['加购件数']:.2f}% 环比")
 
     st.divider()
 
