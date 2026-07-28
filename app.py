@@ -1,4 +1,4 @@
-"""半自动推广工具 v4.0 — Streamlit 版"""
+"""半自动推广工具 v4.1 — Streamlit 版"""
 from __future__ import annotations
 
 import os, re, time, io, json, shutil, tempfile, hashlib
@@ -35,8 +35,10 @@ from core.schema import (
     SOURCE_WUJIE_SUBJECT, classify_file, EXPORT_COLS, ACTION_RULES, compute_bounds,
 )
 
-st.set_page_config(page_title="半自动推广工具", layout="wide")
-st.title("半自动推广工具")
+APP_VERSION = "4.1"
+
+st.set_page_config(page_title=f"半自动推广工具 v{APP_VERSION}", layout="wide")
+st.title(f"半自动推广工具 v{APP_VERSION}")
 GIT_PROJECT_NAME = "半自动推广工具"
 
 # ── 初始化 Session State ─────────────────────────────────
