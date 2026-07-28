@@ -142,7 +142,8 @@ def category_analysis(df, cat_ctx=None):
     """品类分析（两张表）。
     cat_ctx(可选,2026-07-10 新增): 品类级环比上下文,由 app 按所选时间周期构建:
       {'sel_prev_spend': {类目: 上一周期付费}, 'h7_cur_gmv': {类目: 7日窗GMV},
-       'h7_prev_gmv': {类目: 上一7日窗GMV}}
+       'h7_prev_gmv': {类目: 上一7日窗GMV},
+       'h7_prev_spend|keyword|crowd|omni': {类目: 上一7日窗渠道金额}}
     - 基础表新增 付费占比(=品类付费/品类GMV,用户定义口径)与 付费环比((当期-上期)/上期,基准0记0);
     - 投放表新增 7日GMV环比(7日窗口品类GMV环比);
     - '7天GMV'优先使用上一7日窗口的完整品类GMV,避免只汇总本期仍存在商品的上周期金额。"""
@@ -153,6 +154,15 @@ def category_analysis(df, cat_ctx=None):
     h7_cur_gmv = ctx.get('h7_cur_gmv') or {}
     h7_prev_gmv = ctx.get('h7_prev_gmv') or {}
     has_complete_h7_prev = ctx.get('h7_prev_gmv') is not None
+    h7_prev_spend = ctx.get('h7_prev_spend') or {}
+    h7_prev_keyword = ctx.get('h7_prev_keyword') or {}
+    h7_prev_crowd = ctx.get('h7_prev_crowd') or {}
+    h7_prev_omni = ctx.get('h7_prev_omni') or {}
+    has_complete_h7_channels = all(
+        ctx.get(key) is not None for key in (
+            'h7_prev_spend', 'h7_prev_keyword', 'h7_prev_crowd', 'h7_prev_omni',
+        )
+    )
 
     def _mom(cur, prev):
         return f'{safe_div(cur - prev, prev)*100:.1f}%' if prev else '0.0%'
@@ -165,6 +175,9 @@ def category_analysis(df, cat_ctx=None):
             * pd.to_numeric(work['GMV'], errors='coerce').fillna(0.0)
     else:
         work['_refund_w'] = 0.0
+    for col in ('上周期金额', '上周期付费', '上周期关键词', '上周期人群', '上周期全站'):
+        if col not in work.columns:
+            work[col] = 0.0
 
     cat_agg = work.groupby('淘宝类目').agg(
         cnt=('宝贝ID','count'), gmv=('GMV','sum'), spend=('付费','sum'),
@@ -201,9 +214,15 @@ def category_analysis(df, cat_ctx=None):
                             float(h7_prev_gmv.get(cat_key, 0.0))),
             '付费': float(r['spend']),
             '付费占比': f'{safe_div(r["spend"],total_spend)*100:.1f}%' if total_spend else '0%',
-            '上周期付费': float(r['d7spend']),
+            '上周期付费': float(h7_prev_spend.get(cat_key, 0.0))
+                    if has_complete_h7_channels else float(r['d7spend']),
             '关键词': float(r['kw']), '人群': float(r['crowd']), '全站': float(r['omni']),
-            '上周期关键词': float(r['d7kw']), '上周期人群': float(r['d7crowd']), '上周期全站': float(r['d7omni']),
+            '上周期关键词': float(h7_prev_keyword.get(cat_key, 0.0))
+                    if has_complete_h7_channels else float(r['d7kw']),
+            '上周期人群': float(h7_prev_crowd.get(cat_key, 0.0))
+                    if has_complete_h7_channels else float(r['d7crowd']),
+            '上周期全站': float(h7_prev_omni.get(cat_key, 0.0))
+                    if has_complete_h7_channels else float(r['d7omni']),
             'ROI': f'{safe_div(r["gmv"],r["spend"]):.2f}',
         })
 

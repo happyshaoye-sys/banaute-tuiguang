@@ -11,6 +11,7 @@ import streamlit as st
 from core.loader import read_prepared_source
 from core.merge import build_shared_dimensions, merge_sources
 from core.periods import (
+    aggregate_category_metrics,
     aggregate_period_frame,
     apply_period_comparisons,
     apply_rolling_daily_metrics,
@@ -472,13 +473,29 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
         period_logs.append({'周期': '聚水潭退款率', '范围': jst_refund_note, '完整性': '',
                             '已读取日期': '', '缺失日期': '', '耗时': ''})
 
-    # 品类环比上下文:所选周期的上一周期品类付费(需求3) + 7日窗品类GMV双端(需求4)
+    # 品类环比上下文:所选周期付费环比 + 固定7日品类投放指标。
+    # 直接从已加载日帧按品类汇总，避免为非7日选择额外执行两次商品级周期聚合。
+    h7_period = periods["7日环比"]
+    h7_current = aggregate_category_metrics(
+        day_map,
+        iter_dates(h7_period["current_start"], h7_period["current_end"]),
+        ["GMV"],
+    )
+    h7_previous = aggregate_category_metrics(
+        day_map,
+        iter_dates(h7_period["prev_start"], h7_period["prev_end"]),
+        ["GMV", "付费", "关键词", "人群", "全站"],
+    )
     cat_ctx = {
         'period_choice': period_choice,
         'sel_label': sel_label,
         'sel_prev_spend': _cat_sum(sel_prev_frame, '付费'),
-        'h7_cur_gmv': _cat_sum(comparisons['7日环比']['current'], 'GMV'),
-        'h7_prev_gmv': _cat_sum(comparisons['7日环比']['previous'], 'GMV'),
+        'h7_cur_gmv': h7_current['GMV'],
+        'h7_prev_gmv': h7_previous['GMV'],
+        'h7_prev_spend': h7_previous['付费'],
+        'h7_prev_keyword': h7_previous['关键词'],
+        'h7_prev_crowd': h7_previous['人群'],
+        'h7_prev_omni': h7_previous['全站'],
     }
 
     return df, sel_prev_frame, files_info, plan_ids, sel_prev_plan_ids, timings, period_logs, cat_ctx

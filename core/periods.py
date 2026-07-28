@@ -49,6 +49,43 @@ def iter_dates(start_date, end_date):
         cur += timedelta(days=1)
 
 
+def aggregate_category_metrics(day_map, days, metrics):
+    """从已加载日帧直接汇总品类指标，不触发商品级周期重算或额外 IO。"""
+    metric_list = list(dict.fromkeys(metrics))
+    result = {metric: {} for metric in metric_list}
+    if not metric_list:
+        return result
+
+    frames = []
+    for day in days:
+        entry = day_map.get(day)
+        if not entry or entry[0] is None or len(entry[0]) == 0:
+            continue
+        frame = entry[0]
+        if "淘宝类目" not in frame.columns:
+            continue
+        part = pd.DataFrame({
+            "淘宝类目": frame["淘宝类目"].fillna("").astype(str).str.strip(),
+        })
+        for metric in metric_list:
+            part[metric] = (
+                pd.to_numeric(frame[metric], errors="coerce").fillna(0.0)
+                if metric in frame.columns else 0.0
+            )
+        frames.append(part)
+
+    if not frames:
+        return result
+
+    grouped = pd.concat(frames, ignore_index=True).groupby(
+        "淘宝类目", dropna=False
+    )[metric_list].sum()
+    return {
+        metric: grouped[metric].to_dict()
+        for metric in metric_list
+    }
+
+
 def aggregate_period_frame(df, period_days=7):
     """把多日执行表按宝贝ID累计，并重新计算 ROI、点击率等比率字段。"""
     if df is None or len(df) == 0:
