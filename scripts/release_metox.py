@@ -78,6 +78,14 @@ def _safe_remove_new_tree(path: Path, output_root: Path) -> None:
         shutil.rmtree(path)
 
 
+def _safe_remove_published_tree(path: Path, output_root: Path, package_name: str) -> None:
+    resolved = path.resolve()
+    if resolved.parent != output_root.resolve() or path.name != package_name:
+        raise RuntimeError(f"refusing to clean unsafe release path: {path}")
+    if path.exists():
+        shutil.rmtree(path)
+
+
 def _write_zip(source: Path, package_name: str, destination: Path) -> None:
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         for path in sorted(source.rglob("*")):
@@ -141,6 +149,8 @@ def build_release(baseline: Path, output_root: Path) -> dict[str, object]:
 
     stage = Path(tempfile.mkdtemp(prefix=f".{package_name}.staging-", dir=output_root))
     temp_zip = output_root / f".{package_name}.{uuid.uuid4().hex}.zip.tmp"
+    published_dir = False
+    published_zip = False
     try:
         shutil.copytree(baseline, stage, dirs_exist_ok=True, ignore=_ignore)
 
@@ -184,9 +194,11 @@ def build_release(baseline: Path, output_root: Path) -> dict[str, object]:
         audit = _audit(stage, version, manual_name)
         _write_zip(stage, package_name, temp_zip)
         stage.rename(destination)
+        published_dir = True
         temp_zip.rename(zip_path)
+        published_zip = True
         digest = _sha256(zip_path)
-        hash_path.write_text(f"{digest}  {zip_path.name}\n", encoding="ascii")
+        hash_path.write_text(f"{digest}  {zip_path.name}\n", encoding="utf-8")
         return {
             "package_dir": str(destination),
             "zip": str(zip_path),
@@ -199,6 +211,12 @@ def build_release(baseline: Path, output_root: Path) -> dict[str, object]:
             _safe_remove_new_tree(stage, output_root)
         if temp_zip.exists():
             temp_zip.unlink()
+        if hash_path.exists():
+            hash_path.unlink()
+        if published_zip and zip_path.exists():
+            zip_path.unlink()
+        if published_dir and destination.exists():
+            _safe_remove_published_tree(destination, output_root, package_name)
         raise
 
 
