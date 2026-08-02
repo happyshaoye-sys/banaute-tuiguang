@@ -22,6 +22,7 @@ from core.segmentation import segment_products
 from core.analysis import (
     calc_kpis, calc_kpi_mom_percent, grade_distribution, channel_summary,
     segment_summary, category_analysis, refund_risk, channel_top, inventory_actions,
+    build_operating_daily_report,
 )
 from core.acceptance import build_source_status
 from core.v93_signal import parse_v93_report
@@ -682,19 +683,80 @@ def _build_paths(base_root, date_str, year, shop):
     wujie_dir = root / year / shop / "生意参谋" / "无界" / date_str
     return product_dir, wujie_dir
 
+
+def _render_git_version_management():
+    """在高级设置中渲染低频 Git 版本管理功能。"""
+    git_repo = find_repository(Path(__file__).resolve().parent)
+    if git_repo is None:
+        st.warning("未找到 Git 仓库，暂时不能创建版本")
+        return
+
+    git_status = get_status(git_repo, project_name=GIT_PROJECT_NAME)
+    if git_status.error:
+        st.error(f"读取 Git 状态失败：{git_status.error}")
+        return
+
+    st.caption(f"仓库：{git_repo}")
+    st.caption(
+        f"分支：{git_status.branch} | 本地领先 {git_status.ahead} | "
+        f"远端领先 {git_status.behind}"
+    )
+    if git_status.remote_url:
+        st.caption(f"远端：{git_status.remote_url}")
+    st.write(f"当前版本：{git_status.current_version or '尚未建立（首次为1.0）'}")
+
+    if git_status.changed_files:
+        st.write(f"待保存改动：{len(git_status.changed_files)} 个")
+        st.code("\n".join(git_status.changed_files[:12]), language=None)
+        if len(git_status.changed_files) > 12:
+            st.caption(f"另有 {len(git_status.changed_files) - 12} 个文件未展开")
+    else:
+        st.success("当前代码已是最新保存状态")
+
+    version_note = st.text_input(
+        "版本备注", placeholder="例如：修复多日货号匹配",
+        key="git_version_note",
+    )
+    change_label = st.radio(
+        "版本调整", ["小改（小数位 +0.1）", "大改（整数位 +1.0）"],
+        horizontal=True, key="git_change_kind",
+    )
+    change_kind = "major" if change_label.startswith("大改") else "minor"
+    next_version = next_version_name(git_repo, GIT_PROJECT_NAME, change_kind)
+    st.info(f"本次版本：{next_version}")
+    push_to_github = st.checkbox(
+        "保存后同步 GitHub", value=True, key="git_push_to_github",
+    )
+    if st.button("保存新版本", use_container_width=True, key="git_save_version"):
+        with st.spinner("正在创建版本..."):
+            git_result = save_version(
+                git_repo, version_note, push=push_to_github,
+                project_name=GIT_PROJECT_NAME, change_kind=change_kind,
+            )
+        st.session_state["git_action_result"] = git_result
+
+    git_result = st.session_state.get("git_action_result")
+    if git_result:
+        if git_result.ok:
+            st.success(
+                f"{git_result.message}：{git_result.version}（{git_result.commit}）"
+            )
+        else:
+            st.error(git_result.message)
+        if git_result.details:
+            st.code(git_result.details[:2000], language=None)
+
+    if git_status.recent_commits:
+        st.write("最近版本")
+        for commit, subject, commit_date in git_status.recent_commits:
+            st.caption(f"{commit_date} · {commit} · {subject}")
+
 # ══════════════════════════════════════════════════════════
 # 侧边栏
 # ══════════════════════════════════════════════════════════
 
 with st.sidebar:
     st.header("数据加载")
-
-    base_root = st.text_input(
-        "数据根目录",
-        value=DEFAULT_ROOT,
-        key="base_root_input",
-        help="共享盘: \\\\10.1.22.253\\天猫mark   |   本地: D:\\推广数据"
-    )
 
     date_input = st.text_input(
         "日期",
@@ -712,15 +774,28 @@ with st.sidebar:
              "(如填2026-07-08则为07-06~07-08,环比对比07-03~07-05),7天/15天同理"
     )
 
-    # 高级：年份和店铺（默认值可修改）
-    with st.expander("路径配置（默认值一般不需要改）"):
+    load_requested = st.button(
+        "加载并处理数据",
+        type="primary",
+        use_container_width=True,
+    )
+
+    # 低频配置和诊断统一收进一个高级设置，缩短日常加载首屏。
+    with st.expander("高级设置", expanded=False):
+        st.markdown("#### 路径配置")
+        base_root = st.text_input(
+            "数据根目录",
+            value=DEFAULT_ROOT,
+            key="base_root_input",
+            help="共享盘: \\\\10.1.22.253\\天猫mark   |   本地: D:\\推广数据"
+        )
         year = st.text_input("年份", value=DEFAULT_YEAR, key="year_input")
         shop = st.text_input("店铺", value=DEFAULT_SHOP, key="shop_input")
         st.caption(f"商品目录 = {base_root or '(根目录)'}\\{year}\\{shop}\\生意参谋\\商品\\(日期)")
         st.caption(f"无界目录 = {base_root or '(根目录)'}\\{year}\\{shop}\\生意参谋\\无界\\(日期)")
 
-    # 数据源目录(2026-07-11 折叠:4个路径均有默认值,一般不需要改)
-    with st.expander("数据源目录（聚水潭/v9.3,默认值一般不需要改）"):
+        st.divider()
+        st.markdown("#### 数据源目录")
         # 商品资料（独立入口，不随日期变化）
         product_folder = st.text_input(
             "商品资料文件夹（库存+商品资料）",
@@ -762,9 +837,8 @@ with st.sidebar:
                  "全量分层展示为纯展示段,不解析"
         )
 
-    # 自定义分界点(2026-07-10 前置,预填常用值,加载时直接应用;
-    # 2026-07-11 改为折叠面板,与「路径配置」同样式)
-    with st.expander("自定义分界点（预填常用值,一般不需要改）"):
+        st.divider()
+        st.markdown("#### 自定义分界点")
         t_input = st.text_input(
             "流量分界点(5个,逗号分隔)",
             value="50,150,400,1500,3000",
@@ -778,7 +852,55 @@ with st.sidebar:
             help="访客平均价值(GMV÷访客) 6 档分界。清空则按全店分位数自动计算",
         )
 
-    if st.button("加载并处理数据", type="primary", use_container_width=True):
+        if st.session_state.loaded:
+            # 分位参考和重算动作跟随分界点配置，不再常驻侧边栏。
+            if st.session_state.df is not None:
+                current_df = st.session_state.df
+                t_ref = compute_bounds(current_df['商品访客数'].values)
+                v_ref = compute_bounds(current_df['访客平均价值'].values)
+                st.caption(f"流量分位参考: {', '.join([f'{b:,.0f}' for b in t_ref])}")
+                st.caption(f"价值分位参考: {', '.join([f'{b:.2f}' for b in v_ref])}")
+
+            if st.button(
+                "重新应用分界点(不重新读数)",
+                use_container_width=True,
+                key="reapply_segmentation_bounds",
+            ):
+                tb = _parse_bounds(t_input)
+                vb = _parse_bounds(v_input)
+                st.session_state.traffic_bounds = tb
+                st.session_state.value_bounds = vb
+                current_df = _apply_segmentation(st.session_state.df, tb, vb)
+                st.session_state.df = current_df
+                st.session_state.kpis = calc_kpis(current_df, st.session_state.plan_ids)
+                st.session_state.kpi_mom = calc_kpi_mom_percent(
+                    st.session_state.kpis, st.session_state.prev_kpis
+                )
+                st.rerun()
+
+        if st.session_state.get('timings'):
+            st.divider()
+            st.markdown(
+                f"#### 性能耗时（总 {st.session_state.get('total_time', 0):.1f} 秒）"
+            )
+            for label, elapsed, extra in st.session_state.timings:
+                extra_str = f" — {extra}" if extra else ""
+                st.caption(f"[耗时] {label}：{elapsed}{extra_str}")
+
+        if st.session_state.get('period_logs'):
+            st.divider()
+            st.markdown("#### 周期环比范围与完整性")
+            st.dataframe(
+                pd.DataFrame(st.session_state.period_logs),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        st.divider()
+        st.markdown("#### Git 版本管理")
+        _render_git_version_management()
+
+    if load_requested:
         # ── 1. 校验日期格式 ──
         date_str = date_input.strip()
         if not date_str:
@@ -889,96 +1011,6 @@ with st.sidebar:
                                f"花费 ¥{st.session_state.kpis['本期花费']/1e4:.2f}万 | 计划 {len(plan_ids)}")
                     st.rerun()
 
-    if st.session_state.loaded:
-        st.divider()
-
-        # 全店分位数参考(帮助判断上方分界点填得是否合理)
-        if st.session_state.df is not None:
-            df = st.session_state.df
-            t_ref = compute_bounds(df['商品访客数'].values)
-            v_ref = compute_bounds(df['访客平均价值'].values)
-            st.caption(f"流量分位参考: {', '.join([f'{b:,.0f}' for b in t_ref])}")
-            st.caption(f"价值分位参考: {', '.join([f'{b:.2f}' for b in v_ref])}")
-
-        # 改了上方分界点后无需重新读数,点此仅重算分层
-        if st.button("重新应用分界点(不重新读数)", use_container_width=True):
-            tb = _parse_bounds(t_input)
-            vb = _parse_bounds(v_input)
-            st.session_state.traffic_bounds = tb
-            st.session_state.value_bounds = vb
-            df = _apply_segmentation(st.session_state.df, tb, vb)
-            st.session_state.df = df
-            st.session_state.kpis = calc_kpis(df, st.session_state.plan_ids)
-            st.session_state.kpi_mom = calc_kpi_mom_percent(
-                st.session_state.kpis, st.session_state.prev_kpis
-            )
-            st.rerun()
-
-    st.divider()
-    with st.expander("Git 版本管理", expanded=False):
-        git_repo = find_repository(Path(__file__).resolve().parent)
-        if git_repo is None:
-            st.warning("未找到 Git 仓库，暂时不能创建版本")
-        else:
-            git_status = get_status(git_repo, project_name=GIT_PROJECT_NAME)
-            if git_status.error:
-                st.error(f"读取 Git 状态失败：{git_status.error}")
-            else:
-                st.caption(f"仓库：{git_repo}")
-                st.caption(
-                    f"分支：{git_status.branch} | 本地领先 {git_status.ahead} | "
-                    f"远端领先 {git_status.behind}"
-                )
-                if git_status.remote_url:
-                    st.caption(f"远端：{git_status.remote_url}")
-                st.write(f"当前版本：{git_status.current_version or '尚未建立（首次为1.0）'}")
-
-                if git_status.changed_files:
-                    st.write(f"待保存改动：{len(git_status.changed_files)} 个")
-                    st.code("\n".join(git_status.changed_files[:12]), language=None)
-                    if len(git_status.changed_files) > 12:
-                        st.caption(f"另有 {len(git_status.changed_files) - 12} 个文件未展开")
-                else:
-                    st.success("当前代码已是最新保存状态")
-
-                version_note = st.text_input(
-                    "版本备注", placeholder="例如：修复多日货号匹配",
-                    key="git_version_note",
-                )
-                change_label = st.radio(
-                    "版本调整", ["小改（小数位 +0.1）", "大改（整数位 +1.0）"],
-                    horizontal=True, key="git_change_kind",
-                )
-                change_kind = "major" if change_label.startswith("大改") else "minor"
-                next_version = next_version_name(git_repo, GIT_PROJECT_NAME, change_kind)
-                st.info(f"本次版本：{next_version}")
-                push_to_github = st.checkbox(
-                    "保存后同步 GitHub", value=True, key="git_push_to_github",
-                )
-                if st.button("保存新版本", use_container_width=True, key="git_save_version"):
-                    with st.spinner("正在创建版本..."):
-                        git_result = save_version(
-                            git_repo, version_note, push=push_to_github,
-                            project_name=GIT_PROJECT_NAME, change_kind=change_kind,
-                        )
-                    st.session_state["git_action_result"] = git_result
-
-                git_result = st.session_state.get("git_action_result")
-                if git_result:
-                    if git_result.ok:
-                        st.success(
-                            f"{git_result.message}：{git_result.version}（{git_result.commit}）"
-                        )
-                    else:
-                        st.error(git_result.message)
-                    if git_result.details:
-                        st.code(git_result.details[:2000], language=None)
-
-                if git_status.recent_commits:
-                    st.write("最近版本")
-                    for commit, subject, commit_date in git_status.recent_commits:
-                        st.caption(f"{commit_date} · {commit} · {subject}")
-
 # ══════════════════════════════════════════════════════════
 # 主内容区
 # ══════════════════════════════════════════════════════════
@@ -986,17 +1018,6 @@ with st.sidebar:
 if not st.session_state.loaded:
     st.info("👈 在左侧输入日期（如 2026-07-02），点击「加载并处理数据」")
     st.stop()
-
-# 显示耗时日志（主区域顶部）
-if st.session_state.get('timings'):
-    with st.expander(f"📊 性能耗时（总 {st.session_state.get('total_time', 0):.1f} 秒）", expanded=False):
-        for label, elapsed, extra in st.session_state.timings:
-            extra_str = f" — {extra}" if extra else ""
-            st.text(f"[耗时] {label}：{elapsed}{extra_str}")
-
-if st.session_state.get('period_logs'):
-    with st.expander("周期环比范围与完整性", expanded=False):
-        st.dataframe(pd.DataFrame(st.session_state.period_logs), use_container_width=True, hide_index=True)
 
 st.session_state.df = _normalize_display_columns(st.session_state.df)
 df = st.session_state.df
@@ -1017,6 +1038,35 @@ with tab1:
     c4.metric("店铺ROI", f"{kpis['店铺ROI']:.2f}", f"{kpi_mom['店铺ROI']:.2f}% 环比")
     c5.metric("在推广商品", kpis['在推广商品数量'], f"{kpi_mom['在推广商品数量']:.2f}% 环比")
     c6.metric("加购件数", f"{kpis['加购件数']:,}", f"{kpi_mom['加购件数']:.2f}% 环比")
+
+    # 可审计的本地智能摘要：复用当前/上期内存帧，不读文件、不调用外部 AI。
+    report_ctx = st.session_state.get('cat_ctx') or {}
+    report_period_choice = report_ctx.get('period_choice', '当日')
+    report_period_label = report_ctx.get('sel_label', '日环比')
+    report_period_log = next(
+        (row for row in (st.session_state.get('period_logs') or [])
+         if row.get('周期') == report_period_label),
+        None,
+    )
+    operating_report = build_operating_daily_report(
+        df,
+        st.session_state.get('prev_df'),
+        period_choice=report_period_choice,
+        period_log=report_period_log,
+        risk_spend_floor=100.0,
+    )
+    st.subheader("🧠 AI经营日报")
+    with st.container(border=True):
+        st.caption(
+            f"口径：{operating_report['period_scope']}｜本地规则化解读，金额可与本期/上期对账；"
+            "三渠道表示广告归因成交变化，不等同于全店GMV贡献。"
+        )
+        if operating_report['status'] != 'complete':
+            st.warning(f"周期数据不完整，以下仅显示暂估总览：{operating_report['completeness']}")
+            st.markdown(f"**总览（暂估）：** {operating_report['lines']['总览']}")
+        else:
+            for section in ('总览', '等级', '品类', '渠道', '风险'):
+                st.markdown(f"**{section}：** {operating_report['lines'][section]}")
 
     st.divider()
 

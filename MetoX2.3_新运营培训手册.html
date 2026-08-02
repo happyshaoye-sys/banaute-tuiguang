@@ -1,0 +1,538 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MetoX2.3 半自动推广工具新运营培训手册</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --paper: #ffffff;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #d9e0ea;
+      --soft: #eef2f7;
+      --red: #d92d20;
+      --blue: #155eef;
+      --green: #067647;
+      --amber: #b54708;
+      --purple: #6941c6;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      line-height: 1.72;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+      gap: 24px;
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    aside {
+      position: sticky;
+      top: 18px;
+      align-self: start;
+      background: #111827;
+      color: #fff;
+      border-radius: 8px;
+      padding: 18px 16px;
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+    }
+    aside h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+      border: 0;
+      padding: 0;
+      color: #fff;
+    }
+    aside a {
+      display: block;
+      color: #d1d5db;
+      text-decoration: none;
+      padding: 7px 8px;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    aside a:hover { background: #1f2937; color: #fff; }
+    main { min-width: 0; }
+    header {
+      background: #111827;
+      color: #fff;
+      padding: 34px 40px;
+      border-radius: 8px;
+      margin-bottom: 18px;
+    }
+    h1 { margin: 0 0 10px; font-size: 34px; letter-spacing: 0; }
+    h2 {
+      margin: 34px 0 14px;
+      font-size: 24px;
+      border-left: 5px solid var(--red);
+      padding-left: 12px;
+    }
+    h3 { margin: 24px 0 10px; font-size: 18px; }
+    p { margin: 8px 0; }
+    .subtitle { color: #d1d5db; font-size: 15px; }
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px 24px;
+      margin: 16px 0;
+    }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .mini {
+      background: #fafbff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 15px 16px;
+    }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; background: #fff; }
+    th, td { border: 1px solid var(--line); padding: 9px 10px; vertical-align: top; }
+    th { background: var(--soft); text-align: left; }
+    code { background: var(--soft); padding: 1px 5px; border-radius: 4px; }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: var(--blue);
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .ok { color: var(--green); font-weight: 700; }
+    .warn { color: var(--amber); font-weight: 700; }
+    .bad { color: var(--red); font-weight: 700; }
+    .purple { color: var(--purple); font-weight: 700; }
+    .note { color: var(--muted); font-size: 14px; }
+    ol, ul { padding-left: 22px; }
+    li { margin: 5px 0; }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin: 12px 0;
+    }
+    .step {
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 90px;
+    }
+    .step b { display: block; color: var(--blue); margin-bottom: 5px; }
+    .checklist li { list-style: none; margin-left: -20px; }
+    .checklist li::before { content: "□ "; color: var(--blue); font-weight: 700; }
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; padding: 16px; }
+      aside { position: static; max-height: none; }
+      .grid, .grid3, .flow { grid-template-columns: 1fr; }
+      header { padding: 26px 22px; }
+      h1 { font-size: 26px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <h2>培训目录</h2>
+      <a href="#overview">0. 培训目标</a>
+      <a href="#start">1. 启动与交付包</a>
+      <a href="#logic">2. 工具整体逻辑</a>
+      <a href="#sources">3. 数据源与字段来源</a>
+      <a href="#algo">4. 算法说明</a>
+      <a href="#diff">5. v9.3 与 MetoX 差异</a>
+      <a href="#scenes">6. 运营业务场景</a>
+      <a href="#fields">7. 重点关注字段</a>
+      <a href="#sop">8. 每日使用 SOP</a>
+      <a href="#cases">9. 实战案例与冲突处理</a>
+      <a href="#checklist">10. 新运营上手清单</a>
+      <a href="#faq">11. 常见问题</a>
+    </aside>
+
+    <main>
+      <header>
+        <h1>MetoX2.3 半自动推广工具新运营培训手册</h1>
+        <div class="subtitle">适用对象：新接手天猫推广执行、渠道分析、商品分层复盘的运营同学。更新日期：2026-07-16。</div>
+      </header>
+
+
+      <section id="update-20260716" class="card">
+        <h2>2026-07-16 更新说明</h2>
+        <p><span class="tag">本次重点</span> 执行表里的 <code>宝贝ID</code>、<code>货号</code>、<code>款式主图</code>、<code>创建时间</code>、<code>在仓库存</code>、<code>在途</code>、<code>成本价（含税）</code> 改为按宝贝ID读取对应日期的款式级库存快照。</p>
+        <table>
+          <thead><tr><th>项目</th><th>当前规则</th></tr></thead>
+          <tbody>
+            <tr><td>库存快照日更目录</td><td><code>\\10.1.22.253\天猫mark\mark0706啊\聚水潭\库存快照\YYYY-MM</code></td></tr>
+            <tr><td>文件命名</td><td><code>库存快照_YYYY-MM-DD_款式级.csv</code></td></tr>
+            <tr><td>跨月规则</td><td>8 月自动创建 <code>2026-08</code> 文件夹，后续月份同理。</td></tr>
+            <tr><td>现场校验</td><td>宝贝ID <code>1059580001412</code> 已补齐：货号 <code>B1476C56262</code>，创建时间 <code>2026-06-16 13:13:59</code>，在仓库存 <code>0</code>，在途 <code>1271</code>，成本价 <code>70</code>。</td></tr>
+          </tbody>
+        </table>
+        <p class="note">如果这些字段仍为空，优先检查侧边栏“聚水潭库存快照目录”是否指向共享盘 <code>mark0706啊\聚水潭\库存快照</code>，然后重新点击“加载并处理数据”。</p>
+      </section>
+      <section id="overview" class="card">
+        <h2>0. 培训目标</h2>
+        <div class="grid3">
+          <div class="mini"><h3>会启动</h3><p>能在第三人电脑上解压、启动、打开工具，并知道路径和端口。</p></div>
+          <div class="mini"><h3>会判断</h3><p>能看懂 36宫格、v9.3信号、MetoX算法、渠道分析、库存和退款风险。</p></div>
+          <div class="mini"><h3>会落地</h3><p>能把工具结果转成每天的推广动作：加预算、保护、优化、观察、削减。</p></div>
+        </div>
+        <p class="note">这份手册不是只讲按钮，而是让运营知道“为什么这么判、应该怎么做、冲突时听谁”。</p>
+      </section>
+
+      <section id="start" class="card">
+        <h2>1. 启动与交付包</h2>
+        <ol>
+          <li>完整解压 <code>MetoX半自动推广工具_v2.2_第三方版_20260802.zip</code>。</li>
+          <li>进入 <code>MetoX半自动推广工具</code> 文件夹。</li>
+          <li>双击 <code>启动MetoX半自动推广工具.bat</code>。</li>
+          <li>浏览器会自动打开。如果没有自动打开，就复制启动窗口中 <code>METOX_URL=</code> 后面的实际地址；端口被占用时程序会自动换用可用端口。</li>
+          <li>使用期间不要关闭黑色启动窗口，关闭窗口等于停止工具。</li>
+        </ol>
+        <table>
+          <thead><tr><th>文件/目录</th><th>作用</th><th>能不能删</th></tr></thead>
+          <tbody>
+            <tr><td><code>TuiGuangTool.exe</code></td><td>离线运行入口，内置启动 Streamlit 的逻辑。</td><td class="bad">不能删</td></tr>
+            <tr><td><code>_internal</code></td><td>Python、Streamlit、pandas 等运行依赖。</td><td class="bad">不能删</td></tr>
+            <tr><td><code>app.py</code>、<code>core</code></td><td>工具页面和核心算法源码。</td><td class="bad">不能删</td></tr>
+            <tr><td><code>聚水潭</code></td><td>随包兜底快照，长期建议读共享盘最新快照。</td><td class="warn">可替换，不建议误删</td></tr>
+            <tr><td>本 HTML 手册</td><td>新运营培训材料。</td><td class="ok">可单独转发</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="logic" class="card">
+        <h2>2. 工具整体逻辑</h2>
+        <p>这套工具的核心定位是“推广执行工作台”。它不是单纯展示报表，而是把多个来源的数据变成一张运营能执行的商品推广表。</p>
+        <div class="flow">
+          <div class="step"><b>数据读取</b>商品经营、无界、聚水潭、v9.3日报。</div>
+          <div class="step"><b>商品合并</b>按宝贝ID/商品ID统一到执行表。</div>
+          <div class="step"><b>36宫格</b>用流量和价值给商品分层。</div>
+          <div class="step"><b>信号打标</b>外部 v9.3 + 内置 MetoX 双信号。</div>
+          <div class="step"><b>运营动作</b>结合渠道、库存、退款落操作。</div>
+        </div>
+        <table>
+          <thead><tr><th>模块</th><th>解决的问题</th><th>运营动作方向</th></tr></thead>
+          <tbody>
+            <tr><td>36宫格分层</td><td>这个商品当前处在什么层级。</td><td>决定基础动作：放量、待优化、上升验证、衰退预警。</td></tr>
+            <tr><td>v9.3信号</td><td>外部日报策略认为哪些商品有机会或风险。</td><td>作为外部策略参考，保留 v9.3 原名。</td></tr>
+            <tr><td>MetoX算法</td><td>工具用执行表和历史窗口重新识别强信号。</td><td>作为内置决策引擎，重点看原因和分值。</td></tr>
+            <tr><td>渠道分析</td><td>关键词、人群、全站各自是否值得继续投。</td><td>拆渠道做加投、优化、观察或控预算。</td></tr>
+            <tr><td>库存/退款</td><td>商品能不能承接放量，风险是否过高。</td><td>高风险先控预算或修商品承接。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="sources" class="card">
+        <h2>3. 数据源与字段来源</h2>
+        <table>
+          <thead><tr><th>数据源</th><th>主要字段</th><th>业务用途</th><th>异常时怎么看</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>生意参谋·商品经营投产比</td>
+              <td>GMV、商品访客数、商品加购件数、支付件数、商品支付转化率、淘宝类目</td>
+              <td>商品主表、36宫格、自然表现、销售规模。</td>
+              <td>缺这个源，执行表商品池会不完整。</td>
+            </tr>
+            <tr>
+              <td>无界·商品主体</td>
+              <td>付费、推广投产、推广成交、推广加购、推广明细、关键词/人群/全站花费与成交</td>
+              <td>推广消耗、渠道效率、MetoX 推广字段。</td>
+              <td>缺这个源，渠道分析和投放效率会失真。</td>
+            </tr>
+            <tr>
+              <td>聚水潭库存/映射</td>
+              <td>货号、主图、创建时间、库存、在途、成本价</td>
+              <td>判断商品身份、库存承接、利润空间。</td>
+              <td>长期使用建议保证共享盘快照持续更新。</td>
+            </tr>
+            <tr>
+              <td>聚水潭退款率</td>
+              <td>退款率、成功退款金额</td>
+              <td>风险标签、预算优先级、放量闸门。</td>
+              <td>无退款率不等于退款率为 0，只代表缺数据。</td>
+            </tr>
+            <tr>
+              <td>daily_review v9.3 日报</td>
+              <td>v9.3信号</td>
+              <td>外部复盘信号：明日之星、爆发、加预算、保护持有、削减、溢出等。</td>
+              <td>日报未生成或路径未匹配时，v9.3信号为空。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="algo" class="card">
+        <h2>4. 算法说明：优先级、风险、触发逻辑、运营处理</h2>
+        <h3>4.1 36宫格基础算法</h3>
+        <p>36宫格用两个维度判断商品位置：<code>商品访客数</code>代表流量，<code>访客平均价值=GMV÷商品访客数</code>代表价值。两个维度各分 6 档，组合后生成商品定位、综合等级、商品周期和基础推广动作。</p>
+        <table>
+          <thead><tr><th>字段</th><th>触发逻辑</th><th>运营处理</th></tr></thead>
+          <tbody>
+            <tr><td>流量定位</td><td>商品访客数按分界点或全店分位数分档。</td><td>判断流量规模。低流量不急着重投，高流量要看价值。</td></tr>
+            <tr><td>价值定位</td><td>访客平均价值按分界点或全店分位数分档。</td><td>判断流量质量。高价值低流量适合拉流量验证。</td></tr>
+            <tr><td>综合等级</td><td>组合映射为 S/A+/A/B/C/D。</td><td>S/A+/A 优先处理，C/D 需谨慎。</td></tr>
+            <tr><td>商品周期</td><td>组合映射为放量、待优化、上升验证、衰退预警等。</td><td>决定基础动作，但必须结合风险和信号。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>4.2 MetoX 内置算法标签</h3>
+        <table>
+          <thead><tr><th>标签</th><th>典型触发逻辑</th><th>算法分</th><th>运营处理</th></tr></thead>
+          <tbody>
+            <tr><td>明日之星</td><td>自然访客、自然加购、加购率较强，且 7 日花费较低。</td><td>多项细分累加</td><td>小步测试预算，重点看点击/加购/收藏是否继续走强。</td></tr>
+            <tr><td>强主推</td><td>明日之星内部强条件同时满足。</td><td>随明日之星累加</td><td>优先进入主推观察池，但仍要看库存和退款。</td></tr>
+            <tr><td>近3日潜力</td><td>近 3 日加购达到门槛，花费低，加购率较好。</td><td>+20</td><td>适合快速试投，不要等 7 天后才动。</td></tr>
+            <tr><td>爆发</td><td>昨日加购相对基线明显增长，且达到最低加购量。</td><td>+30</td><td>处在窗口期，优先检查渠道和库存后加速。</td></tr>
+            <tr><td>加预算</td><td>ROI 高、有机贡献强、加购成本优等。</td><td>+40</td><td>可加预算，但要分渠道加，不是一刀切全渠道加。</td></tr>
+            <tr><td>保护持有</td><td>加购成本低或自然 GMV 占比高。</td><td>+10/+15</td><td>不要随意砍预算，先保持并优化承接。</td></tr>
+            <tr><td>饱和观察</td><td>边际投产低、近期增投但 mROI 不足。</td><td>+5</td><td>暂停大幅加预算，先优化人群/关键词/素材。</td></tr>
+            <tr><td>溢出</td><td>付费可能带动自然流量或自然成交。</td><td>+10</td><td>不能只看直接投产，要看自然 GMV 占比。</td></tr>
+            <tr><td>亏损风险</td><td>低效、亏损或投入回报明显弱。</td><td>-20</td><td>进入风控，先查渠道、价格、承接、退款。</td></tr>
+            <tr><td>削减</td><td>低 ROI 且加购成本高。</td><td>-30</td><td>优先控预算或停低效计划。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>4.3 预算优先级与风险标签</h3>
+        <table>
+          <thead><tr><th>字段</th><th>含义</th><th>运营处理</th></tr></thead>
+          <tbody>
+            <tr><td>预算优先级 P1/P2/P3/P4</td><td>综合商品层级、周期、ROI、库存、退款等生成的预算优先级。</td><td>P1/P2 优先争取预算；P3 观察；P4 谨慎或控制。</td></tr>
+            <tr><td>风险标签</td><td>高退款、缺货、亏损投放、库存异常等提醒。</td><td>风险标签优先级高于加预算冲动。高退款/缺货先处理风险。</td></tr>
+            <tr><td>推广动作</td><td>根据商品周期和风控规则给出的基础动作文案。</td><td>作为执行建议，最终仍要结合 MetoX/v9.3/渠道。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="diff" class="card">
+        <h2>5. v9.3 算法与 MetoX 算法的差异</h2>
+        <p><span class="tag">必须记住</span> <code>v9.3信号</code> 是外部引用信号；<code>MetoX算法命中</code> 是工具内置算法。两者不是互相替代，而是两个视角。</p>
+        <table>
+          <thead><tr><th>维度</th><th>v9.3信号</th><th>MetoX算法</th><th>运营怎么用</th></tr></thead>
+          <tbody>
+            <tr><td>来源</td><td>daily_review v9.3 日报文本解析。</td><td>半自动推广工具内部代码实时计算。</td><td>一个是外部策略产物，一个是工具内置判断。</td></tr>
+            <tr><td>字段名</td><td><code>v9.3信号</code></td><td><code>MetoX算法命中/分/原因</code></td><td>不能混名，便于追溯来源。</td></tr>
+            <tr><td>计算入口</td><td>日报已生成后才能解析。</td><td>加载执行表后直接打标。</td><td>v9.3 可能因日报未生成而为空，MetoX 通常可直接出结果。</td></tr>
+            <tr><td>信息粒度</td><td>偏策略复盘和信号池。</td><td>偏执行表指标、历史窗口、预算动作。</td><td>MetoX 更适合当天执行排序，v9.3 更适合复盘校验。</td></tr>
+            <tr><td>冲突原因</td><td>使用外部模型和日报口径。</td><td>使用当前工具合并后的数据和内置门槛。</td><td>冲突时先看数据口径，再看最近趋势和风险。</td></tr>
+            <tr><td>共同命中</td><td colspan="2">如果 v9.3 与 MetoX 同向，例如都提示明日之星/爆发/加预算，可信度更高。</td><td>优先进入当天操作池。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="scenes" class="card">
+        <h2>6. 运营使用业务场景</h2>
+        <div class="grid">
+          <div class="mini">
+            <h3>场景一：每日预算调整</h3>
+            <p>先看 <code>MetoX算法命中</code> 和 <code>预算优先级</code>，再看渠道分析决定加在哪个渠道。</p>
+            <p><b>重点字段：</b>MetoX算法命中、MetoX算法原因、预算优先级、渠道投产、渠道判断。</p>
+          </div>
+          <div class="mini">
+            <h3>场景二：新品/潜力款发现</h3>
+            <p>重点找低花费但自然加购、近3日加购、加购率强的商品。</p>
+            <p><b>重点字段：</b>明日之星、近3日潜力、商品加购件数、花费3、花费7。</p>
+          </div>
+          <div class="mini">
+            <h3>场景三：爆发款追投</h3>
+            <p>先确认爆发不是退款、缺货或低价异常造成，再拆渠道追投。</p>
+            <p><b>重点字段：</b>爆发、GMV、日销3、日销7、库存、退款率。</p>
+          </div>
+          <div class="mini">
+            <h3>场景四：低效预算回收</h3>
+            <p>找削减、亏损风险、饱和观察，优先控制低效渠道。</p>
+            <p><b>重点字段：</b>削减、亏损风险、推广投产、加购成本、渠道判断。</p>
+          </div>
+          <div class="mini">
+            <h3>场景五：渠道结构优化</h3>
+            <p>关键词、人群、全站不要混在一起看，分别看渠道花费、渠道成交、渠道投产。</p>
+            <p><b>重点字段：</b>关键词/人群/全站花费、渠道成交、渠道投产、渠道判断。</p>
+          </div>
+          <div class="mini">
+            <h3>场景六：风险拦截</h3>
+            <p>高退款、缺货、库存不足时，即使算法提示加预算，也要先处理风险。</p>
+            <p><b>重点字段：</b>风险标签、退款率、在仓库存、可售天数、预算优先级。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="fields" class="card">
+        <h2>7. 运营需要重点关注的字段</h2>
+        <table>
+          <thead><tr><th>优先级</th><th>字段</th><th>怎么看</th><th>典型动作</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>MetoX算法命中</td><td>当天内置算法给出的标签。</td><td>决定今天先处理哪些商品。</td></tr>
+            <tr><td>2</td><td>MetoX算法原因</td><td>解释触发逻辑，必须读，不要只看标签。</td><td>决定是加预算、保护还是排查。</td></tr>
+            <tr><td>3</td><td>v9.3信号</td><td>外部日报信号，同向时增强信心。</td><td>用于交叉验证和复盘。</td></tr>
+            <tr><td>4</td><td>综合等级/商品周期</td><td>36宫格基础定位。</td><td>给动作定底线。</td></tr>
+            <tr><td>5</td><td>预算优先级/风险标签</td><td>预算和值不值得放的风控结果。</td><td>高风险先处理风险。</td></tr>
+            <tr><td>6</td><td>GMV/付费/推广投产/链接投产</td><td>规模和效率。</td><td>判断能不能放量和是否浪费预算。</td></tr>
+            <tr><td>7</td><td>商品访客数/访客平均价值/加购件数</td><td>流量、价值、购买意向。</td><td>判断是缺流量还是承接差。</td></tr>
+            <tr><td>8</td><td>渠道成交/渠道投产/渠道判断</td><td>拆关键词、人群、全站看。</td><td>决定预算加到哪里或从哪里砍。</td></tr>
+            <tr><td>9</td><td>库存/退款率</td><td>承接能力和售后风险。</td><td>决定是否允许放量。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="sop" class="card">
+        <h2>8. 运营使用工具的方式方法 SOP</h2>
+        <h3>8.1 每日 15 分钟基础流程</h3>
+        <ol>
+          <li><b>加载数据：</b>默认只需选择日期和周期，再点击加载。日常先看 7 天，异常再补看 3 天/15 天；路径、数据源、分界点和周期完整性都在「高级设置」中，正常情况下不用展开。</li>
+          <li><b>验收数据：</b>进入数据验收，确认商品、无界、聚水潭、v9.3 日报是否读到。</li>
+          <li><b>筛强信号：</b>执行表中筛 <code>MetoX算法命中</code> 非空，优先看加预算、爆发、近3日潜力、明日之星。</li>
+          <li><b>看风控：</b>检查风险标签、退款率、库存、可售天数，先拦不能放量的商品。</li>
+          <li><b>拆渠道：</b>到渠道分析看关键词、人群、全站分别该怎么动。</li>
+          <li><b>写动作：</b>在导出的执行表里填写操作和运营备注。</li>
+          <li><b>次日复盘：</b>看昨天操作后的 GMV、加购、花费、ROI、库存和退款变化。</li>
+        </ol>
+
+        <h3>8.2 AI经营日报怎么读</h3>
+        <p>数据看板六项核心指标下方会自动生成五行经营摘要：总览、等级、品类、渠道和风险。它跟随左侧选择的当日/3天/7天/15天，与紧邻的等长上周期比较；金额由本地固定公式计算，不调用外部AI服务。</p>
+        <ul>
+          <li><b>等级/品类：</b>表示GMV增长集中在哪里、主要拖累在哪里；“流失商品”是上期有、本期没有的商品，纳入后才能与店铺GMV差额对账。</li>
+          <li><b>渠道：</b>关键词、人群、全站显示的是广告归因成交变化，并同时显示花费变化；它们不能直接等同于全店GMV贡献。</li>
+          <li><b>风险：</b>按品类GMV合计÷品类付费合计比较ROI，本期品类付费不足100元不做强提示。</li>
+          <li><b>数据不完整：</b>当前期或对比期缺日时只显示暂估总览，不据此下放量或控投结论。</li>
+        </ul>
+
+        <h3>8.3 操作顺序口诀</h3>
+        <p><span class="tag">先验收</span> 数据没读全不做判断；<span class="tag">先风控</span> 高退款/缺货不盲目加；<span class="tag">先强信号</span> 同向命中优先；<span class="tag">再拆渠道</span> 预算加到有效渠道；<span class="tag">最后记录</span> 没备注就无法复盘。</p>
+        <p><b>高级设置说明：</b>需要更换根目录、店铺、聚水潭/v9.3来源或分界点时再展开；加载后如只修改分界点，在同一区域点击「重新应用分界点(不重新读数)」。</p>
+
+        <h3>8.3 周期选择</h3>
+        <table>
+          <thead><tr><th>周期</th><th>适合场景</th><th>注意事项</th></tr></thead>
+          <tbody>
+            <tr><td>3天</td><td>新品、突发趋势、活动刚开始。</td><td>波动大，只做快速预警，不宜单独决定大额预算。</td></tr>
+            <tr><td>7天</td><td>日常主决策周期。</td><td>推荐作为每日预算调整的默认周期。</td></tr>
+            <tr><td>15天</td><td>看稳定投产、稳定承接和中期趋势。</td><td>会稀释新品爆发，需和 3/7 天交叉看。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="cases" class="card">
+        <h2>9. 实战案例与冲突处理</h2>
+        <h3>案例一：宝贝ID 950528147557，MetoX 加预算，但 36宫格显示衰退</h3>
+        <table>
+          <tbody>
+            <tr><th>训练现象</th><td>在执行表中搜索 <code>950528147557</code>，可以看到它曾出现 <code>MetoX算法命中=加预算</code>，但 36宫格的 <code>商品周期</code> 显示为衰退类判断。</td></tr>
+            <tr><th>为什么冲突</th><td>36宫格看的是当前截面：流量和访客价值组合偏弱时，会给出衰退判断；MetoX 看的是内置趋势/投放规则：如果近期 ROI、自然贡献或加购成本达到加预算条件，就会提示加预算。</td></tr>
+            <tr><th>运营处理</th><td>不要直接否定任意一边。先读 <code>MetoX算法原因</code>，再查库存、退款率、渠道投产。如果风险低，采用“小步加预算 + 次日复盘”；如果库存/退款有问题，只做保护或观察。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>案例二：宝贝ID 932192042609，v9.3 有信号，但 MetoX 为空或不跟随</h3>
+        <table>
+          <tbody>
+            <tr><th>训练现象</th><td>在执行表中搜索 <code>932192042609</code>，它是此前排查过的典型样例：<code>v9.3信号</code> 能命中，但内置 MetoX 不一定同步给出相同动作。</td></tr>
+            <tr><th>为什么冲突</th><td><code>v9.3信号</code> 来自外部 daily_review v9.3 日报，是外部策略产物；<code>MetoX算法命中</code> 来自工具内置门槛，只按执行表和历史窗口重新打标。两个体系的输入、阈值和目标不完全一样。</td></tr>
+            <tr><th>运营处理</th><td>把它放入“外部信号观察池”。重点看 GMV、加购、花费、渠道投产是否在接下来 1-3 天继续变好。只有 v9.3 单边命中时，不建议直接大额加预算，适合小额验证或等待 MetoX/36宫格确认。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>案例三：宝贝ID 1052837614444，MetoX算法原因里出现高花费和溢出</h3>
+        <table>
+          <tbody>
+            <tr><th>训练现象</th><td>搜索 <code>1052837614444</code>，此前用于校验算法原因：原因里出现类似 <code>稳定持有</code>、<code>溢出</code>、<code>7日花费6643</code>、自然 GMV 占比、加购成本等说明。</td></tr>
+            <tr><th>为什么要重点看原因</th><td>同一个商品可能不是简单的“加”或“砍”。如果出现 <code>溢出</code>，说明付费可能带动自然流量或自然 GMV；如果同时花费高，就要判断这笔花费是否真的带来自然放大，而不是低效消耗。</td></tr>
+            <tr><th>运营处理</th><td>先拆两层看：第一，看整体 ROI、自然 GMV 占比、加购成本；第二，到渠道分析看钱花在哪个渠道。若自然带动强且库存/退款正常，保持或小幅加；若只是高花费堆出来，先优化渠道结构。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>案例四：宝贝ID 1056867435666，渠道投产必须看单渠道，不看全渠道</h3>
+        <table>
+          <tbody>
+            <tr><th>训练现象</th><td>搜索 <code>1056867435666</code>，这是渠道分析口径修正时使用过的样例。7日窗里，人群花费约 88.75、归因成交约 379.80、渠道投产约 4.28；关键词花费约 159.40、归因成交约 359.90、渠道投产约 2.26。</td></tr>
+            <tr><th>为什么重要</th><td>过去如果直接用全渠道 <code>推广投产</code>，关键词和人群可能显示同一个 ROI，运营会误以为两个渠道效率一样。现在必须看 <code>渠道成交 ÷ 渠道花费</code> 得到各渠道自己的投产。</td></tr>
+            <tr><th>运营处理</th><td>预算不要按商品整体 ROI 一把梭。人群、人群包、关键词、全站分别看：高效渠道加，低效渠道优化或控。渠道花费低于 50 时，工具会直接显示 <code>花费&lt;50</code>，表示样本太小，不做强判断。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>案例五：宝贝ID 932192042609，GMV 高不等于一定继续加预算</h3>
+        <table>
+          <tbody>
+            <tr><th>训练现象</th><td><code>932192042609</code> 也曾作为真实单日总账/单品抽查样例出现，属于运营容易优先关注的高表现商品。</td></tr>
+            <tr><th>为什么不能只看 GMV</th><td>GMV 高说明规模大，但推广动作还要看花费、ROI、渠道投产、库存、退款和 v9.3/MetoX 是否同向。高 GMV 如果靠低效花费堆出来，继续加预算可能放大亏损。</td></tr>
+            <tr><th>运营处理</th><td>高 GMV 商品的标准流程是：先看 <code>链接投产</code> 和 <code>推广投产</code>，再拆渠道，看风险标签和库存，最后决定“继续放量、保护持有、优化渠道、还是控制预算”。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>冲突处理优先级</h3>
+        <ol>
+          <li><span class="bad">风险拦截优先：</span>缺货、高退款、明显亏损先处理。</li>
+          <li><span class="ok">共同命中优先：</span>v9.3 与 MetoX 同向，可信度更高。</li>
+          <li><span class="warn">原因字段优先：</span>标签冲突时，读 MetoX算法原因和最近周期数据。</li>
+          <li><span class="purple">渠道拆分优先：</span>不要因为商品整体强就所有渠道一起加。</li>
+          <li><span class="ok">小步验证优先：</span>冲突但有潜力时，先小预算试探，次日复盘。</li>
+        </ol>
+      </section>
+
+      <section id="checklist" class="card">
+        <h2>10. 新运营上手清单</h2>
+        <div class="grid">
+          <div class="mini">
+            <h3>第 1 天：能打开、能出表</h3>
+            <ul class="checklist">
+              <li>能解压并启动工具。</li>
+              <li>知道数据根目录、日期、周期怎么选。</li>
+              <li>能加载 7 天数据并看到执行表。</li>
+              <li>能生成执行表 Excel。</li>
+            </ul>
+          </div>
+          <div class="mini">
+            <h3>第 2 天：能看懂字段</h3>
+            <ul class="checklist">
+              <li>能解释 GMV、付费、推广投产、链接投产。</li>
+              <li>能解释 36宫格的流量定位和价值定位。</li>
+              <li>能区分 v9.3信号 和 MetoX算法。</li>
+              <li>能读懂 MetoX算法原因。</li>
+            </ul>
+          </div>
+          <div class="mini">
+            <h3>第 3 天：能做动作</h3>
+            <ul class="checklist">
+              <li>能筛出加预算/爆发/近3日潜力商品。</li>
+              <li>能先排除高退款和缺货商品。</li>
+              <li>能按渠道判断加投或控预算。</li>
+              <li>能写清楚运营备注。</li>
+            </ul>
+          </div>
+          <div class="mini">
+            <h3>第 4-7 天：能复盘</h3>
+            <ul class="checklist">
+              <li>能对比昨天操作后的 GMV、花费、ROI、加购。</li>
+              <li>能识别误判：样本小、库存断、退款高、渠道错配。</li>
+              <li>能总结哪些标签对自己店铺最有效。</li>
+              <li>能形成每日固定动作表。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="faq" class="card">
+        <h2>11. 常见问题</h2>
+        <h3>为什么执行表里 v9.3信号为空？</h3>
+        <p>通常是日报还没生成、路径没匹配、或该商品没有进入 v9.3 信号池。MetoX 是内置算法，所以即使 v9.3 为空，MetoX 也可能有结果。</p>
+        <h3>MetoX算法分是不是命中率？</h3>
+        <p>不是。它是规则强度分，用来辅助排序。分高代表信号更强或更值得关注，负分代表风险或削减倾向。</p>
+        <h3>推广加购是总加购还是直接加购？</h3>
+        <p>MetoX 内置算法里的推广加购来自无界推广归因字段，优先使用推广总加购/加购人数等可用字段汇总，不等同于商品主表的全店商品加购件数。</p>
+        <h3>新电脑打不开共享盘怎么办？</h3>
+        <p>先在资源管理器打开 <code>\\10.1.22.253\天猫mark</code> 并输入凭据。无法访问共享盘时，可以把数据文件放到本地目录，再在左侧路径里改成本地目录。</p>
+        <h3>什么时候应该人工覆盖工具建议？</h3>
+        <p>高退款、缺货、价格异常、活动机制变化、直播/达人带来的异常流量、样本太小等情况，都需要人工判断覆盖工具建议。</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

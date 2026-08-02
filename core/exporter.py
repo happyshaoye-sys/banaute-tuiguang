@@ -77,7 +77,7 @@ def export_all_sheets(df):
 
         # 8. 库存
         if '在仓库存' in df.columns:
-            inv_cols = [c for c in ['宝贝ID','商品名称','在仓库存','在途','商品访客数','GMV','付费','综合等级','风险标签'] if c in df.columns]
+            inv_cols = [c for c in ['宝贝ID','货号','商品名称','在仓库存','在途','商品访客数','GMV','付费','综合等级','风险标签'] if c in df.columns]
             if inv_cols:
                 inv = df[(df['在仓库存'] > 50) | (df['在仓库存'] == 0)].sort_values('在仓库存', ascending=False)[inv_cols]
                 inv.to_excel(writer, sheet_name='库存动作', index=False)

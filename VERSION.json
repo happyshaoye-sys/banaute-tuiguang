@@ -1,11 +1,14 @@
 {
   "product": "MetoX",
-  "version": "2.2",
+  "version": "2.3",
   "release_date": "2026-08-02",
   "external_strategy_version": "v9.3",
   "rule_versions": {
     "refund_risk": "2026-08-02",
     "startup_launcher": "2026-08-02",
-    "runtime_packaging": "2026-08-02"
+    "runtime_packaging": "2026-08-02",
+    "sidebar_layout": "2026-08-02",
+    "inventory_action_columns": "2026-08-02",
+    "ai_operating_daily_report": "2026-08-02"
   }
 }

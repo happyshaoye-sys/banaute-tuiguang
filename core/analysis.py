@@ -1,4 +1,6 @@
 ﻿"""分析函数：KPI、品类、渠道、库存"""
+import re
+
 import pandas as pd
 import numpy as np
 from .schema import safe_div, to_num
@@ -51,6 +53,272 @@ def calc_kpi_mom_percent(current_kpis, previous_kpis):
             2,
         )
         for key in KPI_MOM_KEYS
+    }
+
+
+REPORT_CHANNELS = ('关键词', '人群', '全站')
+REPORT_PERIOD_LABELS = {
+    '当日': '当日 vs 前一日',
+    '3天': '近3天 vs 前3天',
+    '7天': '近7天 vs 前7天',
+    '15天': '近15天 vs 前15天',
+}
+
+
+def _report_number_sum(df, col):
+    if df is None or len(df) == 0 or col not in df.columns:
+        return 0.0
+    return float(pd.to_numeric(df[col], errors='coerce').fillna(0.0).sum())
+
+
+def _first_report_label(values):
+    for value in values:
+        text = str(value or '').strip()
+        if text and text not in ('nan', 'None'):
+            return text
+    return ''
+
+
+def _product_report_frame(df, label_col=None):
+    columns = ['_pid', 'gmv'] + (['label'] if label_col else [])
+    if df is None or len(df) == 0 or '宝贝ID' not in df.columns:
+        return pd.DataFrame(columns=columns)
+
+    work = pd.DataFrame({
+        '_pid': df['宝贝ID'].astype(str).str.strip().str.replace(r'\.0$', '', regex=True),
+        'gmv': pd.to_numeric(df['GMV'], errors='coerce').fillna(0.0)
+               if 'GMV' in df.columns else 0.0,
+    })
+    work = work[work['_pid'].ne('') & work['_pid'].ne('nan')]
+    agg = {'gmv': 'sum'}
+    if label_col:
+        work['label'] = df[label_col].fillna('').astype(str).str.strip() \
+            if label_col in df.columns else ''
+        agg['label'] = _first_report_label
+    return work.groupby('_pid', as_index=False).agg(agg)
+
+
+def _rank_report_deltas(rows):
+    positive = sorted((row.copy() for row in rows if row['delta'] > 0),
+                      key=lambda row: row['delta'], reverse=True)
+    negative = sorted((row.copy() for row in rows if row['delta'] < 0),
+                      key=lambda row: row['delta'])
+    positive_total = sum(row['delta'] for row in positive)
+    negative_total = sum(abs(row['delta']) for row in negative)
+    for row in positive:
+        row['direction_share'] = safe_div(row['delta'], positive_total)
+    for row in negative:
+        row['direction_share'] = safe_div(abs(row['delta']), negative_total)
+    return {
+        'all': rows,
+        'growth': positive[0] if positive else None,
+        'decline': negative[0] if negative else None,
+        'positive_total': positive_total,
+        'negative_total': negative_total,
+    }
+
+
+def _grade_report_deltas(current_df, previous_df):
+    current = _product_report_frame(current_df, '综合等级').rename(
+        columns={'gmv': 'current_gmv'}
+    )
+    previous = _product_report_frame(previous_df).rename(
+        columns={'gmv': 'previous_gmv'}
+    )
+    merged = current.merge(previous, on='_pid', how='outer', indicator=True)
+    if merged.empty:
+        return _rank_report_deltas([])
+    merged['current_gmv'] = merged['current_gmv'].fillna(0.0)
+    merged['previous_gmv'] = merged['previous_gmv'].fillna(0.0)
+    if 'label' not in merged.columns:
+        merged['label'] = ''
+    merged['label'] = merged['label'].fillna('').astype(str).str.strip()
+    merged.loc[merged['_merge'].eq('right_only'), 'label'] = '流失商品'
+    merged.loc[merged['label'].eq(''), 'label'] = '未分级'
+    merged['delta'] = merged['current_gmv'] - merged['previous_gmv']
+    grouped = merged.groupby('label', as_index=False).agg(
+        current=('current_gmv', 'sum'),
+        previous=('previous_gmv', 'sum'),
+        delta=('delta', 'sum'),
+    )
+    return _rank_report_deltas(grouped.to_dict('records'))
+
+
+def _category_report_rows(current_df, previous_df):
+    def _totals(frame, prefix):
+        if frame is None or len(frame) == 0:
+            return pd.DataFrame(columns=['label', f'{prefix}_gmv', f'{prefix}_spend'])
+        label = frame['淘宝类目'].fillna('').astype(str).str.strip() \
+            if '淘宝类目' in frame.columns else pd.Series('', index=frame.index)
+        work = pd.DataFrame({
+            'label': label.replace({'': '未分类', 'nan': '未分类', 'None': '未分类'}),
+            f'{prefix}_gmv': pd.to_numeric(frame['GMV'], errors='coerce').fillna(0.0)
+                            if 'GMV' in frame.columns else 0.0,
+            f'{prefix}_spend': pd.to_numeric(frame['付费'], errors='coerce').fillna(0.0)
+                              if '付费' in frame.columns else 0.0,
+        })
+        return work.groupby('label', as_index=False).sum(numeric_only=True)
+
+    current = _totals(current_df, 'current')
+    previous = _totals(previous_df, 'previous')
+    merged = current.merge(previous, on='label', how='outer').fillna(0.0)
+    rows = []
+    for _, row in merged.iterrows():
+        current_gmv = float(row['current_gmv'])
+        previous_gmv = float(row['previous_gmv'])
+        current_spend = float(row['current_spend'])
+        previous_spend = float(row['previous_spend'])
+        current_roi = safe_div(current_gmv, current_spend)
+        previous_roi = safe_div(previous_gmv, previous_spend)
+        rows.append({
+            'label': row['label'],
+            'current': current_gmv,
+            'previous': previous_gmv,
+            'delta': current_gmv - previous_gmv,
+            'current_spend': current_spend,
+            'previous_spend': previous_spend,
+            'current_roi': current_roi,
+            'previous_roi': previous_roi,
+            'roi_delta': current_roi - previous_roi,
+        })
+    return rows
+
+
+def _report_completeness(period_log):
+    if not period_log:
+        return 'unknown', '未取得周期完整性记录'
+    completeness = str(period_log.get('完整性', '') or '').strip()
+    pairs = re.findall(r'(\d+)\s*/\s*(\d+)', completeness)
+    status = 'complete' if len(pairs) >= 2 and all(
+        int(actual) == int(expected) for actual, expected in pairs[:2]
+    ) else 'incomplete'
+    missing = str(period_log.get('缺失日期', '') or '').strip()
+    message = completeness
+    if status != 'complete' and missing:
+        message = f'{message}；{missing}' if message else missing
+    return status, message or '周期完整性未知'
+
+
+def _report_money(value, signed=False):
+    number = float(value or 0.0)
+    sign = '+' if signed and number > 0 else ('-' if number < 0 else '')
+    amount = abs(number)
+    if amount >= 10000:
+        return f'{sign}¥{amount / 10000:.2f}万'
+    return f'{sign}¥{amount:,.0f}'
+
+
+def _report_rate(current, previous):
+    current = float(current or 0.0)
+    previous = float(previous or 0.0)
+    if previous == 0:
+        return '新增' if current > 0 else '持平'
+    return f'{safe_div(current - previous, previous):+.1%}'
+
+
+def _report_movement_line(ranked):
+    parts = []
+    growth = ranked.get('growth')
+    decline = ranked.get('decline')
+    if growth:
+        parts.append(
+            f"增长集中在{growth['label']} {_report_money(growth['delta'], signed=True)}"
+            f"（占正向变化{growth['direction_share']:.0%}）"
+        )
+    if decline:
+        parts.append(
+            f"主要拖累{decline['label']} {_report_money(decline['delta'], signed=True)}"
+            f"（占负向变化{decline['direction_share']:.0%}）"
+        )
+    return '；'.join(parts) if parts else '无明显增长或下滑项'
+
+
+def build_operating_daily_report(current_df, previous_df, period_choice='当日', period_log=None,
+                                 risk_spend_floor=100.0):
+    """生成可对账的本地经营日报，不读文件、不调用外部 AI 服务。"""
+    current_gmv = _report_number_sum(current_df, 'GMV')
+    previous_gmv = _report_number_sum(previous_df, 'GMV')
+    current_spend = _report_number_sum(current_df, '付费')
+    previous_spend = _report_number_sum(previous_df, '付费')
+    current_roi = safe_div(current_gmv, current_spend)
+    previous_roi = safe_div(previous_gmv, previous_spend)
+
+    grades = _grade_report_deltas(current_df, previous_df)
+    category_rows = _category_report_rows(current_df, previous_df)
+    categories = _rank_report_deltas(category_rows)
+
+    channels = []
+    for channel in REPORT_CHANNELS:
+        current_attr = _report_number_sum(current_df, f'{channel}归因成交')
+        previous_attr = _report_number_sum(previous_df, f'{channel}归因成交')
+        current_channel_spend = _report_number_sum(current_df, channel)
+        previous_channel_spend = _report_number_sum(previous_df, channel)
+        channels.append({
+            'name': channel,
+            'current_attributed_sales': current_attr,
+            'previous_attributed_sales': previous_attr,
+            'attributed_sales_delta': current_attr - previous_attr,
+            'current_spend': current_channel_spend,
+            'previous_spend': previous_channel_spend,
+            'spend_delta': current_channel_spend - previous_channel_spend,
+        })
+
+    risk_candidates = [
+        row for row in category_rows
+        if row['current_spend'] >= float(risk_spend_floor)
+        and row['previous_spend'] > 0
+        and row['roi_delta'] < 0
+    ]
+    roi_risk = min(risk_candidates, key=lambda row: row['roi_delta']) \
+        if risk_candidates else None
+
+    status, completeness = _report_completeness(period_log)
+    overview = {
+        'current_gmv': current_gmv,
+        'previous_gmv': previous_gmv,
+        'gmv_delta': current_gmv - previous_gmv,
+        'gmv_change_label': _report_rate(current_gmv, previous_gmv),
+        'current_spend': current_spend,
+        'previous_spend': previous_spend,
+        'spend_delta': current_spend - previous_spend,
+        'spend_change_label': _report_rate(current_spend, previous_spend),
+        'current_roi': current_roi,
+        'previous_roi': previous_roi,
+        'roi_delta': current_roi - previous_roi,
+    }
+
+    channel_line = '；'.join(
+        f"{row['name']}归因{_report_money(row['attributed_sales_delta'], signed=True)}"
+        f"/花费{_report_money(row['spend_delta'], signed=True)}"
+        for row in channels
+    )
+    risk_line = (
+        f"{roi_risk['label']} ROI {roi_risk['previous_roi']:.2f}→{roi_risk['current_roi']:.2f}"
+        f"（{roi_risk['roi_delta']:+.2f}），本期付费{_report_money(roi_risk['current_spend'])}"
+        if roi_risk else f'暂无本期付费≥{risk_spend_floor:.0f}元且ROI下滑的品类'
+    )
+    lines = {
+        '总览': (
+            f"GMV {_report_money(overview['gmv_delta'], signed=True)}"
+            f"（{overview['gmv_change_label']}），花费{_report_money(overview['spend_delta'], signed=True)}"
+            f"（{overview['spend_change_label']}），ROI {previous_roi:.2f}→{current_roi:.2f}"
+            f"（{overview['roi_delta']:+.2f}）"
+        ),
+        '等级': _report_movement_line(grades),
+        '品类': _report_movement_line(categories),
+        '渠道': channel_line,
+        '风险': risk_line,
+    }
+    return {
+        'status': status,
+        'completeness': completeness,
+        'period_scope': REPORT_PERIOD_LABELS.get(period_choice, str(period_choice)),
+        'overview': overview,
+        'grades': grades,
+        'categories': categories,
+        'channels': channels,
+        'roi_risk': roi_risk,
+        'lines': lines,
     }
 
 
@@ -379,7 +647,7 @@ def inventory_actions(df):
     hi = df[(df['在仓库存'] > 50) & (df['商品访客数'] < 20)].sort_values('在仓库存', ascending=False).head(200) if (has_stock and has_vis) else pd.DataFrame()
     no = df[(df['在仓库存'] == 0) & (df['在途'] == 0) & (df['付费'] > 0)].head(200) if (has_stock and has_transit and has_spend) else pd.DataFrame()
     def _fmt(sub):
-        return [{'宝贝ID': r['宝贝ID'], '商品名称': r.get('商品名称',''), '在仓库存': int(r.get('在仓库存',0)),
+        return [{'宝贝ID': r['宝贝ID'], '货号': r.get('货号',''), '商品名称': r.get('商品名称',''), '在仓库存': int(r.get('在仓库存',0)),
                  '在途': int(r.get('在途',0)), '商品访客数': int(r.get('商品访客数',0)),
                  'GMV': float(r.get('GMV',0)), '付费': float(r.get('付费',0)), '综合等级': r.get('综合等级','')}
                 for _, r in sub.iterrows()]
