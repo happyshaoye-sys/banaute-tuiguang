@@ -1,4 +1,4 @@
-"""分析函数：KPI、品类、渠道、库存"""
+﻿"""分析函数：KPI、品类、渠道、库存"""
 import pandas as pd
 import numpy as np
 from .schema import safe_div, to_num
@@ -110,10 +110,10 @@ def segment_summary(df):
             sig_map[keys] = ' | '.join(
                 f'{lbl}×{n}' for lbl, n in
                 sorted(label_cnt.items(), key=lambda x: (-x[1], x[0])))
-    if 'v9.3算法命中' in df.columns:
+    if 'MetoX算法命中' in df.columns:
         for keys, sub in df.groupby(group_keys):
             label_cnt = {}
-            for v in sub['v9.3算法命中'].dropna():
+            for v in sub['MetoX算法命中'].dropna():
                 for lbl in str(v).split('|'):
                     lbl = lbl.strip()
                     if lbl:
@@ -131,7 +131,7 @@ def segment_summary(df):
             '对应操作': r['对应操作'], '操作建议': act['action'],
             '预算建议': act['budget'], '关注重点': act['focus'],
             'v9.3信号': sig_map.get(tuple(r[k] for k in group_keys), ''),
-            'v9.3算法命中': builtin_sig_map.get(tuple(r[k] for k in group_keys), ''),
+            'MetoX算法命中': builtin_sig_map.get(tuple(r[k] for k in group_keys), ''),
             '商品数': int(r['cnt']), 'GMV': float(r['gmv']),
             '付费': round(float(r['spend']), 2),
         })
@@ -238,9 +238,9 @@ def category_analysis(df, cat_ctx=None):
 
 
 def refund_risk(df):
-    """退款风险（聚水潭cohort退款率>40%,与「⚠高退款」阈值对齐）"""
+    """退款风险（聚水潭cohort退款率>70%,与「⚠高退款」和 Excel 退款风险阈值对齐）"""
     if '退款率' not in df.columns: return []
-    sub = df[df['退款率'] > 0.4].sort_values('退款率', ascending=False).head(500)
+    sub = df[df['退款率'] > 0.7].sort_values('退款率', ascending=False).head(500)
     return [{'宝贝ID': r['宝贝ID'], '商品名称': r.get('商品名称',''), '淘宝类目': r.get('淘宝类目',''),
              'GMV': float(r.get('GMV',0)), '成功退款金额': float(r.get('成功退款金额',0)),
              '退款率': f'{float(r.get("退款率",0))*100:.1f}%', '付费': float(r.get('付费',0)),
@@ -255,18 +255,118 @@ def channel_top(df, col, n=30):
     GMV 仍为全链接口径,仅作规模参考,不参与该行 ROI。"""
     sub = _f(df, col).sort_values(col, ascending=False).head(n)
     attr_col = f'{col}归因成交'
+    channel_spend_total = _s(df, col)
+    channel_attr_total = _s(df, attr_col)
+    channel_base_roi = safe_div(channel_attr_total, channel_spend_total)
     rows = []
     for _, r in sub.iterrows():
         ch_spend = to_num(r.get(col, 0))
         ch_attr = to_num(r.get(attr_col, 0))
+        ch_roi = safe_div(ch_attr, ch_spend)
+        decision = _channel_decision(r, ch_spend, ch_attr, ch_roi, channel_base_roi)
         rows.append({
             '宝贝ID': r['宝贝ID'], '商品名称': r.get('商品名称', ''),
             '渠道花费': ch_spend, '渠道成交': round(ch_attr, 2),
-            '渠道投产': f'{safe_div(ch_attr, ch_spend):.2f}',
+            '渠道投产': f'{ch_roi:.2f}',
+            '渠道基准投产': f'{channel_base_roi:.2f}',
+            '渠道效率倍数': f'{safe_div(ch_roi, channel_base_roi):.2f}' if channel_base_roi else '',
+            '渠道判断': decision['judge'],
+            '渠道动作': decision['action'],
+            '渠道预算建议': decision['budget'],
+            '渠道判断原因': decision['reason'],
             'GMV': float(r.get('GMV', 0)),
             '综合等级': r.get('综合等级', ''), '对应操作': r.get('对应操作', ''),
         })
     return rows
+
+
+def _channel_decision(row, spend, attr, roi, base_roi):
+    ratio = safe_div(roi, base_roi)
+    labels = str(row.get('MetoX算法命中', '') or '')
+    grade = str(row.get('综合等级', '') or '')
+    op = str(row.get('对应操作', '') or '')
+    risks = str(row.get('风险标签', '') or '')
+    strong_signal = any(x in labels for x in ['爆发', '溢出', '加预算', '明日之星', '近3日潜力', '强主推'])
+    risk_signal = (
+        grade in ('C', 'D')
+        or op in ('观察期', '淘汰', '衰退期', '待优化')
+        or any(x in risks for x in ['缺货', '高退款', '亏损投放', '库存不足'])
+    )
+
+    def _reason(prefix):
+        sig = '强信号' if strong_signal else '无强信号'
+        risk = '有风险' if risk_signal else '无明显风险'
+        return f"{prefix}; 渠道投产{roi:.2f},基准{base_roi:.2f},效率{ratio:.2f}倍,{sig},{risk}"
+
+    if spend < 50:
+        return {
+            'judge': '花费<50',
+            'action': '观察',
+            'budget': '样本不足，不做强判断',
+            'reason': f"渠道花费{spend:.0f}<50，不做强判断",
+        }
+    if attr <= 0 and spend >= 100:
+        return {
+            'judge': '暂停观察',
+            'action': '暂停新增预算',
+            'budget': '停止新增预算，复查定向/素材/出价',
+            'reason': _reason('花费≥100且渠道成交=0'),
+        }
+    if spend < 100:
+        return {
+            'judge': '小额测试',
+            'action': '观察',
+            'budget': '维持小预算，继续观察1-3天',
+            'reason': _reason('50≤渠道花费<100，样本偏小'),
+        }
+    if strong_signal and not risk_signal and ratio >= 1.2:
+        return {
+            'judge': '高效放量',
+            'action': '加预算',
+            'budget': '增加20%-30%',
+            'reason': _reason('商品正向强信号且渠道效率≥1.2倍基准'),
+        }
+    if strong_signal and ratio < 0.9:
+        return {
+            'judge': '低效优化',
+            'action': '优化渠道',
+            'budget': '不加预算，先优化关键词/人群/出价/素材',
+            'reason': _reason('商品有强信号但该渠道效率低于0.9倍基准'),
+        }
+    if risk_signal and ratio >= 1.2:
+        return {
+            'judge': '小额保留',
+            'action': '谨慎维持',
+            'budget': '不放大，先处理商品风险',
+            'reason': _reason('渠道高效但商品分层或风险标签不支持放量'),
+        }
+    if ratio >= 1.2:
+        return {
+            'judge': '有效维持',
+            'action': '维持或小幅加预算',
+            'budget': '维持或增加5%-10%',
+            'reason': _reason('渠道效率≥1.2倍基准但缺少商品强信号'),
+        }
+    if ratio >= 0.9:
+        return {
+            'judge': '有效维持',
+            'action': '维持',
+            'budget': '维持预算，观察稳定性',
+            'reason': _reason('渠道效率在0.9-1.2倍基准之间'),
+        }
+    if ratio >= 0.3:
+        return {
+            'judge': '低效优化',
+            'action': '优化渠道',
+            'budget': '不加预算，先优化渠道结构',
+            'reason': _reason('渠道效率在0.3-0.9倍基准之间'),
+        }
+    return {
+        'judge': '控投止损',
+        'action': '控投或暂停',
+        'budget': '降低20%-50%',
+        'reason': _reason('渠道效率<0.3倍基准'),
+    }
 
 
 def inventory_actions(df):

@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-"""Built-in v9.3-style threshold labels for the execution table.
+﻿# -*- coding: utf-8 -*-
+"""Built-in MetoX-style threshold labels for the execution table.
 
 This module intentionally does not import daily_review_v9.3.py.  The offline
 tool owns execution-table fields, so this layer recreates the four business
@@ -21,19 +21,19 @@ GMV = "GMV"
 AD_GMV = "推广成交金额"
 AD_CARTS = "推广加购数"
 AD_VISITORS = "推广访客数"
-V93_SPEND = "v9.3推广花费"
-V93_AD_GMV = "v9.3推广成交金额"
-V93_AD_CARTS = "v9.3推广加购数"
-V93_AD_VISITORS = "v9.3推广访客数"
+METOX_SPEND = "MetoX推广花费"
+METOX_AD_GMV = "MetoX推广成交金额"
+METOX_AD_CARTS = "MetoX推广加购数"
+METOX_AD_VISITORS = "MetoX推广访客数"
 SPEND = "付费"
 VISITORS = "商品访客数"
 CARTS = "商品加购件数"
 PRICE = "件单价"
 DETAIL = "推广明细"
 
-OUT_LABELS = "v9.3算法命中"
-OUT_SCORE = "v9.3算法分"
-OUT_REASON = "v9.3算法原因"
+OUT_LABELS = "MetoX算法命中"
+OUT_SCORE = "MetoX算法分"
+OUT_REASON = "MetoX算法原因"
 
 
 FOCUS_GATE = {
@@ -140,8 +140,8 @@ PLAN_ROI_RE = re.compile(r"投产[:：]\s*([0-9.]+)")
 PLAN_CART_RE = re.compile(r"加购[:：]\s*([0-9.]+)")
 
 
-def apply_v93_algorithm(df, day_map=None, date_str=None):
-    """Append built-in v9.3 threshold labels to an execution table.
+def apply_metox_algorithm(df, day_map=None, date_str=None):
+    """Append built-in MetoX threshold labels to an execution table.
 
     `day_map` is the app's existing `{date: (day_df, ...)}` history cache.  When
     it is absent, the function falls back to the current frame and rolling
@@ -268,18 +268,18 @@ class _MetricContext:
             return self._item_cache[pid]
         row = self.current.get(pid, {})
         yd = self.latest.get(pid, row)
-        spend7 = self.sum_preferred(pid, V93_SPEND, SPEND, 7, 0, fallback_col="花费7")
-        spend3 = self.sum_preferred(pid, V93_SPEND, SPEND, 3, 0, fallback_col="花费3")
+        spend7 = self.sum_preferred(pid, METOX_SPEND, SPEND, 7, 0, fallback_col="花费7")
+        spend3 = self.sum_preferred(pid, METOX_SPEND, SPEND, 3, 0, fallback_col="花费3")
         gmv3 = self.sum(pid, GMV, 3, 0)
         prev_gmv3 = self.sum(pid, GMV, 3, 3)
-        spend3_prev = self.sum_preferred(pid, V93_SPEND, SPEND, 3, 3)
+        spend3_prev = self.sum_preferred(pid, METOX_SPEND, SPEND, 3, 3)
         carts7 = self.sum(pid, CARTS, 7, 0)
-        ad_carts7 = self.sum_preferred(pid, V93_AD_CARTS, AD_CARTS, 7, 0)
-        ad_vis7 = self.sum_preferred(pid, V93_AD_VISITORS, AD_VISITORS, 7, 0)
+        ad_carts7 = self.sum_preferred(pid, METOX_AD_CARTS, AD_CARTS, 7, 0)
+        ad_vis7 = self.sum_preferred(pid, METOX_AD_VISITORS, AD_VISITORS, 7, 0)
         yd_vis = _num(_val(yd, VISITORS, _val(row, VISITORS, 0)))
         yd_carts = _num(_val(yd, CARTS, _val(row, CARTS, 0)))
-        yd_ad_vis = self.value_preferred(yd, row, V93_AD_VISITORS, AD_VISITORS)
-        yd_ad_carts = self.value_preferred(yd, row, V93_AD_CARTS, AD_CARTS)
+        yd_ad_vis = self.value_preferred(yd, row, METOX_AD_VISITORS, AD_VISITORS)
+        yd_ad_carts = self.value_preferred(yd, row, METOX_AD_CARTS, AD_CARTS)
         org_vis7 = max(0.0, self.sum(pid, VISITORS, 7, 0) - ad_vis7)
         org_carts7 = max(0.0, carts7 - ad_carts7)
         yd_org_vis = max(0.0, yd_vis - yd_ad_vis)
@@ -287,11 +287,11 @@ class _MetricContext:
         plan_count, best_plan_roi, detail_ad_carts = _parse_plan_detail(_val(row, DETAIL, ""))
         if ad_carts7 <= 0 and detail_ad_carts > 0:
             ad_carts7 = detail_ad_carts
-        ad_carts3 = self.sum_preferred(pid, V93_AD_CARTS, AD_CARTS, 3, 0)
+        ad_carts3 = self.sum_preferred(pid, METOX_AD_CARTS, AD_CARTS, 3, 0)
         prev_org_carts = max(
             0.0,
             self.avg(pid, CARTS, 3, 1)
-            - self.avg_preferred(pid, V93_AD_CARTS, AD_CARTS, 3, 1),
+            - self.avg_preferred(pid, METOX_AD_CARTS, AD_CARTS, 3, 1),
         )
         price = _num(_val(row, PRICE, _val(yd, PRICE, 0)))
         if price <= 0:
@@ -306,7 +306,7 @@ class _MetricContext:
             "yd_org_vis": yd_org_vis,
             "yd_org_carts": yd_org_carts,
             "yd_rate": _safe_div(yd_org_carts, yd_org_vis),
-            "yd_spend": self.value_preferred(yd, row, V93_SPEND, SPEND),
+            "yd_spend": self.value_preferred(yd, row, METOX_SPEND, SPEND),
             "yd_gmv": _num(_val(yd, GMV, _val(row, GMV, 0))),
             "vis_7d": self.sum(pid, VISITORS, 7, 0),
             "org_vis_7d": org_vis7,
@@ -314,7 +314,7 @@ class _MetricContext:
             "carts_7d": carts7,
             "gmv_7d": self.sum(pid, GMV, 7, 0),
             "spend_7d": spend7,
-            "ad_gmv_7d": self.sum_preferred(pid, V93_AD_GMV, AD_GMV, 7, 0),
+            "ad_gmv_7d": self.sum_preferred(pid, METOX_AD_GMV, AD_GMV, 7, 0),
             "ad_carts_7d": ad_carts7,
             "vis_3d": self.sum(pid, VISITORS, 3, 0),
             "carts_3d": self.sum(pid, CARTS, 3, 0),
@@ -329,7 +329,7 @@ class _MetricContext:
             "baseline_org_carts": prev_org_carts,
             "active_plan_count": plan_count if plan_count > 0 else int(_num(_val(row, SPEND, 0)) > 0),
             "best_plan_roi": best_plan_roi,
-            "has_plan": self.value_preferred(row, row, V93_SPEND, SPEND) > 0 or str(_val(row, DETAIL, "")).strip() != "",
+            "has_plan": self.value_preferred(row, row, METOX_SPEND, SPEND) > 0 or str(_val(row, DETAIL, "")).strip() != "",
         }
         self._item_cache[pid] = item
         return item
@@ -564,7 +564,7 @@ class _ThresholdContext:
 
 def _loss_hole_context(ctx, pids):
     latest = _latest_frame(ctx.current_frame(), ctx.day_map, ctx.date_str)
-    spend = _frame_sum_preferred(latest, V93_SPEND, SPEND)
+    spend = _frame_sum_preferred(latest, METOX_SPEND, SPEND)
     gmv = _frame_sum(latest, GMV)
     return {"store_roi": _safe_div(gmv, spend)}
 
@@ -689,7 +689,7 @@ def _store_roi_basis(ctx, pids):
         frame = _day_frame(ctx.day_map, day)
         if frame is None or GMV not in frame.columns:
             continue
-        spend = _frame_sum_preferred(frame, V93_SPEND, SPEND)
+        spend = _frame_sum_preferred(frame, METOX_SPEND, SPEND)
         gmv = float(pd.to_numeric(frame[GMV], errors="coerce").fillna(0.0).sum())
         if spend > 0:
             rois.append(gmv / spend)

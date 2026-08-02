@@ -163,7 +163,6 @@ def _untracked_files(repo: Path) -> Iterable[str]:
 
 
 def _stage_code_changes(repo: Path) -> None:
-    # 已跟踪文件的修改/删除可安全纳入；新增文件仅纳入代码和项目配置白名单。
     _run_git(repo, "add", "-u", "--", ".")
     safe_new_files = [path for path in _untracked_files(repo) if _safe_new_file(path)]
     if safe_new_files:
@@ -174,7 +173,7 @@ def save_version(
     repo: str | Path,
     note: str,
     push: bool = True,
-    project_name: str = "半自动推广工具",
+    project_name: str = "MetoX",
     change_kind: str = "minor",
 ) -> GitActionResult:
     repo_path = Path(repo).resolve()

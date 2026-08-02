@@ -1,0 +1,29 @@
+name: release-check
+
+on:
+  push:
+    branches: [main, "release/**"]
+    tags: ["MetoX*"]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run tests
+        run: python -m unittest discover -p "test_*.py"
+      - name: Run business regressions
+        run: |
+          python _regression_metox_algorithm.py
+          python _regression_export_period.py
+          python 自检_造数套件.py
+      - name: Enforce release contract
+        run: python scripts/release_check.py

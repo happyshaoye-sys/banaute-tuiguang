@@ -1,4 +1,4 @@
-"""半自动推广工具 v4.1 — Streamlit 版"""
+"""MetoX 半自动推广工具 — Streamlit 版。"""
 from __future__ import annotations
 
 import os, re, time, io, json, shutil, tempfile, hashlib
@@ -25,21 +25,20 @@ from core.analysis import (
 )
 from core.acceptance import build_source_status
 from core.v93_signal import parse_v93_report
-from core.v93_algorithm import apply_v93_algorithm
+from core.metox_algorithm import apply_metox_algorithm
 from core.jst_stock import find_snapshot, load_snapshot_as_stock
 from core.jst_refund import find_refund_snapshot, load_refund_rates
 from core.exporter import export_execution_table, export_all_sheets, style_execution_table
 from core.version_control import find_repository, get_status, next_version_name, save_version
+from core.version import APP_VERSION, DISPLAY_VERSION, PRODUCT_NAME
 from core.schema import (
     ALLOWED_SOURCE_TYPES, SOURCE_PRODUCT_INFO, SOURCE_PRODUCT_ROI, SOURCE_STOCK,
     SOURCE_WUJIE_SUBJECT, classify_file, EXPORT_COLS, ACTION_RULES, compute_bounds,
 )
 
-APP_VERSION = "4.1"
-
-st.set_page_config(page_title=f"半自动推广工具 v{APP_VERSION}", layout="wide")
-st.title(f"半自动推广工具 v{APP_VERSION}")
-GIT_PROJECT_NAME = "半自动推广工具"
+st.set_page_config(page_title=f"{DISPLAY_VERSION} 半自动推广工具", layout="wide")
+st.title(f"{DISPLAY_VERSION} 半自动推广工具")
+GIT_PROJECT_NAME = PRODUCT_NAME
 
 # ── 初始化 Session State ─────────────────────────────────
 for key in ['df','prev_df','kpis','prev_kpis','kpi_mom','plan_ids','prev_plan_ids','cur_date','prev_date',
@@ -343,6 +342,7 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
             jst_refund_entry = (f"聚水潭退款率_{refund_date}(30日cohort)", jr_df)
             jst_refund_note = None if refund_date == date_str else \
                 f"⚠️ 聚水潭退款率缺 {date_str},已回退使用 {refund_date}"
+
             _log_time(timings, "聚水潭退款率加载", t0,
                       f"{refund_date} {len(jr_df)} 链接")
         else:
@@ -451,8 +451,8 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
     df = apply_rolling_daily_metrics(df, day_map, date_str)
     _log_time(timings, "滚动日销花费计算", t_step, "3/7/15 天")
     t_step = time.perf_counter()
-    df = apply_v93_algorithm(df, day_map, date_str)
-    _log_time(timings, "v9.3算法打标", t_step, f"{len(df)} 行")
+    df = apply_metox_algorithm(df, day_map, date_str)
+    _log_time(timings, "MetoX算法打标", t_step, f"{len(df)} 行")
     # 链接数:当前表内同一货号(款式)的链接个数——多链接共享同一款式库存池,
     # 该列标出分流规模;货号为空的行留空(无法判定款式归属)
     t_step = time.perf_counter()
@@ -465,7 +465,7 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
         p_sel = periods[sel_label]
         df['统计日期'] = f"{p_sel['current_start']}~{p_sel['current_end']}"
     _log_time(timings, "链接数/日期整理", t_step, f"{len(df)} 行")
-    _log_time(timings, "周期环比+滚动+v9.3合计", t0, f"{len(comparisons)} 个周期")
+    _log_time(timings, "周期环比+滚动+MetoX合计", t0, f"{len(comparisons)} 个周期")
     _log_time(timings, "总计", t_total, f"{len(day_map)} 天数据")
 
     if jst_note:
@@ -561,6 +561,35 @@ CACHE_RESULT_DIR = APP_DIR / "cache_result"
 COLUMN_PREFS_PATH = CACHE_DIR / "column_prefs.json"
 
 
+_LEGACY_METOX_PREFIX = "v" + "9" + "." + "3"
+DISPLAY_RENAME_MAP = {
+    "MetoX" + "信号": "v9.3信号",
+    f"{_LEGACY_METOX_PREFIX}算法命中": "MetoX算法命中",
+    f"{_LEGACY_METOX_PREFIX}算法分": "MetoX算法分",
+    f"{_LEGACY_METOX_PREFIX}算法原因": "MetoX算法原因",
+    f"{_LEGACY_METOX_PREFIX}推广花费": "MetoX推广花费",
+    f"{_LEGACY_METOX_PREFIX}推广成交金额": "MetoX推广成交金额",
+    f"{_LEGACY_METOX_PREFIX}推广加购数": "MetoX推广加购数",
+    f"{_LEGACY_METOX_PREFIX}推广访客数": "MetoX推广访客数",
+}
+
+
+def _normalize_display_columns(obj):
+    """兼容旧会话/旧列偏好:区分外部 v9.3 信号与内置 MetoX 算法。"""
+    if obj is None:
+        return obj
+    if isinstance(obj, pd.DataFrame):
+        rename = {old: new for old, new in DISPLAY_RENAME_MAP.items() if old in obj.columns}
+        out = obj.rename(columns=rename) if rename else obj
+        if "v9.3信号" not in out.columns:
+            out = out.copy()
+            out["v9.3信号"] = ""
+        return out
+    if isinstance(obj, list):
+        return [DISPLAY_RENAME_MAP.get(c, c) for c in obj]
+    return obj
+
+
 def _first_existing_dir(*candidates):
     """依次返回第一个存在的目录;都不存在返回空串(UI侧留空即跳过该数据源)。"""
     for cand in candidates:
@@ -577,16 +606,25 @@ def _first_existing_dir(*candidates):
 # 快照 CSV 由开发机经聚水潭数据库预先导出,工具运行时只读文件、无需联库/令牌
 _JST_PORTABLE = APP_DIR / "聚水潭"
 _JST_DEV = r"e:\08-推广\天猫运营方法论\聚水潭"
+_JST_MARK0706 = Path(r"\\10.1.22.253\天猫mark\mark0706啊\聚水潭")
 _JST_SHARE = r"\\10.1.22.253\天猫mark\聚水潭"
 DEFAULT_JST_SNAP_DIR = _first_existing_dir(
+    _JST_MARK0706 / "库存快照",
     _JST_PORTABLE / "库存快照",
     os.path.join(_JST_DEV, "库存快照"),
     os.path.join(_JST_SHARE, "库存快照"))
 DEFAULT_JST_REFUND_DIR = _first_existing_dir(
+    _JST_MARK0706 / "退款率快照",
+    _JST_PORTABLE / "退款率快照",
     _JST_PORTABLE / "退款率",
     os.path.join(_JST_DEV, "退款率"),
     os.path.join(_JST_SHARE, "退款率"))
-DEFAULT_JST_PRODUCT_DIR = _first_existing_dir(_JST_PORTABLE, _JST_DEV, _JST_SHARE)
+# 店铺商品资料由 NAS 每日生成；优先读取共享盘最新映射，随运行日自动更新。
+DEFAULT_JST_PRODUCT_DIR = _first_existing_dir(
+    _JST_MARK0706,
+    _JST_PORTABLE,
+    _JST_DEV,
+    _JST_SHARE)
 # v9.3 日报默认目录(共享盘每日复盘;按分析日自动匹配文件名含日期的 txt)
 DEFAULT_V93_DIR = r"\\10.1.22.253\天猫mark\2026\女装店\明日之星-每日数据"
 
@@ -595,6 +633,7 @@ def _load_column_prefs():
     """读执行表列偏好(勾选过的展示列);无文件/损坏/与当前字段全不相交→None(全部列)。"""
     try:
         cols = json.loads(COLUMN_PREFS_PATH.read_text(encoding="utf-8"))
+        cols = _normalize_display_columns(cols)
         cols = [c for c in cols if c in EXPORT_COLS]
         return cols or None
     except Exception:
@@ -605,6 +644,7 @@ def _save_column_prefs(cols):
     """列偏好持久化到 cache/column_prefs.json(EXE 重启后仍生效);写失败不阻断。"""
     try:
         COLUMN_PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        cols = _normalize_display_columns(list(cols))
         COLUMN_PREFS_PATH.write_text(
             json.dumps(list(cols), ensure_ascii=False, indent=1), encoding="utf-8")
     except Exception:
@@ -958,6 +998,7 @@ if st.session_state.get('period_logs'):
     with st.expander("周期环比范围与完整性", expanded=False):
         st.dataframe(pd.DataFrame(st.session_state.period_logs), use_container_width=True, hide_index=True)
 
+st.session_state.df = _normalize_display_columns(st.session_state.df)
 df = st.session_state.df
 kpis = st.session_state.kpis
 kpi_mom = st.session_state.kpi_mom or calc_kpi_mom_percent(kpis, {})
@@ -1044,7 +1085,7 @@ with tab3:
     st.session_state["exec_cols_pref"] = [
         c for c in st.session_state["exec_cols_pref"] if c in all_cols
     ] or all_cols
-    for c in ["v9.3算法命中", "v9.3算法分", "v9.3算法原因"]:
+    for c in ["v9.3信号", "MetoX算法命中", "MetoX算法分", "MetoX算法原因"]:
         if c in all_cols and c not in st.session_state["exec_cols_pref"]:
             st.session_state["exec_cols_pref"].append(c)
 
@@ -1088,7 +1129,7 @@ with tab3:
     search_q = str(search).strip() if search else ""
     if search_q:
         mask = pd.Series(False, index=filtered.index)
-        for col in ['宝贝ID','货号','淘宝类目','商品定位','商品名称','v9.3信号','v9.3算法命中','v9.3算法原因']:
+        for col in ['宝贝ID','货号','淘宝类目','商品定位','商品名称','v9.3信号','MetoX算法命中','MetoX算法原因']:
             if col in filtered.columns:
                 mask |= filtered[col].astype(str).str.contains(
                     search_q, case=False, na=False, regex=False)
@@ -1175,7 +1216,7 @@ with tab5:
 with tab6:
     try:
         ref = refund_risk(df)
-        st.caption(f"退款率>40%(聚水潭30日cohort口径): {len(ref)} 个")
+        st.caption(f"退款率>70%(聚水潭30日cohort口径): {len(ref)} 个")
         if ref:
             st.dataframe(pd.DataFrame(ref), use_container_width=True, hide_index=True, height=500)
     except Exception as e:

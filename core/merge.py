@@ -1,4 +1,4 @@
-"""数据合并管线。"""
+﻿"""数据合并管线。"""
 import pandas as pd
 
 from .schema import (
@@ -20,12 +20,12 @@ SUM_COLS = [
     'GMV', '商品访客数', '支付买家数', '支付件数', '成功退款金额',
     '商品加购件数', '搜索引导访客数',
 ]
-V93_PRODUCT_SUM_COLS = ['v9.3推广成交金额', 'v9.3推广加购数', 'v9.3推广访客数']
-V93_VISITOR_COLS = ['关键词推广访客数', '人群推广访客数', '场景推广访客数']
-V93_CART_PEOPLE_COLS = ['关键词推广加购人数', '人群推广加购人数', '场景推广加购人数']
-V93_CART_COUNT_COLS = ['关键词推广加购数', '人群推广加购数', '场景推广加购数']
+METOX_PRODUCT_SUM_COLS = ['MetoX推广成交金额', 'MetoX推广加购数', 'MetoX推广访客数']
+METOX_VISITOR_COLS = ['关键词推广访客数', '人群推广访客数', '场景推广访客数']
+METOX_CART_PEOPLE_COLS = ['关键词推广加购人数', '人群推广加购人数', '场景推广加购人数']
+METOX_CART_COUNT_COLS = ['关键词推广加购数', '人群推广加购数', '场景推广加购数']
 FIRST_COLS = ['淘宝类目', '统计日期', '商品名称', '创建时间']
-WUJIE_SUM_COLS = ['付费', 'v9.3推广花费', '推广加购数', '直购数量', '直购成本', '展现', '点击']
+WUJIE_SUM_COLS = ['付费', 'MetoX推广花费', '推广加购数', '直购数量', '直购成本', '展现', '点击']
 CHANNEL_COLS = ['关键词', '人群', '全站', '店铺直达']
 # 渠道归因成交(2026-07-11):渠道分析 ROI=渠道归因成交÷渠道花费,与渠道花费同源同口径
 CHANNEL_ATTR_COLS = [f'{ch}归因成交' for ch in CHANNEL_COLS]
@@ -33,7 +33,7 @@ DIM_NUM_COLS = ['在途', '成本价（含税）']
 STOCK_NUM_COLS = ['在仓库存', '在途', '成本价（含税）', '日销7']
 REQUIRED_COLS = [
     'GMV','推广成交金额','付费','关键词','人群','全站','店铺直达',
-    'v9.3推广花费','v9.3推广成交金额','v9.3推广加购数','v9.3推广访客数',
+    'MetoX推广花费','MetoX推广成交金额','MetoX推广加购数','MetoX推广访客数',
     '关键词归因成交','人群归因成交','全站归因成交','店铺直达归因成交',
     '商品访客数','支付买家数','支付件数','商品加购件数','推广加购数',
     '成功退款金额','退款率','商品支付转化率','访客平均价值',
@@ -123,22 +123,22 @@ def _product_roi_agg(sources):
         return pd.DataFrame(columns=['宝贝ID'])
 
     if '推广引导总成交金额' in work.columns:
-        work['v9.3推广成交金额'] = work['推广引导总成交金额']
-    visitor_cols = [col for col in V93_VISITOR_COLS if col in work.columns]
+        work['MetoX推广成交金额'] = work['推广引导总成交金额']
+    visitor_cols = [col for col in METOX_VISITOR_COLS if col in work.columns]
     if visitor_cols:
-        work['v9.3推广访客数'] = sum(_numeric_series(work[col]) for col in visitor_cols)
-    cart_people_cols = [col for col in V93_CART_PEOPLE_COLS if col in work.columns]
+        work['MetoX推广访客数'] = sum(_numeric_series(work[col]) for col in visitor_cols)
+    cart_people_cols = [col for col in METOX_CART_PEOPLE_COLS if col in work.columns]
     if cart_people_cols:
-        work['v9.3推广加购数'] = sum(_numeric_series(work[col]) for col in cart_people_cols)
+        work['MetoX推广加购数'] = sum(_numeric_series(work[col]) for col in cart_people_cols)
     elif '推广总加购数' in work.columns:
-        work['v9.3推广加购数'] = work['推广总加购数']
+        work['MetoX推广加购数'] = work['推广总加购数']
     else:
-        cart_count_cols = [col for col in V93_CART_COUNT_COLS if col in work.columns]
+        cart_count_cols = [col for col in METOX_CART_COUNT_COLS if col in work.columns]
         if cart_count_cols:
-            work['v9.3推广加购数'] = sum(_numeric_series(work[col]) for col in cart_count_cols)
+            work['MetoX推广加购数'] = sum(_numeric_series(work[col]) for col in cart_count_cols)
 
     agg = {}
-    for col in SUM_COLS + V93_PRODUCT_SUM_COLS:
+    for col in SUM_COLS + METOX_PRODUCT_SUM_COLS:
         if col in work.columns:
             work[col] = _numeric_series(work[col])
             agg[col] = 'sum'
@@ -158,6 +158,11 @@ def _filtered_wujie(sources):
     work = df.copy()
     work['_pid'] = _clean_id_series(work['宝贝ID'])
     work = work[_valid_pid_mask(work)]
+    # P0-1(验收报告_四轮验证_20260711): 无界"店铺"主体(店铺首页,主体ID=店铺ID如436273237)
+    # 会被当宝贝建行,生意参谋侧查无此品→访客0/GMV0→污染滞销/削减/亏损池与消耗排名。
+    # 列存在时仅保留 主体类型=='商品'(报告建议口径);列缺失时不过滤,不静默丢数据。
+    if '主体类型' in work.columns:
+        work = work[work['主体类型'].astype(str).str.strip() == '商品']
     if '转化周期' in work.columns:
         work = work[work['转化周期'].map(_is_15_day_period)]
     return work
@@ -171,7 +176,7 @@ def _wujie_agg(work):
     if '商品加购件数' in work.columns and '推广加购数' not in work.columns:
         work['推广加购数'] = work['商品加购件数']
     if '付费' in work.columns:
-        work['v9.3推广花费'] = work['付费']
+        work['MetoX推广花费'] = work['付费']
     for col in WUJIE_SUM_COLS:
         if col in work.columns:
             work[col] = _numeric_series(work[col])
@@ -330,9 +335,14 @@ def _stock_agg(sources):
         agg = {}
         if '_sku' in pid_work.columns:
             agg['货号'] = ('_sku', _first_non_empty)
-        # 在仓库存仅款式级(货号)挂载,不做 pid 级求和——多链接共享同一库存池
+        if '在仓库存' in pid_work.columns:
+            agg['在仓库存'] = ('在仓库存', _first_positive)
         if '日销7' in pid_work.columns:
             agg['日销7'] = ('日销7', 'sum')
+        if '款式主图' in pid_work.columns:
+            agg['款式主图'] = ('款式主图', _first_non_empty)
+        if '创建时间' in pid_work.columns:
+            agg['创建时间'] = ('创建时间', _first_non_empty)
         for col in DIM_NUM_COLS:
             if col in pid_work.columns:
                 agg[col] = (col, _first_positive)
@@ -343,9 +353,13 @@ def _stock_agg(sources):
     if not sku_work.empty:
         agg = {}
         if '在仓库存' in sku_work.columns:
-            agg['在仓库存'] = ('在仓库存', 'sum')
+            agg['在仓库存'] = ('在仓库存', _first_positive)
         if '日销7' in sku_work.columns:
             agg['日销7'] = ('日销7', 'sum')
+        if '款式主图' in sku_work.columns:
+            agg['款式主图'] = ('款式主图', _first_non_empty)
+        if '创建时间' in sku_work.columns:
+            agg['创建时间'] = ('创建时间', _first_non_empty)
         for col in DIM_NUM_COLS:
             if col in sku_work.columns:
                 agg[col] = (col, _first_positive)
@@ -407,7 +421,7 @@ def _finalize_result(base):
 
     for col in [
         'GMV', '推广成交金额', '付费', '关键词', '人群', '全站', '店铺直达',
-        'v9.3推广花费', 'v9.3推广成交金额', 'v9.3推广加购数', 'v9.3推广访客数',
+        'MetoX推广花费', 'MetoX推广成交金额', 'MetoX推广加购数', 'MetoX推广访客数',
         '关键词归因成交', '人群归因成交', '全站归因成交', '店铺直达归因成交',
         '商品访客数', '支付买家数', '支付件数', '商品加购件数', '推广加购数',
         '成功退款金额', '搜索引导访客数',
@@ -506,7 +520,8 @@ def merge_sources(sources, dimensions=None):
     base = _merge_dimension(base, product_info_by_sku, '货号', '_info_sku')
     base = _merge_dimension(base, stock_by_sku, '货号', '_stock_sku')
 
-    _coalesce_columns(base, '创建时间', '创建时间_info_pid')
+    _coalesce_columns(base, '款式主图', '款式主图_info_pid', '款式主图_stock_pid', '款式主图_info_sku', '款式主图_stock_sku')
+    _coalesce_columns(base, '创建时间', '创建时间_info_pid', '创建时间_stock_pid', '创建时间_info_sku', '创建时间_stock_sku')
     # 退款率:聚水潭 30日cohort 唯一来源(2026-07-10 起不再回退生意参谋)。
     # 不走 _coalesce_numeric_columns——它会把未覆盖品的 NaN 压成 0,而 0%(无退款)
     # 与 空(近30日无订单、无数据) 语义不同,必须保留 NaN
@@ -514,7 +529,7 @@ def merge_sources(sources, dimensions=None):
         if _refund_cand in base.columns:
             base['退款率'] = pd.to_numeric(base[_refund_cand], errors='coerce')
             break
-    _coalesce_numeric_columns(base, '在仓库存', '在仓库存_stock_sku', '在仓库存_stock_pid')
+    _coalesce_numeric_columns(base, '在仓库存', '在仓库存_stock_pid', '在仓库存_stock_sku')
     _coalesce_numeric_columns(base, '日销7', '日销7_stock_pid', '日销7_stock_sku')
     _coalesce_numeric_columns(base, '在途', '在途_info_pid', '在途_stock_pid', '在途_info_sku', '在途_stock_sku')
     _coalesce_numeric_columns(
@@ -526,7 +541,7 @@ def merge_sources(sources, dimensions=None):
         '成本价（含税）_stock_sku',
     )
 
-    for col in CHANNEL_COLS + SUM_COLS + V93_PRODUCT_SUM_COLS + WUJIE_SUM_COLS:
+    for col in CHANNEL_COLS + SUM_COLS + METOX_PRODUCT_SUM_COLS + WUJIE_SUM_COLS:
         if col in base.columns:
             base[col] = _numeric_series(base[col])
 

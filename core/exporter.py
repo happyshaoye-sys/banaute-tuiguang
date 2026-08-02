@@ -57,11 +57,11 @@ def export_all_sheets(df):
             cat = cat.drop(columns=['_退款率加权金额'])
             cat.to_excel(writer, sheet_name='品类分析', index=False)
 
-        # 4. 退款风险
+        # 4. 退款风险（聚水潭cohort退款率>70%，与页面阈值一致）
         if '退款率' in df.columns:
             ref_cols = [c for c in ['宝贝ID','商品名称','淘宝类目','GMV','成功退款金额','退款率','付费','综合等级','对应操作','风险标签'] if c in df.columns]
             if ref_cols:
-                ref = df[df['退款率'] > 0.4].sort_values('退款率', ascending=False)[ref_cols]
+                ref = df[df['退款率'] > 0.7].sort_values('退款率', ascending=False)[ref_cols]
                 ref.to_excel(writer, sheet_name='退款风险', index=False)
 
         # 5-7. 渠道

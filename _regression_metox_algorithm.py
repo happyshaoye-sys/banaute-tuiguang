@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Regression checks for the built-in v9.3 threshold layer."""
+"""Regression checks for the built-in MetoX threshold layer."""
 from datetime import date, timedelta
 
 import pandas as pd
 
 from core.schema import EXPORT_COLS
-from core.v93_algorithm import apply_v93_algorithm
+from core.metox_algorithm import apply_metox_algorithm
 
 
 def check(name, condition, detail):
@@ -35,10 +35,10 @@ def _day_map(latest, rows_by_pid):
                 "推广明细": row.get("detail", "计划ID:1"),
             }
             for source, target in {
-                "v93_spend": "v9.3推广花费",
-                "v93_ad_gmv": "v9.3推广成交金额",
-                "v93_ad_carts": "v9.3推广加购数",
-                "v93_ad_vis": "v9.3推广访客数",
+                "v93_spend": "MetoX推广花费",
+                "v93_ad_gmv": "MetoX推广成交金额",
+                "v93_ad_carts": "MetoX推广加购数",
+                "v93_ad_vis": "MetoX推广访客数",
             }.items():
                 if source in row:
                     record[target] = row[source]
@@ -78,34 +78,34 @@ def test_builtin_v93_threshold_labels():
         ],
     }
     current = _day_map(latest, rows_by_pid)[latest][0]
-    scored = apply_v93_algorithm(current, _day_map(latest, rows_by_pid), latest)
+    scored = apply_metox_algorithm(current, _day_map(latest, rows_by_pid), latest)
     by_pid = scored.set_index("宝贝ID")
 
     check(
         "focus threshold produces 明日之星",
-        "明日之星" in by_pid.loc["focus", "v9.3算法命中"],
-        by_pid.loc["focus", "v9.3算法命中"],
+        "明日之星" in by_pid.loc["focus", "MetoX算法命中"],
+        by_pid.loc["focus", "MetoX算法命中"],
     )
     check(
         "recent threshold supplements non-focus item",
-        "近3日潜力" in by_pid.loc["recent", "v9.3算法命中"],
-        by_pid.loc["recent", "v9.3算法命中"],
+        "近3日潜力" in by_pid.loc["recent", "MetoX算法命中"],
+        by_pid.loc["recent", "MetoX算法命中"],
     )
     check(
         "scale threshold detects burst item",
-        "爆发" in by_pid.loc["scale", "v9.3算法命中"],
-        by_pid.loc["scale", "v9.3算法命中"],
+        "爆发" in by_pid.loc["scale", "MetoX算法命中"],
+        by_pid.loc["scale", "MetoX算法命中"],
     )
     check(
         "rebalance threshold detects add-budget item",
-        "加预算" in by_pid.loc["reb", "v9.3算法命中"],
-        by_pid.loc["reb", "v9.3算法命中"],
+        "加预算" in by_pid.loc["reb", "MetoX算法命中"],
+        by_pid.loc["reb", "MetoX算法命中"],
     )
 
 
 def test_builtin_v93_columns_are_exported():
-    for col in ["v9.3算法命中", "v9.3算法分", "v9.3算法原因"]:
-        check("export includes built-in v9.3 column", col in EXPORT_COLS, col)
+    for col in ["MetoX算法命中", "MetoX算法分", "MetoX算法原因"]:
+        check("export includes built-in MetoX column", col in EXPORT_COLS, col)
 
 
 def test_original_v93_rebalance_buckets_and_spillover():
@@ -133,15 +133,15 @@ def test_original_v93_rebalance_buckets_and_spillover():
             {"vis": 100, "carts": 5, "ad_carts": 5, "gmv": 1000, "ad_gmv": 900, "spend": 100, "price": 120},
         ] * 7,
     }
-    scored = apply_v93_algorithm(_day_map(latest, rows_by_pid)[latest][0], _day_map(latest, rows_by_pid), latest)
+    scored = apply_metox_algorithm(_day_map(latest, rows_by_pid)[latest][0], _day_map(latest, rows_by_pid), latest)
     by_pid = scored.set_index("宝贝ID")
 
-    check("rebalance high ROI uses original 加预算 bucket", "加预算" in by_pid.loc["add", "v9.3算法命中"], by_pid.loc["add", "v9.3算法命中"])
-    check("saturated good item uses original 饱和观察 bucket", "饱和观察" in by_pid.loc["observe", "v9.3算法命中"], by_pid.loc["observe", "v9.3算法命中"])
-    check("low add-to-cart-cost item uses original 保护持有 bucket", "保护持有" in by_pid.loc["protect", "v9.3算法命中"], by_pid.loc["protect", "v9.3算法命中"])
-    check("low ROI high add-to-cart-cost item uses original 削减 bucket", "削减" in by_pid.loc["reduce", "v9.3算法命中"], by_pid.loc["reduce", "v9.3算法命中"])
-    check("spillover section uses fixed 7 day spend and organic GMV", "溢出" in by_pid.loc["add", "v9.3算法命中"], by_pid.loc["add", "v9.3算法命中"])
-    reasons = " | ".join(by_pid["v9.3算法原因"].astype(str).tolist())
+    check("rebalance high ROI uses original 加预算 bucket", "加预算" in by_pid.loc["add", "MetoX算法命中"], by_pid.loc["add", "MetoX算法命中"])
+    check("saturated good item uses original 饱和观察 bucket", "饱和观察" in by_pid.loc["observe", "MetoX算法命中"], by_pid.loc["observe", "MetoX算法命中"])
+    check("low add-to-cart-cost item uses original 保护持有 bucket", "保护持有" in by_pid.loc["protect", "MetoX算法命中"], by_pid.loc["protect", "MetoX算法命中"])
+    check("low ROI high add-to-cart-cost item uses original 削减 bucket", "削减" in by_pid.loc["reduce", "MetoX算法命中"], by_pid.loc["reduce", "MetoX算法命中"])
+    check("spillover section uses fixed 7 day spend and organic GMV", "溢出" in by_pid.loc["add", "MetoX算法命中"], by_pid.loc["add", "MetoX算法命中"])
+    reasons = " | ".join(by_pid["MetoX算法原因"].astype(str).tolist())
     check("algorithm reasons use 加购成本 label", "加购成本" in reasons, reasons)
     check("algorithm reasons no longer expose CPA label", "CPA" not in reasons, reasons)
 
@@ -155,18 +155,18 @@ def test_original_v93_fields_override_wujie_attribution_fields():
         "付费": 500.0,
         "推广成交金额": 2500.0,
         "推广加购数": 10.0,
-        "v9.3推广花费": 300.0,
-        "v9.3推广成交金额": 300.0,
-        "v9.3推广加购数": 100.0,
-        "v9.3推广访客数": 50.0,
+        "MetoX推广花费": 300.0,
+        "MetoX推广成交金额": 300.0,
+        "MetoX推广加购数": 100.0,
+        "MetoX推广访客数": 50.0,
         "商品访客数": 500.0,
         "商品加购件数": 60.0,
         "件单价": 120.0,
         "推广明细": "",
     }])
-    scored = apply_v93_algorithm(current)
-    reason = scored.loc[0, "v9.3算法原因"]
-    check("strict v9.3 ad GMV overrides wujie attribution GMV", "自然GMV占比90%" in reason, reason)
+    scored = apply_metox_algorithm(current)
+    reason = scored.loc[0, "MetoX算法原因"]
+    check("strict MetoX ad GMV overrides wujie attribution GMV", "自然GMV占比90%" in reason, reason)
 
 
 if __name__ == "__main__":
@@ -174,4 +174,4 @@ if __name__ == "__main__":
     test_builtin_v93_columns_are_exported()
     test_original_v93_rebalance_buckets_and_spillover()
     test_original_v93_fields_override_wujie_attribution_fields()
-    print("v9.3 algorithm regression checks passed")
+    print("MetoX algorithm regression checks passed")

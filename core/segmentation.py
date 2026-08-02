@@ -111,12 +111,14 @@ def _apply_matrix(df):
             action = '上升验证'
             risks.append('📈动量↑')
 
-        # 阈值按聚水潭30日cohort口径标定(2026-07-10,女装cohort普遍40~60%,
-        # 沿用生意参谋口径的0.3会令大半商品被标高退款): >0.5极高 / >0.4高
-        if refund_rate > 0.5: risks.append('🚨极高退款')
-        elif refund_rate > 0.4:
+        # 风险标签按聚水潭30日cohort口径标定: >0.8极高 / >0.7高。
+        # 两档均将「放量/适当放量」降为「待优化」，>0.8只标「极高退款」。
+        if refund_rate > 0.8:
+            risks.append('🚨极高退款')
+        elif refund_rate > 0.7:
             risks.append('⚠高退款')
-            if action in ('放量','适当放量'): action = '待优化'
+        if refund_rate > 0.7 and action in ('放量','适当放量'):
+            action = '待优化'
 
         if stock == 0 and to_num(row.get('在途', 0)) == 0: risks.append('🆘缺货')
         elif stock < 10: risks.append('📦库存不足')
@@ -127,7 +129,7 @@ def _apply_matrix(df):
         if roi > 10: risks.append('⭐高ROI')
         if to_num(row.get('在途', 0)) > 0 and stock < 10: risks.append('🚚在途补货中')
 
-        # P1-P4(低退款线与「⚠高退款」阈值一致,cohort口径 0.4)
+        # P1-P4预算优先级仍使用独立的0.4低退款线，不与0.7/0.8风险标签阈值混用。
         is_low_refund = refund_rate < 0.4
         has_stock = stock >= 10
         spend = to_num(row.get('付费', 0))

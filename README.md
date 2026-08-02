@@ -1,72 +1,49 @@
-# 半自动推广工具 v4.1
+# MetoX v2.0 半自动推广工具
 
-应用版本：v4.1
+应用版本：MetoX v2.0
 
-外部策略算法版本：v9.3（保持不变）
+外部策略算法版本：v9.3（独立版本，本次未变更）
 
-这是可直接下载使用的离线版半自动推广工具。仓库中已经包含：
+## v2.0 核心变更
 
-- `TuiGuangTool.exe`
-- `_internal/` 离线运行环境
-- `app.py`
-- `core/` 核心逻辑
-- `templates/`
-- `.streamlit/config.toml`
-- `启动半自动推广工具.bat`
-
-## v4.1 / MetoX1.1
-
-- 修复选择“当日、3天、15天”时品类分析固定读取“7日环比”导致的 KeyError。
-- “7天GMV”和“7日GMV环比”按完整的当前7日与上一7日品类数据汇总，不再只覆盖本期仍存在的商品ID。
-- 固定7日品类汇总复用已加载日数据，不增加文件读取。
+- 聚水潭 30 日 cohort 退款率 `>80%` 标记「极高退款」。
+- `>70%且≤80%` 标记「高退款」。
+- 两档均将「放量/适当放量」降为「待优化」，`>80%` 只保留极高退款标签。
+- 页面与 Excel 退款风险入选线统一为严格 `>70%`。
+- `core/__init__.py` 改为引用 `core/segmentation.py`，不再保留第二份分层算法。
 
 ## 新电脑直接使用
 
-1. 在 GitHub 页面点击 `Code` -> `Download ZIP`。
-2. 完整解压 ZIP，不要在压缩包里直接双击文件。
-3. 进入解压后的文件夹。
-4. 双击 `启动半自动推广工具.bat`。
-5. 浏览器打开 `http://127.0.0.1:8765` 后即可使用。
-6. 使用过程中不要关闭黑色启动窗口，关闭窗口工具会停止。
+1. 完整解压正式交付 ZIP，不要在压缩包中直接运行。
+2. 双击 `启动MetoX半自动推广工具.bat`。
+3. 浏览器打开 `http://127.0.0.1:8765`后使用。
+4. 使用期间不要关闭启动窗口。
 
-## 数据要求
+## 版本治理
 
-工具本身可以离线启动，但分析数据仍需要来源：
+- `VERSION.json` 是唯一版本源。
+- `core/version.py` 从唯一版本源派生页面显示版本。
+- `scripts/release_check.py` 检查业务规则变更是否升版，并校验页面、文档、分支和阈值契约。
+- `scripts/release_metox.py` 先执行发布检查，再生成带版本和日期的不可覆盖目录与 ZIP。
+- Git 发布标签使用 `MetoX<版本>`，例如 `MetoX2.0`。
 
-- 默认读取共享盘数据路径，例如 `\\10.1.22.253\天猫mark`。
-- 新电脑必须能访问共享盘，或在工具侧边栏手动选择本地数据目录。
-- 聚水潭库存/退款快照没有放进仓库，因为本地快照目录体积约 6GB，不适合提交到 GitHub。
-- 如果没有聚水潭快照，退款率和在仓库存相关列可能为空，其余功能仍可继续使用。
+## 核心文件
 
-## 源码运行方式
-
-如果不用离线 EXE，也可以用 Python 源码方式运行：
-
-```powershell
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-或指定本机 Python：
-
-```powershell
-D:\python\python.exe -m pip install -r requirements.txt
-D:\python\python.exe -m streamlit run app.py
-```
-
-## v9.3 相关核心文件
-
-- `core/v93_algorithm.py`：内置 v9.3 算法命中逻辑。
+- `core/metox_algorithm.py`：MetoX 内置算法。
 - `core/v93_signal.py`：v9.3 日报信号解析。
-- `core/schema.py`：字段别名、导出字段、分层矩阵。
-- `core/merge.py`：商品、推广、库存、退款数据合并。
-- `core/periods.py`：周期聚合与环比。
-- `core/loader.py`：源文件加载与缓存。
+- `core/segmentation.py`：36 宫格、风险标签、动作和优先级。
+- `core/analysis.py` / `core/exporter.py`：页面和 Excel 分析口径。
+- `core/merge.py` / `core/periods.py`：数据合并和周期聚合。
 
-## 校验命令
+## 验证命令
 
 ```powershell
-D:\python\python.exe -m compileall app.py core _regression_v93_algorithm.py _regression_export_period.py
-D:\python\python.exe _regression_v93_algorithm.py
-D:\python\python.exe _regression_export_period.py
+python -m unittest discover -p "test_*.py"
+python scripts/release_check.py --release
+```
+
+正式打包需指定已验收的离线运行包作为运行时基线：
+
+```powershell
+python scripts/release_metox.py --baseline-package <已验收包目录> --output-root <交付根目录>
 ```
