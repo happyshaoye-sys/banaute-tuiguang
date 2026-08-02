@@ -1,10 +1,16 @@
-# MetoX v2.0 半自动推广工具
+# MetoX v2.1 半自动推广工具
 
-应用版本：MetoX v2.0
+应用版本：MetoX v2.1
 
 外部策略算法版本：v9.3（独立版本，本次未变更）
 
-## v2.0 核心变更
+## v2.1 核心变更
+
+- 三个启动入口统一使用新版启动器。
+- 默认尝试端口 `8765`；若已被其他程序占用，会自动选择后续可用端口。
+- 启动窗口会显示实际访问地址，不再要求用户手工设置 `TGTOOL_PORT`。
+
+## 延续的退款规则（v2.0）
 
 - 聚水潭 30 日 cohort 退款率 `>80%` 标记「极高退款」。
 - `>70%且≤80%` 标记「高退款」。
@@ -16,7 +22,7 @@
 
 1. 完整解压正式交付 ZIP，不要在压缩包中直接运行。
 2. 双击 `启动MetoX半自动推广工具.bat`。
-3. 浏览器打开 `http://127.0.0.1:8765`后使用。
+3. 浏览器会自动打开；实际地址以启动窗口中的 `METOX_URL=` 为准。
 4. 使用期间不要关闭启动窗口。
 
 ## 版本治理
@@ -25,7 +31,7 @@
 - `core/version.py` 从唯一版本源派生页面显示版本。
 - `scripts/release_check.py` 检查业务规则变更是否升版，并校验页面、文档、分支和阈值契约。
 - `scripts/release_metox.py` 先执行发布检查，再生成带版本和日期的不可覆盖目录与 ZIP。
-- Git 发布标签使用 `MetoX<版本>`，例如 `MetoX2.0`。
+- Git 发布标签使用 `MetoX<版本>`，例如 `MetoX2.1`。
 
 ## 核心文件
 
@@ -42,8 +48,9 @@ python -m unittest discover -p "test_*.py"
 python scripts/release_check.py --release
 ```
 
-正式打包需指定已验收的离线运行包作为运行时基线：
+先重建启动器，再指定已验收的离线运行包和新启动器运行时：
 
 ```powershell
-python scripts/release_metox.py --baseline-package <已验收包目录> --output-root <交付根目录>
+python scripts/build_launcher.py
+python scripts/release_metox.py --baseline-package <已验收包目录> --launcher-runtime dist\TuiGuangTool --output-root <交付根目录>
 ```

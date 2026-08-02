@@ -6,6 +6,7 @@ from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -16,7 +17,9 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 OVERLAY_FILES = (
+    ".streamlit/config.toml",
     "app.py",
+    "launcher.py",
     "requirements.txt",
     "README.md",
     "README_离线使用说明.txt",
@@ -33,7 +36,9 @@ OVERLAY_FILES = (
 REQUIRED_PATHS = (
     "TuiGuangTool.exe",
     "_internal",
+    ".streamlit/config.toml",
     "app.py",
+    "launcher.py",
     "core/version.py",
     "core/segmentation.py",
     "VERSION.json",
@@ -124,12 +129,22 @@ def _audit(stage: Path, version: str, manual_name: str) -> dict[str, int]:
         raise RuntimeError("packaged app.py is not connected to VERSION.json")
     if (stage / "core" / "v93_algorithm.py").exists():
         raise RuntimeError("obsolete core/v93_algorithm.py leaked into release")
+    launcher_source = (stage / "launcher.py").read_text(encoding="utf-8")
+    if "find_available_port" not in launcher_source or '"--global.developmentMode"' not in launcher_source:
+        raise RuntimeError("packaged launcher lacks the automatic-port production-mode contract")
+    config_source = (stage / ".streamlit" / "config.toml").read_text(encoding="utf-8-sig")
+    if re.search(r"^\s*port\s*=\s*8765\s*$", config_source, flags=re.MULTILINE):
+        raise RuntimeError("packaged Streamlit config still forces port 8765")
+    for batch_name in ("启动MetoX半自动推广工具.bat", "启动半自动推广工具.bat"):
+        batch_source = (stage / batch_name).read_text(encoding="utf-8-sig")
+        if "set TGTOOL_PORT=8765" in batch_source or "TuiGuangTool.exe" not in batch_source:
+            raise RuntimeError(f"packaged batch entry point violates launcher contract: {batch_name}")
 
     files = [path for path in stage.rglob("*") if path.is_file()]
     return {"file_count": len(files), "total_bytes": sum(path.stat().st_size for path in files)}
 
 
-def build_release(baseline: Path, output_root: Path) -> dict[str, object]:
+def build_release(baseline: Path, launcher_runtime: Path, output_root: Path) -> dict[str, object]:
     info = json.loads((ROOT / "VERSION.json").read_text(encoding="utf-8"))
     version = str(info["version"])
     release_date = str(info["release_date"])
@@ -142,6 +157,12 @@ def build_release(baseline: Path, output_root: Path) -> dict[str, object]:
 
     if not baseline.is_dir():
         raise RuntimeError(f"baseline package does not exist: {baseline}")
+    runtime_exe = launcher_runtime / "TuiGuangTool.exe"
+    runtime_internal = launcher_runtime / "_internal"
+    if not runtime_exe.is_file() or not runtime_internal.is_dir():
+        raise RuntimeError(f"launcher runtime is incomplete: {launcher_runtime}")
+    if not any(runtime_internal.glob("streamlit-*.dist-info")):
+        raise RuntimeError("launcher runtime is missing Streamlit package metadata")
     output_root.mkdir(parents=True, exist_ok=True)
     collisions = [path for path in (destination, zip_path, hash_path) if path.exists()]
     if collisions:
@@ -153,6 +174,12 @@ def build_release(baseline: Path, output_root: Path) -> dict[str, object]:
     published_zip = False
     try:
         shutil.copytree(baseline, stage, dirs_exist_ok=True, ignore=_ignore)
+
+        shutil.copy2(runtime_exe, stage / "TuiGuangTool.exe")
+        packaged_internal = stage / "_internal"
+        if packaged_internal.exists():
+            shutil.rmtree(packaged_internal)
+        shutil.copytree(runtime_internal, packaged_internal, ignore=_ignore)
 
         packaged_core = stage / "core"
         if packaged_core.exists():
@@ -178,6 +205,17 @@ def build_release(baseline: Path, output_root: Path) -> dict[str, object]:
             "external_strategy_version": info["external_strategy_version"],
             "source_commit": _git_commit(),
             "baseline_package": baseline.name,
+            "launcher_runtime": launcher_runtime.name,
+            "launcher_sha256": _sha256(stage / "TuiGuangTool.exe"),
+            "startup": {
+                "preferred_port": 8765,
+                "occupied_port_behavior": "select next available local port",
+                "entry_points": [
+                    "TuiGuangTool.exe",
+                    "启动MetoX半自动推广工具.bat",
+                    "启动半自动推广工具.bat",
+                ],
+            },
             "rules": {
                 "refund_extreme": ">80%",
                 "refund_high": ">70% and <=80%",
@@ -223,6 +261,7 @@ def build_release(baseline: Path, output_root: Path) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--baseline-package", required=True, type=Path)
+    parser.add_argument("--launcher-runtime", required=True, type=Path)
     parser.add_argument("--output-root", required=True, type=Path)
     args = parser.parse_args()
     try:
@@ -231,7 +270,11 @@ def main() -> int:
         _run([sys.executable, str(ROOT / "_regression_metox_algorithm.py")])
         _run([sys.executable, str(ROOT / "_regression_export_period.py")])
         _run([sys.executable, str(ROOT / "自检_造数套件.py")])
-        result = build_release(args.baseline_package.resolve(), args.output_root.resolve())
+        result = build_release(
+            args.baseline_package.resolve(),
+            args.launcher_runtime.resolve(),
+            args.output_root.resolve(),
+        )
     except Exception as exc:
         print(f"release-build FAIL: {exc}", file=sys.stderr)
         return 1

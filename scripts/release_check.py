@@ -12,7 +12,9 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_PATH = ROOT / "VERSION.json"
 PROTECTED_FILES = {
+    ".streamlit/config.toml",
     "app.py",
+    "launcher.py",
     "core/analysis.py",
     "core/exporter.py",
     "core/field_mapping.py",
@@ -26,6 +28,10 @@ PROTECTED_FILES = {
     "core/segmentation.py",
     "core/v93_algorithm.py",
     "core/v93_signal.py",
+    "scripts/build_launcher.py",
+    "scripts/smoke_three_entries.ps1",
+    "启动MetoX半自动推广工具.bat",
+    "启动半自动推广工具.bat",
 }
 CURRENT_DOCS = {
     "README.md": "MetoX v{version}",
@@ -87,6 +93,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json release_date must use YYYY-MM-DD")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("refund_risk"):
         errors.append("VERSION.json must record rule_versions.refund_risk")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("startup_launcher"):
+        errors.append("VERSION.json must record rule_versions.startup_launcher")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()
@@ -96,6 +104,11 @@ def check_release(require_release_branch: bool = False) -> list[str]:
             for line in _git("diff", "--name-only", latest_tag, "--").splitlines()
             if line.strip()
         }
+        changed.update(
+            line.replace("\\", "/")
+            for line in _git("ls-files", "--others", "--exclude-standard").splitlines()
+            if line.strip()
+        )
         protected_changed = sorted(changed.intersection(PROTECTED_FILES))
         if protected_changed and VERSION_RE.fullmatch(version) and _version_tuple(version) <= latest_version:
             errors.append(
@@ -110,6 +123,19 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("app.py must not hardcode APP_VERSION")
     if "DISPLAY_VERSION" not in app_source:
         errors.append("app.py must render DISPLAY_VERSION")
+
+    launcher_source = (ROOT / "launcher.py").read_text(encoding="utf-8")
+    for snippet in (
+        "find_available_port",
+        'HOST = "127.0.0.1"',
+        'DEFAULT_PORT = 8765',
+        '"--global.developmentMode"',
+    ):
+        if snippet not in launcher_source:
+            errors.append(f"launcher port-selection contract missing: {snippet}")
+    primary_bat = (ROOT / "启动MetoX半自动推广工具.bat").read_text(encoding="utf-8-sig")
+    if "set TGTOOL_PORT=8765" in primary_bat:
+        errors.append("primary launcher batch file must not force fixed port 8765")
 
     init_source = (ROOT / "core" / "__init__.py").read_text(encoding="utf-8")
     if "from .segmentation import" not in init_source or "refund_rate" in init_source:
