@@ -45,6 +45,7 @@ if ([string]::IsNullOrWhiteSpace($PythonExecutable)) {
 $createdPids = [System.Collections.Generic.List[int]]::new()
 $results = [System.Collections.Generic.List[object]]::new()
 $oldHeadless = $env:METOX_HEADLESS
+$oldAppTest = $env:METOX_APP_TEST
 $env:METOX_HEADLESS = "1"
 
 function Wait-MetoXUrl {
@@ -133,8 +134,52 @@ function Test-MetoXEntry {
     }
 }
 
+function Test-MetoXAppExecution {
+    $stdout = Join-Path $LogRoot "app_execution.stdout.log"
+    $stderr = Join-Path $LogRoot "app_execution.stderr.log"
+    $env:METOX_APP_TEST = "1"
+    try {
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $startInfo.FileName = Join-Path $runtime "TuiGuangTool.exe"
+        $startInfo.WorkingDirectory = $runtime
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $startInfo
+        if (-not $process.Start()) {
+            throw "Packaged app execution process did not start."
+        }
+        $createdPids.Add($process.Id)
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(90000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw "Packaged app execution test timed out."
+        }
+        $process.WaitForExit()
+        $exitCode = $process.ExitCode
+        $output = $stdoutTask.Result
+        $errorOutput = $stderrTask.Result
+        Set-Content -LiteralPath $stdout -Value $output -Encoding UTF8
+        Set-Content -LiteralPath $stderr -Value $errorOutput -Encoding UTF8
+        if ($exitCode -ne 0 -or $output -notmatch "METOX_APP_TEST=PASS") {
+            throw "Packaged app execution failed (exit=$exitCode): $output $errorOutput"
+        }
+        return [pscustomobject]@{
+            Status = "PASS"
+            ExitCode = $exitCode
+            Marker = "METOX_APP_TEST=PASS"
+        }
+    } finally {
+        $env:METOX_APP_TEST = $oldAppTest
+    }
+}
+
 $blocker = $null
 try {
+    $appExecution = Test-MetoXAppExecution
     $existing8765 = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue
     if (-not $existing8765) {
         $blocker = Start-Process -FilePath $PythonExecutable `
@@ -161,10 +206,14 @@ try {
     Test-MetoXEntry -Name "direct_exe" -Path (Join-Path $runtime "TuiGuangTool.exe") -IsBatch $false
     Test-MetoXEntry -Name "primary_bat" -Path $primaryBatch.FullName -IsBatch $true
     Test-MetoXEntry -Name "compatibility_bat" -Path $compatibilityBatch.FullName -IsBatch $true
-    $results | ConvertTo-Json -Depth 3
+    [pscustomobject]@{
+        AppExecution = $appExecution
+        EntrySmoke = $results
+    } | ConvertTo-Json -Depth 4
 } finally {
     foreach ($createdPid in ($createdPids | Sort-Object -Unique -Descending)) {
         Stop-Process -Id $createdPid -Force -ErrorAction SilentlyContinue
     }
     $env:METOX_HEADLESS = $oldHeadless
+    $env:METOX_APP_TEST = $oldAppTest
 }

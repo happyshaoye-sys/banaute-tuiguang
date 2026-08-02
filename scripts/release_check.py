@@ -95,6 +95,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.refund_risk")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("startup_launcher"):
         errors.append("VERSION.json must record rule_versions.startup_launcher")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("runtime_packaging"):
+        errors.append("VERSION.json must record rule_versions.runtime_packaging")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()
@@ -130,6 +132,9 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         'HOST = "127.0.0.1"',
         'DEFAULT_PORT = 8765',
         '"--global.developmentMode"',
+        "streamlit.runtime.scriptrunner.magic_funcs",
+        "AppTest.from_file",
+        "METOX_APP_TEST",
     ):
         if snippet not in launcher_source:
             errors.append(f"launcher port-selection contract missing: {snippet}")

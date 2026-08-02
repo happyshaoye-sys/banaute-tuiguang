@@ -1,8 +1,11 @@
 """Regression tests for the packaged MetoX launcher."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import socket
+import sys
+import tempfile
 import unittest
 
 import launcher
@@ -38,6 +41,32 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(args[args.index("--server.port") + 1], "8877")
         self.assertEqual(args[args.index("--global.developmentMode") + 1], "false")
 
+    def test_dynamic_streamlit_runtime_dependency_is_importable(self):
+        launcher.validate_runtime_dependencies()
+
+    def test_application_environment_exposes_sibling_core_package(self):
+        original_cwd = Path.cwd()
+        original_path = list(sys.path)
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                try:
+                    launcher.prepare_application_environment(root)
+                    self.assertEqual(Path.cwd(), root)
+                    self.assertEqual(Path(sys.path[0]), root)
+                finally:
+                    os.chdir(original_cwd)
+        finally:
+            os.chdir(original_cwd)
+            sys.path[:] = original_path
+
+    def test_release_smoke_executes_real_app_session(self):
+        source = (
+            Path(__file__).resolve().parent / "scripts" / "smoke_three_entries.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("METOX_APP_TEST", source)
+        self.assertIn("METOX_APP_TEST=PASS", source)
+
     def test_batch_entry_points_do_not_force_fixed_port(self):
         root = Path(__file__).resolve().parent
         primary = (root / "启动MetoX半自动推广工具.bat").read_text(encoding="utf-8-sig")
@@ -52,6 +81,7 @@ class LauncherTests(unittest.TestCase):
             Path(__file__).resolve().parent / "scripts" / "build_launcher.py"
         ).read_text(encoding="utf-8")
         self.assertIn('"--recursive-copy-metadata"', source)
+        self.assertIn('"--collect-submodules"', source)
         self.assertIn('"streamlit"', source)
 
 

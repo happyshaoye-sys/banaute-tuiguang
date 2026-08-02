@@ -34,6 +34,8 @@ def main() -> int:
         str(args.work_root.resolve()),
         "--collect-data",
         "streamlit",
+        "--collect-submodules",
+        "streamlit",
         "--recursive-copy-metadata",
         "streamlit",
         "--hidden-import",

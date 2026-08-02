@@ -74,6 +74,35 @@ def streamlit_arguments(app_path: Path, port: int) -> list[str]:
     ]
 
 
+def validate_runtime_dependencies() -> None:
+    """Import Streamlit modules that are loaded dynamically during app execution."""
+    import streamlit.runtime.scriptrunner.magic_funcs  # noqa: F401
+
+
+def prepare_application_environment(root: Path) -> None:
+    """Make sibling application modules importable from every launcher mode."""
+    root_text = str(root.resolve())
+    if root_text not in sys.path:
+        sys.path.insert(0, root_text)
+    os.chdir(root)
+
+
+def run_app_execution_test(app_path: Path) -> int:
+    """Execute the real app through Streamlit's script runner and report exceptions."""
+    from streamlit.testing.v1 import AppTest
+
+    test = AppTest.from_file(str(app_path))
+    test.run(timeout=60)
+    exceptions = list(test.exception)
+    if exceptions:
+        for exception in exceptions:
+            message = getattr(exception, "message", None) or getattr(exception, "value", None)
+            print(f"METOX_APP_TEST_ERROR={message or exception}", flush=True)
+        return 3
+    print("METOX_APP_TEST=PASS", flush=True)
+    return 0
+
+
 def main() -> int:
     root = package_root()
     app_path = root / "app.py"
@@ -81,6 +110,10 @@ def main() -> int:
         print(f"Startup failed: app.py not found beside the launcher: {app_path}", flush=True)
         return 2
 
+    prepare_application_environment(root)
+    validate_runtime_dependencies()
+    if os.environ.get("METOX_APP_TEST", "").strip() == "1":
+        return run_app_execution_test(app_path)
     requested = preferred_port()
     selected = find_available_port(requested)
     if selected != requested:
@@ -89,7 +122,6 @@ def main() -> int:
     print(f"MetoX is starting: {url}", flush=True)
     print(f"METOX_URL={url}", flush=True)
 
-    os.chdir(root)
     sys.argv = streamlit_arguments(app_path, selected)
     from streamlit.web import cli as streamlit_cli
 

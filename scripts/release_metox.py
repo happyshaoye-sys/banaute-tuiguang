@@ -130,7 +130,12 @@ def _audit(stage: Path, version: str, manual_name: str) -> dict[str, int]:
     if (stage / "core" / "v93_algorithm.py").exists():
         raise RuntimeError("obsolete core/v93_algorithm.py leaked into release")
     launcher_source = (stage / "launcher.py").read_text(encoding="utf-8")
-    if "find_available_port" not in launcher_source or '"--global.developmentMode"' not in launcher_source:
+    if (
+        "find_available_port" not in launcher_source
+        or '"--global.developmentMode"' not in launcher_source
+        or "streamlit.runtime.scriptrunner.magic_funcs" not in launcher_source
+        or "AppTest.from_file" not in launcher_source
+    ):
         raise RuntimeError("packaged launcher lacks the automatic-port production-mode contract")
     config_source = (stage / ".streamlit" / "config.toml").read_text(encoding="utf-8-sig")
     if re.search(r"^\s*port\s*=\s*8765\s*$", config_source, flags=re.MULTILINE):
