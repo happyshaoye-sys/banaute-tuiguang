@@ -101,6 +101,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.direct_purchase_metrics")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("ai_task_period_alignment"):
         errors.append("VERSION.json must record rule_versions.ai_task_period_alignment")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("ai_task_experience"):
+        errors.append("VERSION.json must record rule_versions.ai_task_experience")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()

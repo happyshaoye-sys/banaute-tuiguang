@@ -10,6 +10,7 @@ from pandas.testing import assert_frame_equal
 
 from core.analysis import AI_TASK_VIEW_COLUMNS, build_ai_task_view
 from core.task_engine import (
+    AI_TASK_MAIN_COLUMNS,
     PLAN_DETAIL_COLUMNS,
     _consistency_conflicts,
     parse_plan_execution_details,
@@ -48,6 +49,9 @@ def _row(**overrides):
         '上周期金额': 2500, '上周期付费': 300,
         '日销3': 8, '日销7': 7, '日销15': 6,
         '花费3': 45, '花费7': 42, '花费15': 40,
+        '计划数据口径': '近7天累计', '计划统计天数': 7, '计划实际数据天数': 7,
+        '推广计划总数': 3, '推广计划展示数': 3,
+        '计划覆盖率': 1.0, '计划数据完整度': 1.0,
         '退款率': 0.1, '在仓库存': 100, '在途': 0, '风险标签': '',
         '推广明细': _detail(
             {'id': 'P-HIGH', 'spend': 120, 'roi': 12, 'cart': 15},
@@ -256,6 +260,65 @@ class AITaskViewEighteenScenarioTests(unittest.TestCase):
 
 
 class AITaskViewAdditionalContractTests(unittest.TestCase):
+    def test_operating_metrics_are_passed_through_from_execution_table_without_recalculation(self):
+        task = _one(
+            MetoX算法命中='保护持有',
+            GMV=1234.56789,
+            商品访客数=321,
+            链接投产=4.32109,
+            付费=999,
+            推广成交金额=1,
+        )
+        self.assertEqual(task['GMV'], 1234.56789)
+        self.assertEqual(task['商品访客数'], 321)
+        self.assertEqual(task['链接投产'], 4.32109)
+
+    def test_main_table_has_exact_operational_projection_and_only_one_visible_confidence(self):
+        self.assertEqual(AI_TASK_MAIN_COLUMNS, [
+            '执行优先级', '任务优先分', '款式主图', '货号', '链接数', '宝贝ID',
+            'GMV', '商品访客数', '链接投产', '淘宝类目', '综合等级', '商品定位',
+            '商品周期', 'MetoX算法命中', 'AI任务类型', '商品级总策略', '主执行动作',
+            '动作对象', '关键词动作', '人群动作', '全站动作', '计划执行摘要',
+            '观察周期', '成功标准', '停止条件', '任务触发原因', 'AI可信度', '库存提醒',
+        ])
+        self.assertNotIn('商品名称', AI_TASK_MAIN_COLUMNS)
+        self.assertNotIn('AI可信度分', AI_TASK_MAIN_COLUMNS)
+        self.assertNotIn('AI可信度说明', AI_TASK_MAIN_COLUMNS)
+        self.assertNotIn('商品可信度', AI_TASK_MAIN_COLUMNS)
+        self.assertNotIn('渠道可信度', AI_TASK_MAIN_COLUMNS)
+        self.assertNotIn('计划可信度', AI_TASK_MAIN_COLUMNS)
+
+    def test_confidence_is_one_composite_value_with_operational_checklist(self):
+        task = _one(MetoX算法命中='保护持有')
+        self.assertRegex(task['AI可信度'], r'^[★☆]{5}（\d+%）$')
+        explanation = task['AI可信度说明']
+        self.assertIn('✓ 商品数据完整', explanation)
+        self.assertIn('✓ 渠道数据完整', explanation)
+        self.assertIn('✓ 商品-计划数据完整', explanation)
+        self.assertIn('✓ 周期统计一致', explanation)
+        self.assertIn('✓ MetoX数据完整', explanation)
+        self.assertNotIn('商品可信度', explanation)
+        self.assertNotIn('渠道可信度', explanation)
+        self.assertNotIn('计划可信度', explanation)
+
+    def test_partial_plan_evidence_lowers_confidence_without_changing_any_actions(self):
+        complete = _one(MetoX算法命中='削减|溢出', 推广成交金额=1800)
+        partial = _one(
+            MetoX算法命中='削减|溢出', 推广成交金额=1800,
+            推广计划总数=5, 推广计划展示数=3,
+            计划覆盖率=0.6, 计划数据完整度=0.6,
+            计划实际数据天数=4,
+        )
+        for field in (
+            'AI任务类型', '商品级总策略', '关键词状态', '关键词动作',
+            '人群状态', '人群动作', '全站状态', '全站动作', '计划执行摘要',
+            '计划执行明细', '执行优先级', '任务优先分',
+        ):
+            self.assertEqual(complete[field], partial[field], field)
+        self.assertGreater(complete['AI可信度分'], partial['AI可信度分'])
+        self.assertIn('△ 当前仅展示Top3关键计划', partial['AI可信度说明'])
+        self.assertIn('△ 部分计划数据缺失', partial['AI可信度说明'])
+
     def test_declining_product_budget_receiver_is_kept_not_increased(self):
         task = _one(
             综合等级='A', 商品定位='待改善', 商品周期='衰退期',
@@ -344,9 +407,16 @@ class AITaskViewUIContractTests(unittest.TestCase):
 
     def test_main_table_hides_full_plan_json_and_detail_selector_expands_it(self):
         view = self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]
-        self.assertIn("drop(columns=['计划执行明细']", view)
+        self.assertIn('task_main = task_filtered[AI_TASK_MAIN_COLUMNS].copy()', view)
         self.assertIn('parse_plan_execution_details', view)
         self.assertIn('选择商品查看计划动作', view)
+
+    def test_main_table_renames_strategy_and_exposes_one_confidence_detail(self):
+        view = self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]
+        self.assertIn("'商品级总策略': st.column_config.TextColumn('商品级策略'", view)
+        self.assertIn("'AI可信度': st.column_config.TextColumn(", view)
+        self.assertIn('with st.expander("AI可信度说明"', view)
+        self.assertIn("selected_task['AI可信度说明'].splitlines()", view)
 
     def test_plan_explanation_states_period_top3_and_coverage(self):
         view = self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]

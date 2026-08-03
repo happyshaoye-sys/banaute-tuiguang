@@ -18,7 +18,8 @@ from .schema import safe_div, to_num
 
 AI_TASK_VIEW_COLUMNS = [
     '执行优先级', '任务优先分', '款式主图', '货号', '链接数', '宝贝ID',
-    '商品名称', '淘宝类目', '综合等级', '商品定位', '商品周期', 'MetoX算法命中',
+    'GMV', '商品访客数', '链接投产', '商品名称', '淘宝类目', '综合等级',
+    '商品定位', '商品周期', 'MetoX算法命中',
     'AI任务类型', '商品级总策略', '动作对象', '主执行动作',
     '关键词状态', '关键词动作', '人群状态', '人群动作', '全站状态', '全站动作',
     '推广计划数', '计划总数', '计划展示数', '计划覆盖率', '计划数据完整度',
@@ -26,6 +27,16 @@ AI_TASK_VIEW_COLUMNS = [
     '商品策略数据源', '渠道动作数据源', '计划动作数据源',
     '计划执行摘要', '计划执行明细', '非投放动作',
     '观察周期', '成功标准', '停止条件', '任务触发原因', '库存提醒',
+]
+
+# 页面主表只投影运营直接需要的字段。其余字段保留在后台DataFrame中，
+# 供详情、导出和可信度解释使用。
+AI_TASK_MAIN_COLUMNS = [
+    '执行优先级', '任务优先分', '款式主图', '货号', '链接数', '宝贝ID',
+    'GMV', '商品访客数', '链接投产', '淘宝类目', '综合等级', '商品定位',
+    '商品周期', 'MetoX算法命中', 'AI任务类型', '商品级总策略', '主执行动作',
+    '动作对象', '关键词动作', '人群动作', '全站动作', '计划执行摘要',
+    '观察周期', '成功标准', '停止条件', '任务触发原因', 'AI可信度', '库存提醒',
 ]
 
 PLAN_DETAIL_COLUMNS = [
@@ -60,6 +71,16 @@ def _raw_or_blank(value):
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return ''
     return value
+
+
+def _field_available(row, columns, field: str, allow_blank: bool = False) -> bool:
+    """判断执行表字段是否可用；0是有效值，不把业务上的0当成缺失。"""
+    if field not in columns:
+        return False
+    value = row.get(field, None)
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return False
+    return allow_blank or bool(_text(value))
 
 
 def _labels(value) -> set[str]:
@@ -366,6 +387,18 @@ def _build_product_context(row, columns, benchmarks):
     plan_completeness = to_num(row.get('计划数据完整度', 1.0 if plans or spend <= 0 else 0.0))
     period_label = _text(row.get('计划数据口径', ''))
     source_window = _source_window(period_label)
+    plan_period_days = int(to_num(row.get('计划统计天数', 0)))
+    plan_actual_days = int(to_num(row.get('计划实际数据天数', 0)))
+    if period_label == '当日累计':
+        label_days = 1
+    else:
+        period_match = re.fullmatch(r'近(\d+)天累计', period_label)
+        label_days = int(period_match.group(1)) if period_match else 0
+    plan_applicable = plan_total > 0 or spend > 0
+    period_consistent = (
+        True if not plan_applicable
+        else bool(plan_period_days > 0 and label_days == plan_period_days)
+    )
     active_channels = [m for m in channels.values() if m['spend'] > 0]
     high_channels = [name for name, m in channels.items() if m['state'] == '高效渠道']
     normal_channels = [name for name, m in channels.items() if m['state'] == '正常渠道']
@@ -397,6 +430,8 @@ def _build_product_context(row, columns, benchmarks):
         'plan_total': plan_total, 'plan_display': plan_display,
         'plan_coverage': max(0.0, min(plan_coverage, 1.0)),
         'plan_completeness': max(0.0, min(plan_completeness, 1.0)),
+        'plan_period_days': plan_period_days, 'plan_actual_days': plan_actual_days,
+        'period_consistent': period_consistent,
         'period_label': period_label, 'source_window': source_window,
     }
 
@@ -731,37 +766,56 @@ def _plan_data_explanation(ctx) -> str:
 
 
 def _ai_confidence(ctx) -> tuple[str, int, str]:
-    """仅生成运营参考可信度；不得回流任务类型、策略、优先级或动作。"""
-    product_complete = sum(bool(value) for value in (
-        _text(ctx['row'].get('宝贝ID', '')), ctx['grade'], ctx['position'], ctx['cycle'],
-    )) / 4
+    """生成唯一综合可信度和运营检查清单，不回流任何业务判断。"""
+    product_fields = (
+        '宝贝ID', '综合等级', '商品定位', '商品周期',
+        'GMV', '商品访客数', '链接投产',
+    )
+    product_complete = sum(
+        _field_available(ctx['row'], ctx['columns'], field)
+        for field in product_fields
+    ) / len(product_fields)
     channel_complete = sum(
         metrics['state'] != '数据不足' for metrics in ctx['channels'].values()
     ) / max(len(ctx['channels']), 1)
     plan_applicable = ctx['plan_total'] > 0 or ctx['spend'] > 0
-    period_complete = ctx['plan_completeness'] if plan_applicable else 1.0
+    plan_complete = ctx['plan_completeness'] if plan_applicable else 1.0
+    if plan_applicable and (ctx['plan_parse_error'] or (ctx['plan_total'] > 0 and not ctx['plans'])):
+        plan_complete = 0.0
     plan_coverage = ctx['plan_coverage'] if plan_applicable else 1.0
+    period_consistent = 1.0 if ctx['period_consistent'] else 0.0
+    missing_data_complete = 0.0 if (ctx['data_issues'] or ctx['plan_parse_error']) else 1.0
+    metox_complete = float(all(
+        _field_available(ctx['row'], ctx['columns'], field, allow_blank=True)
+        for field in ('MetoX算法命中', 'MetoX算法分', 'MetoX算法原因')
+    ))
     score = round(
-        30 * period_complete
-        + 25 * plan_coverage
-        + 25 * channel_complete
-        + 20 * product_complete
+        20 * product_complete
+        + 20 * channel_complete
+        + 20 * plan_complete
+        + 15 * plan_coverage
+        + 15 * period_consistent
+        + 5 * missing_data_complete
+        + 5 * metox_complete
     )
     score = max(0, min(int(score), 100))
-    star_count = max(1, min(5, int((score + 10) // 20)))
-    display = f'{"★" * star_count}{"☆" * (5 - star_count)} {score}%'
-    reasons = []
-    if period_complete < 1:
-        reasons.append(f'周期数据完整度{period_complete:.0%}')
-    if plan_applicable and plan_coverage < 0.8:
-        reasons.append(f'Top3计划花费覆盖{plan_coverage:.0%}')
-    if channel_complete < 1:
-        reasons.append('部分渠道归因不足')
-    if product_complete < 1:
-        reasons.append('商品关键字段不完整')
-    if not reasons:
-        reasons.append('商品、渠道、计划及周期数据完整')
-    return display, score, '；'.join(reasons)
+    star_count = 5 if score >= 90 else 4 if score >= 75 else 3 if score >= 60 else 2 if score >= 40 else 1
+    display = f'{"★" * star_count}{"☆" * (5 - star_count)}（{score}%）'
+    reasons = [
+        '✓ 商品数据完整' if product_complete == 1 else '△ 商品关键数据缺失',
+        '✓ 渠道数据完整' if channel_complete == 1 else '△ 部分渠道数据不足',
+        '✓ 商品-计划数据完整' if plan_complete == 1 else '△ 部分计划数据缺失',
+    ]
+    if plan_applicable and ctx['plan_total'] > ctx['plan_display']:
+        reasons.append(f'△ 当前仅展示Top3关键计划（花费覆盖{plan_coverage:.0%}）')
+    else:
+        reasons.append('✓ 关键计划展示完整')
+    reasons.extend([
+        '✓ 周期统计一致' if period_consistent == 1 else '△ 周期统计口径待核对',
+        '✓ 未发现关键数据缺失' if missing_data_complete == 1 else '△ 存在关键数据缺失',
+        '✓ MetoX数据完整' if metox_complete == 1 else '△ MetoX数据不完整',
+    ])
+    return display, score, '\n'.join(reasons)
 
 
 def _consistency_conflicts(ctx, strategy: str, channels: dict, plans: list[dict]) -> list[str]:
@@ -958,6 +1012,9 @@ def build_ai_task_view(df: pd.DataFrame) -> pd.DataFrame:
             '货号': _raw_or_blank(row.get('货号', '')),
             '链接数': _raw_or_blank(row.get('链接数', '')),
             '宝贝ID': _raw_or_blank(row.get('宝贝ID', '')),
+            'GMV': _raw_or_blank(row.get('GMV', '')),
+            '商品访客数': _raw_or_blank(row.get('商品访客数', '')),
+            '链接投产': _raw_or_blank(row.get('链接投产', '')),
             '商品名称': _raw_or_blank(row.get('商品名称', '')),
             '淘宝类目': _raw_or_blank(row.get('淘宝类目', '')),
             '综合等级': _raw_or_blank(row.get('综合等级', '')),

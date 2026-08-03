@@ -27,7 +27,7 @@ from core.analysis import (
 from core.acceptance import build_source_status
 from core.v93_signal import parse_v93_report
 from core.metox_algorithm import apply_metox_algorithm
-from core.task_engine import parse_plan_execution_details
+from core.task_engine import AI_TASK_MAIN_COLUMNS, parse_plan_execution_details
 from core.jst_stock import find_snapshot, load_snapshot_as_stock
 from core.jst_refund import find_refund_snapshot, load_refund_rates
 from core.exporter import export_execution_table, export_all_sheets, style_execution_table
@@ -1232,7 +1232,7 @@ with tab3:
     if task_filtered.empty:
         st.info("当前筛选条件下暂无具有明确处理价值的商品任务")
     else:
-        task_main = task_filtered.drop(columns=['计划执行明细'], errors='ignore')
+        task_main = task_filtered[AI_TASK_MAIN_COLUMNS].copy()
         st.dataframe(
             task_main,
             use_container_width=True,
@@ -1243,6 +1243,14 @@ with tab3:
                     '款式主图链接',
                     width='medium',
                     help='仅显示链接，不预加载图片',
+                ),
+                '商品级总策略': st.column_config.TextColumn('商品级策略'),
+                'AI可信度': st.column_config.TextColumn(
+                    'AI可信度',
+                    help=(
+                        '综合商品、渠道、商品-计划、Top3覆盖、周期一致性、'
+                        '数据缺失和MetoX完整性。选择商品后可查看详细依据。'
+                    ),
                 ),
             },
         )
@@ -1268,9 +1276,12 @@ with tab3:
         selected_task = task_choices.iloc[selected_task_index]
         st.caption(
             f"动作对象：{selected_task['动作对象']}｜{selected_task['计划数据说明']}｜"
-            f"计划覆盖率：{selected_task['计划覆盖率']}｜"
-            f"AI可信度：{selected_task['AI可信度']}（{selected_task['AI可信度说明']}）"
+            f"计划覆盖率：{selected_task['计划覆盖率']}"
         )
+        with st.expander("AI可信度说明", expanded=False):
+            st.markdown(f"**AI可信度：{selected_task['AI可信度']}**")
+            for confidence_item in selected_task['AI可信度说明'].splitlines():
+                st.write(confidence_item)
         selected_plan_details = parse_plan_execution_details(selected_task['计划执行明细'])
         if selected_plan_details.empty:
             st.info(selected_task['计划执行摘要'])
