@@ -97,6 +97,10 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.startup_launcher")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("runtime_packaging"):
         errors.append("VERSION.json must record rule_versions.runtime_packaging")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("direct_purchase_metrics"):
+        errors.append("VERSION.json must record rule_versions.direct_purchase_metrics")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("ai_task_period_alignment"):
+        errors.append("VERSION.json must record rule_versions.ai_task_period_alignment")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()
@@ -161,6 +165,21 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("page refund-risk line must be strict >0.7")
     if "df['退款率'] > 0.7" not in exporter:
         errors.append("Excel refund-risk line must be strict >0.7")
+
+    schema = (ROOT / "core" / "schema.py").read_text(encoding="utf-8")
+    loader = (ROOT / "core" / "loader.py").read_text(encoding="utf-8")
+    merge = (ROOT / "core" / "merge.py").read_text(encoding="utf-8")
+    periods = (ROOT / "core" / "periods.py").read_text(encoding="utf-8")
+    if "'直接购物车数':'直购数量'" not in schema:
+        errors.append("direct-purchase quantity must map from 直接购物车数")
+    if "'直接成交笔数':'直购数量'" in schema:
+        errors.append("direct-purchase quantity must not map from 直接成交笔数")
+    if "PARSED_CACHE_VERSION = 'v9'" not in loader:
+        errors.append("direct-purchase source change requires parsed cache v9")
+    if "grouped['直购成本'] = _safe_div_series(" not in merge:
+        errors.append("daily direct-purchase cost must be spend divided by quantity")
+    if 'grouped["直购成本"] = _ratio_series(spend, grouped["直购数量"])' not in periods:
+        errors.append("period direct-purchase cost must be recalculated from period totals")
 
     for relative_template, marker_template in CURRENT_DOCS.items():
         relative = relative_template.format(version=version)

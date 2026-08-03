@@ -9,6 +9,18 @@ from .schema import (
     classify_channel,
     to_num,
 )
+from .plan_metrics import (
+    FULL_PLAN_DETAIL_COLUMN,
+    PLAN_ACTUAL_DAYS_COLUMN,
+    PLAN_COMPLETENESS_COLUMN,
+    PLAN_COVERAGE_COLUMN,
+    PLAN_DISPLAY_COUNT_COLUMN,
+    PLAN_PERIOD_DAYS_COLUMN,
+    PLAN_PERIOD_LABEL_COLUMN,
+    PLAN_PERIOD_RANGE_COLUMN,
+    PLAN_TOTAL_COUNT_COLUMN,
+    summarize_plan_records,
+)
 
 
 LEGACY_SOURCE_PRODUCT_ROI = '生意参谋商品数据'
@@ -25,7 +37,7 @@ METOX_VISITOR_COLS = ['关键词推广访客数', '人群推广访客数', '场�
 METOX_CART_PEOPLE_COLS = ['关键词推广加购人数', '人群推广加购人数', '场景推广加购人数']
 METOX_CART_COUNT_COLS = ['关键词推广加购数', '人群推广加购数', '场景推广加购数']
 FIRST_COLS = ['淘宝类目', '统计日期', '商品名称', '创建时间']
-WUJIE_SUM_COLS = ['付费', 'MetoX推广花费', '推广加购数', '直购数量', '直购成本', '展现', '点击']
+WUJIE_SUM_COLS = ['付费', 'MetoX推广花费', '推广加购数', '直购数量', '展现', '点击']
 CHANNEL_COLS = ['关键词', '人群', '全站', '店铺直达']
 # 渠道归因成交(2026-07-11):渠道分析 ROI=渠道归因成交÷渠道花费,与渠道花费同源同口径
 CHANNEL_ATTR_COLS = [f'{ch}归因成交' for ch in CHANNEL_COLS]
@@ -49,8 +61,14 @@ REQUIRED_COLS = [
     '上周期金额','上周期付费','上周期人群','上周期关键词','上周期全站',
     '日销3','日销15','花费3','花费7','花费15',
     '关键词环比','人群环比','全站环比','店铺直达环比',
+    PLAN_TOTAL_COUNT_COLUMN, PLAN_DISPLAY_COUNT_COLUMN, PLAN_COVERAGE_COLUMN,
+    PLAN_COMPLETENESS_COLUMN, PLAN_PERIOD_DAYS_COLUMN, PLAN_ACTUAL_DAYS_COLUMN,
 ]
-STRING_COLS = ['宝贝ID', '款式主图', '货号', '商品名称', '统计日期', '淘宝类目', '创建时间', '推广明细', 'v9.3信号']
+STRING_COLS = [
+    '宝贝ID', '款式主图', '货号', '商品名称', '统计日期', '淘宝类目',
+    '创建时间', '推广明细', FULL_PLAN_DETAIL_COLUMN, PLAN_PERIOD_LABEL_COLUMN,
+    PLAN_PERIOD_RANGE_COLUMN, 'v9.3信号',
+]
 
 
 def _frames_for(sources, *source_names):
@@ -192,6 +210,11 @@ def _wujie_agg(work):
         agg['推广成交金额'] = 'sum'
 
     grouped = work.groupby('_pid', as_index=False).agg(agg) if agg else work[['_pid']].drop_duplicates()
+    zero = pd.Series(0.0, index=grouped.index)
+    grouped['直购成本'] = _safe_div_series(
+        grouped['付费'] if '付费' in grouped.columns else zero,
+        grouped['直购数量'] if '直购数量' in grouped.columns else zero,
+    )
 
     if '付费' in work.columns:
         spend = work.copy()
@@ -229,50 +252,60 @@ def _collect_plan_ids(work):
     return set(plan_ids[(plan_ids != '') & (spend > 0)])
 
 
-def _format_amount(value):
-    return f"{to_num(value):.2f}"
-
-
-def _format_count(value):
-    num = to_num(value)
-    if float(num).is_integer():
-        return str(int(num))
-    return f"{num:.2f}".rstrip('0').rstrip('.')
-
-
 def _promotion_detail_agg(work):
     if work.empty or '计划ID' not in work.columns:
-        return pd.DataFrame(columns=['宝贝ID', '推广明细'])
+        return pd.DataFrame(columns=['宝贝ID', '推广明细', FULL_PLAN_DETAIL_COLUMN])
 
     detail = work.copy()
     detail['plan_id'] = _clean_id_series(detail['计划ID'])
     detail['spend'] = _numeric_series(detail['付费']) if '付费' in detail.columns else 0.0
     roi_col = '推广投产' if '推广投产' in detail.columns else '投入产出比'
     detail['roi'] = _numeric_series(detail[roi_col]) if roi_col in detail.columns else 0.0
+    raw_gmv = _numeric_series(detail['GMV']) if 'GMV' in detail.columns else pd.Series(0.0, index=detail.index)
+    detail['attributed'] = raw_gmv.where(raw_gmv > 0, detail['spend'] * detail['roi'])
     detail['add_cart'] = _numeric_series(detail['商品加购件数']) if '商品加购件数' in detail.columns else 0.0
+    detail['clicks'] = _numeric_series(detail['点击']) if '点击' in detail.columns else 0.0
+    scene = detail['场景名字'] if '场景名字' in detail.columns else pd.Series('', index=detail.index)
+    detail['channel'] = scene.map(classify_channel)
     detail = detail[(detail['_pid'].ne('')) & (detail['plan_id'].ne('')) & (detail['spend'] > 0)]
     if detail.empty:
-        return pd.DataFrame(columns=['宝贝ID', '推广明细'])
+        return pd.DataFrame(columns=['宝贝ID', '推广明细', FULL_PLAN_DETAIL_COLUMN])
 
-    detail['weighted_roi'] = detail['roi'] * detail['spend']
     grouped = (
         detail.groupby(['_pid', 'plan_id'], as_index=False)
-        .agg(spend=('spend', 'sum'), weighted_roi=('weighted_roi', 'sum'), add_cart=('add_cart', 'sum'))
+        .agg(
+            spend=('spend', 'sum'),
+            attributed=('attributed', 'sum'),
+            add_cart=('add_cart', 'sum'),
+            clicks=('clicks', 'sum'),
+            channel=('channel', _first_non_empty),
+        )
     )
-    grouped['roi'] = grouped['weighted_roi'] / grouped['spend'].where(grouped['spend'] != 0, 1)
     grouped = grouped.sort_values(['_pid', 'spend', 'plan_id'], ascending=[True, False, True])
 
     rows = []
     for pid, part in grouped.groupby('_pid', sort=False):
-        lines = []
-        for idx, row in enumerate(part.head(3).to_dict('records'), start=1):
-            lines.append(
-                f"{idx}. 计划ID:{row['plan_id']} "
-                f"花费:{_format_amount(row['spend'])} "
-                f"投产:{_format_amount(row['roi'])} "
-                f"加购:{_format_count(row['add_cart'])}"
-            )
-        rows.append({'宝贝ID': pid, '推广明细': '\n'.join(lines)})
+        records = [
+            {
+                '计划ID': row['plan_id'],
+                '所属渠道': row['channel'],
+                '当前花费': row['spend'],
+                '归因成交': row['attributed'],
+                '加购': row['add_cart'],
+                '点击': row['clicks'],
+            }
+            for row in part.to_dict('records')
+        ]
+        rows.append({
+            '宝贝ID': pid,
+            **summarize_plan_records(
+                records,
+                period_days=1,
+                actual_days=1,
+                top_n=3,
+                full_source_available=True,
+            ),
+        })
     return pd.DataFrame(rows)
 
 

@@ -483,6 +483,13 @@ def build_ai_task_view(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+# AI 任务策略已独立到 task_engine；在此重导出，保持 app/exporter 的既有调用路径不变。
+from .task_engine import (  # noqa: E402,F401
+    AI_TASK_VIEW_COLUMNS as AI_TASK_VIEW_COLUMNS,
+    build_ai_task_view as build_ai_task_view,
+)
+
+
 def _s(df, col):
     """安全求和：列不存在返回 0"""
     return float(df[col].sum()) if col in df.columns else 0.0

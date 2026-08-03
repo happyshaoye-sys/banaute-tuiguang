@@ -6,6 +6,17 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from .schema import safe_div, to_num
+from .plan_metrics import (
+    FULL_PLAN_DETAIL_COLUMN,
+    PLAN_ACTUAL_DAYS_COLUMN,
+    PLAN_COMPLETENESS_COLUMN,
+    PLAN_COVERAGE_COLUMN,
+    PLAN_DISPLAY_COUNT_COLUMN,
+    PLAN_METADATA_COLUMNS,
+    PLAN_PERIOD_DAYS_COLUMN,
+    PLAN_TOTAL_COUNT_COLUMN,
+    summarize_period_product_plans,
+)
 
 
 PERIOD_SPECS = [
@@ -13,6 +24,7 @@ PERIOD_SPECS = [
     (3, "3日环比"),
     (7, "7日环比"),
     (15, "15日环比"),
+    (30, "30日环比"),
 ]
 
 COMPARISON_FIELDS = []
@@ -86,8 +98,14 @@ def aggregate_category_metrics(day_map, days, metrics):
     }
 
 
-def aggregate_period_frame(df, period_days=7):
-    """把多日执行表按宝贝ID累计，并重新计算 ROI、点击率等比率字段。"""
+def aggregate_period_frame(
+    df,
+    period_days=7,
+    actual_days=None,
+    period_start=None,
+    period_end=None,
+):
+    """按宝贝累计所选周期，并在完整周期计划池上生成 Top3 展示。"""
     if df is None or len(df) == 0:
         return pd.DataFrame()
     if "宝贝ID" not in df.columns:
@@ -98,15 +116,48 @@ def aggregate_period_frame(df, period_days=7):
         "MetoX推广花费", "MetoX推广成交金额", "MetoX推广加购数", "MetoX推广访客数",
         "关键词归因成交", "人群归因成交", "全站归因成交", "店铺直达归因成交",
         "商品访客数", "支付买家数", "支付件数", "商品加购件数", "推广加购数",
-        "成功退款金额", "搜索引导访客数", "直购数量", "直购成本",
+        "成功退款金额", "搜索引导访客数", "直购数量",
         "展现", "点击",
     ]
-    first_cols = ["款式主图", "货号", "商品名称", "统计日期", "淘宝类目", "创建时间", "推广明细"]
+    has_full_plan_details = FULL_PLAN_DETAIL_COLUMN in df.columns
+    first_cols = ["款式主图", "货号", "商品名称", "统计日期", "淘宝类目", "创建时间"]
+    if not has_full_plan_details:
+        # 兼容历史/手工 DataFrame；新管道由全量商品×PlanID数据重新生成推广明细。
+        first_cols.append("推广明细")
     stable_numeric_cols = ["在仓库存", "在途", "成本价（含税）", "日销7", "日销3", "日销15",
                            "花费3", "花费7", "花费15", "退款率"]
     numeric_cols = set(sum_cols + stable_numeric_cols)
 
     work = df.copy()
+    date_values = []
+    if "_数据日期" in work.columns:
+        date_values = sorted({
+            str(value).strip() for value in work["_数据日期"].dropna()
+            if str(value).strip() not in ('', 'nan', 'None')
+        })
+    expected_days = max(int(period_days or 1), 1)
+    loaded_days = (
+        int(actual_days)
+        if actual_days is not None
+        else (len(date_values) if date_values else expected_days)
+    )
+    scope_start = str(period_start or (date_values[0] if date_values else ''))
+    scope_end = str(period_end or (date_values[-1] if date_values else ''))
+
+    plan_summaries = []
+    if has_full_plan_details:
+        for product_id, product_rows in work.groupby("宝贝ID", sort=False):
+            plan_summaries.append({
+                '宝贝ID': product_id,
+                **summarize_period_product_plans(
+                    product_rows,
+                    period_days=expected_days,
+                    actual_days=loaded_days,
+                    period_start=scope_start,
+                    period_end=scope_end,
+                    top_n=3,
+                ),
+            })
     for col in numeric_cols:
         if col in work.columns:
             # 退款率需保留 NaN(聚水潭未覆盖=无数据≠0%),to_num 会把 NaN 压成 0
@@ -127,6 +178,12 @@ def aggregate_period_frame(df, period_days=7):
             agg[col] = "max"
 
     grouped = work.groupby("宝贝ID", as_index=False).agg(agg)
+    if plan_summaries:
+        grouped = grouped.merge(pd.DataFrame(plan_summaries), on="宝贝ID", how="left")
+    elif has_full_plan_details:
+        for column in PLAN_METADATA_COLUMNS:
+            if column not in grouped.columns:
+                grouped[column] = '' if column == FULL_PLAN_DETAIL_COLUMN else 0
 
     for col in sum_cols + stable_numeric_cols:
         if col not in grouped.columns:
@@ -134,6 +191,17 @@ def aggregate_period_frame(df, period_days=7):
         elif col == "退款率":
             grouped[col] = pd.to_numeric(grouped[col], errors="coerce")
         else:
+            grouped[col] = _numeric_series(grouped[col])
+
+    for col in (
+        PLAN_TOTAL_COUNT_COLUMN,
+        PLAN_DISPLAY_COUNT_COLUMN,
+        PLAN_COVERAGE_COLUMN,
+        PLAN_COMPLETENESS_COLUMN,
+        PLAN_PERIOD_DAYS_COLUMN,
+        PLAN_ACTUAL_DAYS_COLUMN,
+    ):
+        if col in grouped.columns:
             grouped[col] = _numeric_series(grouped[col])
 
     gmv = grouped["GMV"]
@@ -152,6 +220,7 @@ def aggregate_period_frame(df, period_days=7):
     # 双投产口径(与 merge._finalize_result 一致):推广投产=归因成交÷花费,链接投产=GMV÷花费
     grouped["推广投产"] = _ratio_series(grouped["推广成交金额"], spend)
     grouped["推广实际投产"] = grouped["推广投产"] * (1 - grouped["退款率"].fillna(0.0))
+    grouped["直购成本"] = _ratio_series(spend, grouped["直购数量"])
     grouped["件单价"] = _ratio_series(gmv, units)
     grouped["利润率"] = _ratio_series(grouped["件单价"] - cost, grouped["件单价"])
     grouped["预估利润"] = (gmv - refund) * grouped["利润率"]

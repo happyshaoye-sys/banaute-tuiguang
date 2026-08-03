@@ -20,7 +20,7 @@ XLSX_NS = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
 RELS_NS = '{http://schemas.openxmlformats.org/package/2006/relationships}'
 OFFICE_RELS_NS = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
 COL_REF_RE = re.compile(r'([A-Z]+)')
-PARSED_CACHE_VERSION = 'v8'  # v8: 无界白名单纳入"主体类型"(P0-1 剔除店铺主体假商品);v7: 保留 04 商品经营投产比的 MetoX 原版广告字段
+PARSED_CACHE_VERSION = 'v9'  # v9: 直购数量改读"直接购物车数"并废止旧成交笔数/总成交成本缓存
 
 
 SOURCE_REQUIRED_FIELDS = {
@@ -36,7 +36,7 @@ SOURCE_REQUIRED_FIELDS = {
     },
     SOURCE_WUJIE_SUBJECT: {
         '宝贝ID', '付费', '计划ID', '商品支付转化率', '投入产出比',
-        '直接成交笔数', '总成交成本', '场景名字', '转化周期',
+        '直接购物车数', '场景名字', '转化周期',
         '展现', '点击', '点击率', '转化率', '商品加购件数',
         '主体类型',  # P0-1: 供 merge 剔除"店铺"主体假商品(店铺首页混入商品池)
     },

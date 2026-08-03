@@ -1,16 +1,34 @@
-"""AI task view decision-boundary and UI-contract tests."""
+"""AI任务策略引擎18个反向场景与页面契约测试。"""
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import unittest
 
 import pandas as pd
 from pandas.testing import assert_frame_equal
 
 from core.analysis import AI_TASK_VIEW_COLUMNS, build_ai_task_view
+from core.task_engine import (
+    PLAN_DETAIL_COLUMNS,
+    _consistency_conflicts,
+    parse_plan_execution_details,
+)
 
 
 ROOT = Path(__file__).resolve().parent
+
+
+def _detail(*plans):
+    lines = []
+    for index, plan in enumerate(plans, start=1):
+        lines.append(
+            f"{index}. 计划ID:{plan.get('id', index)} "
+            f"花费:{plan.get('spend', 0):.2f} "
+            f"投产:{plan.get('roi', 0):.2f} "
+            f"加购:{plan.get('cart', 0)}"
+        )
+    return '\n'.join(lines)
 
 
 def _row(**overrides):
@@ -31,102 +49,203 @@ def _row(**overrides):
         '日销3': 8, '日销7': 7, '日销15': 6,
         '花费3': 45, '花费7': 42, '花费15': 40,
         '退款率': 0.1, '在仓库存': 100, '在途': 0, '风险标签': '',
+        '推广明细': _detail(
+            {'id': 'P-HIGH', 'spend': 120, 'roi': 12, 'cart': 15},
+            {'id': 'P-NORMAL', 'spend': 100, 'roi': 8, 'cart': 8},
+            {'id': 'P-LOW', 'spend': 80, 'roi': 2, 'cart': 1},
+        ),
     }
     row.update(overrides)
     return row
 
 
 def _one(**overrides):
-    return build_ai_task_view(pd.DataFrame([_row(**overrides)])).iloc[0]
+    result = build_ai_task_view(pd.DataFrame([_row(**overrides)]))
+    if result.empty:
+        raise AssertionError('预期生成任务，实际被过滤')
+    return result.iloc[0]
 
 
-class AITaskViewScenarioTests(unittest.TestCase):
-    def test_01_a_plus_growth_strong_and_burst_is_scale(self):
+def _plans(task):
+    return parse_plan_execution_details(task['计划执行明细'])
+
+
+class AITaskViewEighteenScenarioTests(unittest.TestCase):
+    def test_01_a_sprint_growth_reduce_spillover_keyword_high_crowd_low(self):
         task = _one(
-            综合等级='A+', 商品定位='明星款', 商品周期='成长期',
-            MetoX算法命中='强主推|爆发', MetoX算法分=40,
+            综合等级='A', 商品定位='冲刺款', 商品周期='成长期',
+            MetoX算法命中='削减|溢出', 推广成交金额=1800,
+            关键词归因成交=1200, 人群归因成交=200, 全站归因成交=400,
         )
-        self.assertEqual(task['AI任务类型'], '放量任务')
-        self.assertEqual(task['最终推广策略'], '重点放量')
-        self.assertEqual(task['执行优先级'], 'P1')
+        self.assertEqual(task['AI任务类型'], '渠道调整任务')
+        self.assertEqual(task['商品级总策略'], '预算迁移')
+        self.assertEqual(task['关键词状态'], '高效渠道')
+        self.assertEqual(task['人群状态'], '低效渠道')
+        self.assertIn('增加', task['关键词动作'])
+        self.assertIn('削减', task['人群动作'])
 
-    def test_02_b_test_period_recent_is_test(self):
+    def test_02_a_plus_cash_cow_needs_optimization_without_aggressive_increase(self):
         task = _one(
-            综合等级='B', 商品定位='潜力款', 商品周期='测试期',
-            MetoX算法命中='近3日潜力', MetoX算法分=20,
+            综合等级='A+', 商品定位='金牛款', 商品周期='待优化',
+            MetoX算法命中='削减|溢出', 推广成交金额=1800,
+            关键词归因成交=1200, 人群归因成交=200, 全站归因成交=400,
         )
-        self.assertEqual(task['AI任务类型'], '测试任务')
-        self.assertEqual(task['最终推广策略'], '扩量测试')
+        self.assertEqual(task['商品级总策略'], '结构优化')
+        self.assertTrue(task['关键词动作'].startswith('保持高效投放'))
+        self.assertIn('削减30%～50%', task['人群动作'])
 
-    def test_03_a_mature_loss_and_spillover_prioritizes_risk(self):
+    def test_03_b_potential_decline_warning_keeps_test_not_large_migration(self):
         task = _one(
-            综合等级='A', 商品定位='金牛款', 商品周期='成熟期',
-            MetoX算法命中='亏损风险|溢出', MetoX算法分=-10,
-            推广成交金额=100, 付费=300,
+            综合等级='B', 商品定位='潜力款', 商品周期='衰退预警',
+            MetoX算法命中='削减|溢出', 推广成交金额=1800,
+            关键词归因成交=1200, 人群归因成交=200, 全站归因成交=400,
+        )
+        self.assertEqual(task['商品级总策略'], '结构优化')
+        self.assertNotEqual(task['商品级总策略'], '预算迁移')
+        self.assertIn('保持高效', task['关键词动作'])
+
+    def test_04_c_wait_improve_only_reduce_is_stop_loss(self):
+        task = _one(
+            综合等级='C', 商品定位='待改善', 商品周期='待优化',
+            MetoX算法命中='削减', 推广成交金额=0,
+            关键词归因成交=0, 人群归因成交=0, 全站归因成交=0,
         )
         self.assertEqual(task['AI任务类型'], '止损任务')
-        self.assertNotIn(task['最终推广策略'], ('重点放量', '谨慎放量'))
+        self.assertEqual(task['商品级总策略'], '暂停推广')
+        self.assertIn('复核主图', task['非投放动作'])
 
-    def test_04_add_budget_with_saturation_stops_expansion(self):
-        task = _one(MetoX算法命中='加预算|饱和观察', MetoX算法分=45)
-        self.assertEqual(task['AI任务类型'], '稳量任务')
-        self.assertEqual(task['最终推广策略'], '继续观察')
-
-    def test_05_protect_hold_is_stable(self):
-        task = _one(MetoX算法命中='保护持有', MetoX算法分=15)
-        self.assertEqual(task['AI任务类型'], '稳量任务')
-        self.assertEqual(task['最终推广策略'], '保持投放')
-
-    def test_06_reduce_is_loss_or_channel_action(self):
-        task = _one(MetoX算法命中='削减', MetoX算法分=-30, 推广成交金额=100, 付费=300)
-        self.assertEqual(task['AI任务类型'], '止损任务')
-        self.assertEqual(task['最终推广策略'], '削减投放')
-
-    def test_07_opportunity_and_risk_conflict_is_manual_p1(self):
-        task = _one(MetoX算法命中='强主推|亏损风险', MetoX算法分=10)
-        self.assertEqual(task['AI任务类型'], '人工复核任务')
-        self.assertEqual(task['最终推广策略'], '人工复核')
-        self.assertEqual(task['执行优先级'], 'P1')
-
-    def test_08_d_weak_opportunity_never_scales(self):
+    def test_05_all_paid_channels_low_pauses_or_reduces(self):
         task = _one(
-            综合等级='D', 商品定位='滞销款', 商品周期='观察期',
-            MetoX算法命中='明日之星', MetoX算法分=5,
+            MetoX算法命中='削减', 推广成交金额=0,
+            关键词归因成交=0, 人群归因成交=0, 全站归因成交=0,
         )
+        self.assertEqual(task['商品级总策略'], '暂停推广')
+        self.assertTrue(all(_plans(task)['建议动作'] == '暂停'))
+
+    def test_06_only_keyword_is_efficient(self):
+        task = _one(
+            MetoX算法命中='削减|溢出', 推广成交金额=1200,
+            关键词=120, 关键词归因成交=1200,
+            人群=0, 人群归因成交=0, 全站=0, 全站归因成交=0,
+        )
+        self.assertEqual(task['关键词状态'], '高效渠道')
+        self.assertEqual(task['人群状态'], '暂无投放')
+        self.assertNotEqual(task['商品级总策略'], '预算迁移')
+
+    def test_07_only_omni_is_efficient(self):
+        task = _one(
+            MetoX算法命中='削减|溢出', 推广成交金额=800,
+            关键词=0, 关键词归因成交=0, 人群=0, 人群归因成交=0,
+            全站=80, 全站归因成交=800,
+        )
+        self.assertEqual(task['全站状态'], '高效渠道')
+        self.assertEqual(task['关键词状态'], '暂无投放')
+        self.assertNotEqual(task['商品级总策略'], '预算迁移')
+
+    def test_08_all_channels_zero_never_generates_budget_migration(self):
+        task = _one(
+            MetoX算法命中='爆发', 付费=0, 推广成交金额=0,
+            关键词=0, 人群=0, 全站=0,
+            关键词归因成交=0, 人群归因成交=0, 全站归因成交=0,
+            推广明细='',
+        )
+        self.assertNotEqual(task['商品级总策略'], '预算迁移')
+        self.assertEqual(task['关键词状态'], '暂无投放')
+        self.assertIn('小额测试', task['关键词动作'])
+
+    def test_09_paid_channels_missing_attribution_require_manual_review(self):
+        frame = pd.DataFrame([_row(MetoX算法命中='强主推', 推广明细='')]).drop(
+            columns=['关键词归因成交', '人群归因成交', '全站归因成交']
+        )
+        task = build_ai_task_view(frame).iloc[0]
         self.assertEqual(task['AI任务类型'], '人工复核任务')
         self.assertEqual(task['执行优先级'], 'P4')
-        self.assertNotIn(task['最终推广策略'], ('重点放量', '谨慎放量'))
+        self.assertEqual(task['关键词状态'], '数据不足')
 
-    def test_09_low_stock_does_not_cancel_scale_or_change_priority(self):
-        normal = _one(
-            综合等级='A+', 商品定位='明星款', MetoX算法命中='强主推',
-            MetoX算法分=30, 在仓库存=100,
+    def test_10_multiple_plans_mix_high_and_low_actions(self):
+        task = _one(
+            MetoX算法命中='削减|溢出', 推广成交金额=1800,
+            关键词归因成交=1200, 人群归因成交=200, 全站归因成交=400,
         )
-        low = _one(
-            综合等级='A+', 商品定位='明星款', MetoX算法命中='强主推',
-            MetoX算法分=30, 在仓库存=2,
+        actions = set(_plans(task)['建议动作'])
+        self.assertIn('增加', actions)
+        self.assertTrue(actions & {'削减', '暂停'})
+        self.assertEqual(task['推广计划数'], 3)
+
+    def test_11_all_plans_low_follow_product_stop_loss(self):
+        task = _one(
+            MetoX算法命中='削减', 推广成交金额=0,
+            关键词归因成交=0, 人群归因成交=0, 全站归因成交=0,
+            推广明细=_detail(
+                {'id': 'L1', 'spend': 120, 'roi': 0},
+                {'id': 'L2', 'spend': 100, 'roi': 0},
+            ),
         )
-        self.assertEqual(low['AI任务类型'], '放量任务')
-        self.assertEqual(low['最终推广策略'], normal['最终推广策略'])
+        self.assertEqual(task['商品级总策略'], '暂停推广')
+        self.assertEqual(set(_plans(task)['建议动作']), {'暂停'})
+
+    def test_12_single_valid_plan_is_parsed_and_acted_on(self):
+        task = _one(
+            MetoX算法命中='爆发',
+            推广明细=_detail({'id': 'ONLY-1', 'spend': 300, 'roi': 8, 'cart': 20}),
+        )
+        details = _plans(task)
+        self.assertEqual(len(details), 1)
+        self.assertEqual(details.iloc[0]['计划ID'], 'ONLY-1')
+        self.assertIn(details.iloc[0]['建议动作'], ('增加', '保持'))
+
+    def test_13_plan_parse_failure_does_not_break_product_or_channel_advice(self):
+        task = _one(MetoX算法命中='保护持有', 推广明细='这不是可解析的计划明细')
+        self.assertEqual(task['商品级总策略'], '保持投放')
+        self.assertEqual(task['推广计划数'], 0)
+        self.assertEqual(task['计划执行摘要'], '计划明细不足，请人工复核')
+        self.assertTrue(_plans(task).empty)
+
+    def test_14_product_plan_conflict_is_detected(self):
+        ctx = {'low_channels': ['人群'], 'high_channels': [], 'normal_channels': []}
+        channels = {
+            '关键词': {'spend': 100, 'action': '削减'},
+            '人群': {'spend': 100, 'action': '暂停'},
+            '全站': {'spend': 0, 'action': '无动作'},
+        }
+        plans = [{'建议动作': '保持'}]
+        conflicts = _consistency_conflicts(ctx, '预算迁移', channels, plans)
+        self.assertTrue(conflicts)
+        self.assertIn('预算迁移', '/'.join(conflicts))
+
+    def test_15_low_stock_does_not_cancel_scale(self):
+        normal = _one(MetoX算法命中='强主推|爆发', 综合等级='A+', 在仓库存=100)
+        low = _one(MetoX算法命中='强主推|爆发', 综合等级='A+', 在仓库存=2)
+        self.assertEqual(low['商品级总策略'], normal['商品级总策略'])
         self.assertEqual(low['任务优先分'], normal['任务优先分'])
         self.assertEqual(low['关键词动作'], normal['关键词动作'])
         self.assertEqual(low['库存提醒'], '库存偏低，请关注')
 
-    def test_10_high_stock_does_not_override_reduce(self):
+    def test_16_high_stock_does_not_cancel_stop_loss(self):
         normal = _one(
-            MetoX算法命中='削减', MetoX算法分=-30, 推广成交金额=100,
-            付费=300, 在仓库存=30, 商品访客数=100,
+            MetoX算法命中='削减', 推广成交金额=0,
+            关键词归因成交=0, 人群归因成交=0, 全站归因成交=0,
+            在仓库存=30, 商品访客数=100,
         )
         high = _one(
-            MetoX算法命中='削减', MetoX算法分=-30, 推广成交金额=100,
-            付费=300, 在仓库存=500, 商品访客数=5,
+            MetoX算法命中='削减', 推广成交金额=0,
+            关键词归因成交=0, 人群归因成交=0, 全站归因成交=0,
+            在仓库存=500, 商品访客数=5,
         )
-        self.assertEqual(high['AI任务类型'], '止损任务')
-        self.assertEqual(high['最终推广策略'], normal['最终推广策略'])
+        self.assertEqual(high['商品级总策略'], normal['商品级总策略'])
         self.assertEqual(high['任务优先分'], normal['任务优先分'])
         self.assertEqual(high['库存提醒'], '库存较高，请关注动销')
 
-    def test_11_sku_image_and_link_count_are_passed_through(self):
+    def test_17_no_promotion_no_signal_product_is_excluded(self):
+        result = build_ai_task_view(pd.DataFrame([_row(
+            付费=0, 推广成交金额=0, 关键词=0, 人群=0, 全站=0,
+            关键词归因成交=0, 人群归因成交=0, 全站归因成交=0,
+            推广明细='',
+        )]))
+        self.assertTrue(result.empty)
+        self.assertEqual(list(result.columns), AI_TASK_VIEW_COLUMNS)
+
+    def test_18_sku_image_and_link_count_are_passed_through(self):
         task = _one(
             MetoX算法命中='保护持有', 货号='RAW-SKU',
             款式主图='https://img.example/raw.png', 链接数=7,
@@ -135,35 +254,68 @@ class AITaskViewScenarioTests(unittest.TestCase):
         self.assertEqual(task['款式主图'], 'https://img.example/raw.png')
         self.assertEqual(task['链接数'], 7)
 
-    def test_12_empty_passthrough_fields_stay_empty(self):
+
+class AITaskViewAdditionalContractTests(unittest.TestCase):
+    def test_declining_product_budget_receiver_is_kept_not_increased(self):
+        task = _one(
+            综合等级='A', 商品定位='待改善', 商品周期='衰退期',
+            MetoX算法命中='削减|溢出', 推广成交金额=1800,
+            关键词归因成交=1200, 人群归因成交=200, 全站归因成交=400,
+        )
+        self.assertEqual(task['商品级总策略'], '预算迁移')
+        self.assertTrue(task['关键词动作'].startswith('保持高效投放'))
+        high_plan = _plans(task).set_index('计划ID').loc['P-HIGH']
+        self.assertEqual(high_plan['建议动作'], '保持')
+        self.assertEqual(high_plan['建议调整比例'], '0%')
+
+    def test_json_plan_details_are_supported_without_inventing_missing_fields(self):
+        raw = json.dumps([
+            {'计划ID': 'JSON-1', '花费': 100, 'ROI': 6, '渠道': '关键词'},
+        ], ensure_ascii=False)
+        task = _one(MetoX算法命中='保护持有', 推广明细=raw)
+        detail = _plans(task).iloc[0]
+        self.assertEqual(detail['计划ID'], 'JSON-1')
+        self.assertEqual(detail['所属渠道'], '关键词')
+        self.assertEqual(detail['计划名称'], '执行表未提供')
+
+    def test_plan_detail_columns_are_stable(self):
+        task = _one(MetoX算法命中='保护持有')
+        self.assertEqual(list(_plans(task).columns), PLAN_DETAIL_COLUMNS)
+
+    def test_empty_passthrough_fields_stay_empty(self):
         task = _one(MetoX算法命中='保护持有', 货号=None, 款式主图=float('nan'), 链接数=None)
         self.assertEqual(task['货号'], '')
         self.assertEqual(task['款式主图'], '')
         self.assertEqual(task['链接数'], '')
 
-    def test_13_partial_channel_fields_do_not_raise(self):
-        frame = pd.DataFrame([_row(MetoX算法命中='明日之星')]).drop(
-            columns=['人群归因成交', '全站', '全站归因成交']
-        )
-        task = build_ai_task_view(frame).iloc[0]
-        self.assertEqual(task['人群动作'], '渠道数据缺失，人工复核')
-        self.assertEqual(task['全站动作'], '渠道数据缺失，人工复核')
-
-    def test_14_data_quality_issue_enters_manual_review(self):
-        task = _one(宝贝ID='', MetoX算法命中='强主推')
-        self.assertEqual(task['AI任务类型'], '人工复核任务')
-        self.assertIn('关键字段为空', task['任务触发原因'])
-
-    def test_15_ordinary_product_without_signal_is_excluded(self):
-        result = build_ai_task_view(pd.DataFrame([_row()]))
-        self.assertTrue(result.empty)
-        self.assertEqual(list(result.columns), AI_TASK_VIEW_COLUMNS)
-
-    def test_16_input_dataframe_is_not_modified(self):
+    def test_input_dataframe_is_not_modified(self):
         source = pd.DataFrame([_row(MetoX算法命中='保护持有')])
         before = source.copy(deep=True)
         build_ai_task_view(source)
         assert_frame_equal(source, before)
+
+    def test_explainability_fields_do_not_change_existing_business_actions(self):
+        base = _one(MetoX算法命中='削减|溢出', 推广成交金额=1800)
+        explained = _one(
+            MetoX算法命中='削减|溢出', 推广成交金额=1800,
+            计划数据口径='近7天累计', 计划统计天数=7, 计划实际数据天数=7,
+            推广计划总数=5, 推广计划展示数=3, 计划覆盖率=0.85,
+            计划数据完整度=1.0,
+        )
+        for field in (
+            'AI任务类型', '商品级总策略', '关键词状态', '关键词动作',
+            '人群状态', '人群动作', '全站状态', '全站动作', '计划执行摘要',
+        ):
+            self.assertEqual(base[field], explained[field], field)
+        self.assertEqual(explained['动作对象'], '商品-计划级')
+        self.assertEqual(explained['计划总数'], 5)
+        self.assertEqual(explained['计划展示数'], 3)
+        details = _plans(explained)
+        self.assertTrue((details['动作对象'] == '商品-计划级').all())
+        self.assertTrue(details['执行对象'].str.contains('宝贝ID 1001').all())
+        self.assertEqual(explained['商品策略数据源'], '近7天商品汇总数据')
+        self.assertEqual(explained['渠道动作数据源'], '近7天商品×渠道数据')
+        self.assertEqual(explained['计划动作数据源'], '近7天商品×PlanID数据（Top3展示）')
 
 
 class AITaskViewUIContractTests(unittest.TestCase):
@@ -183,6 +335,28 @@ class AITaskViewUIContractTests(unittest.TestCase):
         tabs = main.index('st.tabs([')
         self.assertLess(normalize, build)
         self.assertLess(build, tabs)
+
+    def test_image_url_is_shown_as_link_without_image_column(self):
+        view = self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]
+        self.assertIn("'款式主图': st.column_config.LinkColumn(", view)
+        self.assertIn("'款式主图链接'", view)
+        self.assertNotIn('ImageColumn', view)
+
+    def test_main_table_hides_full_plan_json_and_detail_selector_expands_it(self):
+        view = self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]
+        self.assertIn("drop(columns=['计划执行明细']", view)
+        self.assertIn('parse_plan_execution_details', view)
+        self.assertIn('选择商品查看计划动作', view)
+
+    def test_plan_explanation_states_period_top3_and_coverage(self):
+        view = self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]
+        self.assertIn('Top3关键计划（按周期花费排序）', view)
+        self.assertIn('计划覆盖率', view)
+        self.assertIn('AI可信度', view)
+        self.assertIn('商品-计划级', view)
+
+    def test_sidebar_supports_30_day_period(self):
+        self.assertIn('["当日", "3天", "7天", "15天", "30天"]', self.source)
 
 
 if __name__ == '__main__':

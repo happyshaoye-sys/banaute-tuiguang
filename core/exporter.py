@@ -1,6 +1,7 @@
 """Excel 导出"""
 import io
 import pandas as pd
+from .analysis import build_ai_task_view
 from .schema import EXPORT_COLS, safe_div
 
 
@@ -27,7 +28,11 @@ def export_all_sheets(df):
         cols = [c for c in EXPORT_COLS if c in df.columns]
         df[cols].to_excel(writer, sheet_name='商品推广执行表', index=False)
 
-        # 2. 分层
+        # 2. AI任务视图（基于当前导出范围的最终执行表）
+        ai_tasks = build_ai_task_view(df)
+        ai_tasks.to_excel(writer, sheet_name='AI任务视图', index=False)
+
+        # 3. 分层
         seg_cols = [c for c in ['组合','综合等级','商品定位','对应操作'] if c in df.columns]
         if seg_cols and '宝贝ID' in df.columns and 'GMV' in df.columns:
             seg = df.groupby(seg_cols).agg(
@@ -35,7 +40,7 @@ def export_all_sheets(df):
             ).reset_index()
             seg.to_excel(writer, sheet_name='商品分层明细', index=False)
 
-        # 3. 品类
+        # 4. 品类
         if '淘宝类目' in df.columns:
             work = df.copy()
             if '退款率' in work.columns:
@@ -57,14 +62,14 @@ def export_all_sheets(df):
             cat = cat.drop(columns=['_退款率加权金额'])
             cat.to_excel(writer, sheet_name='品类分析', index=False)
 
-        # 4. 退款风险（聚水潭cohort退款率>70%，与页面阈值一致）
+        # 5. 退款风险（聚水潭cohort退款率>70%，与页面阈值一致）
         if '退款率' in df.columns:
             ref_cols = [c for c in ['宝贝ID','商品名称','淘宝类目','GMV','成功退款金额','退款率','付费','综合等级','对应操作','风险标签'] if c in df.columns]
             if ref_cols:
                 ref = df[df['退款率'] > 0.7].sort_values('退款率', ascending=False)[ref_cols]
                 ref.to_excel(writer, sheet_name='退款风险', index=False)
 
-        # 5-7. 渠道
+        # 6-8. 渠道
         for col, name in [('关键词','关键词建议'),('人群','人群建议'),('全站','全站建议')]:
             if col in df.columns:
                 attr_col = f'{col}归因成交'
@@ -75,7 +80,7 @@ def export_all_sheets(df):
                         ch['渠道投产'] = ch[attr_col] / ch[col].replace(0, float('nan'))
                     ch.to_excel(writer, sheet_name=name, index=False)
 
-        # 8. 库存
+        # 9. 库存
         if '在仓库存' in df.columns:
             inv_cols = [c for c in ['宝贝ID','货号','商品名称','在仓库存','在途','商品访客数','GMV','付费','综合等级','风险标签'] if c in df.columns]
             if inv_cols:

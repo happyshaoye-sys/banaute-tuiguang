@@ -27,6 +27,7 @@ from core.analysis import (
 from core.acceptance import build_source_status
 from core.v93_signal import parse_v93_report
 from core.metox_algorithm import apply_metox_algorithm
+from core.task_engine import parse_plan_execution_details
 from core.jst_stock import find_snapshot, load_snapshot_as_stock
 from core.jst_refund import find_refund_snapshot, load_refund_rates
 from core.exporter import export_execution_table, export_all_sheets, style_execution_table
@@ -265,7 +266,13 @@ def load_period_data(days, day_map):
         loaded_dates.append(day)
 
     combined = (
-        aggregate_period_frame(pd.concat(daily_frames, ignore_index=True), len(days))
+        aggregate_period_frame(
+            pd.concat(daily_frames, ignore_index=True),
+            len(days),
+            actual_days=len(loaded_dates),
+            period_start=days[0] if days else '',
+            period_end=days[-1] if days else '',
+        )
         if daily_frames else pd.DataFrame()
     )
 
@@ -294,7 +301,10 @@ def _load_jst_snapshot_cached(path, mtime):
     return load_snapshot_as_stock(path)
 
 
-PERIOD_LABEL_MAP = {"当日": "日环比", "3天": "3日环比", "7天": "7日环比", "15天": "15日环比"}
+PERIOD_LABEL_MAP = {
+    "当日": "日环比", "3天": "3日环比", "7天": "7日环比",
+    "15天": "15日环比", "30天": "30日环比",
+}
 
 
 def _cat_sum(frame, col):
@@ -308,8 +318,8 @@ def _cat_sum(frame, col):
 
 def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_dir=None,
                         jst_snap_dir=None, jst_refund_dir=None, period_choice="当日"):
-    """读取当前日，并按日/3日/7日/15日生成周期累计环比。一次扫描全部日期，不重复读文件。
-    period_choice(2026-07-10 新增): 主表展示口径——当日=单日;3天/7天/15天=对应周期
+    """读取当前日，并按日/3日/7日/15日/30日生成周期累计环比。一次扫描全部日期，不重复读文件。
+    period_choice(2026-07-10 新增): 主表展示口径——当日=单日;3天/7天/15天/30天=对应周期
     current 窗口累计(与文档§五同一窗口定义),KPI/分层/品类分析随主表口径。"""
     timings = []
     period_logs = []
@@ -767,11 +777,11 @@ with st.sidebar:
 
     period_choice = st.selectbox(
         "时间周期",
-        ["当日", "3天", "7天", "15天"],
+        ["当日", "3天", "7天", "15天", "30天"],
         index=0,
         key="period_choice_input",
         help="主表/看板/品类分析的展示口径:当日=所填日期单日;3天=日期往前3天累计"
-             "(如填2026-07-08则为07-06~07-08,环比对比07-03~07-05),7天/15天同理"
+             "(如填2026-07-08则为07-06~07-08,环比对比07-03~07-05),7天/15天/30天同理"
     )
 
     load_requested = st.button(
@@ -1129,6 +1139,13 @@ with tab3:
         "只读决策视图：仅基于最终执行表生成商品级建议，不重读数据、不重跑MetoX或商品分层，"
         "也不会修改执行表及推广平台预算。"
     )
+    if not ai_task_df.empty:
+        source_sample = ai_task_df.iloc[0]
+        st.caption(
+            f"AI规则数据来源｜商品策略：{source_sample['商品策略数据源']}｜"
+            f"渠道动作：{source_sample['渠道动作数据源']}｜"
+            f"计划动作：{source_sample['计划动作数据源']}"
+        )
 
     task_counts = {
         '全部任务': len(ai_task_df),
@@ -1215,15 +1232,55 @@ with tab3:
     if task_filtered.empty:
         st.info("当前筛选条件下暂无具有明确处理价值的商品任务")
     else:
+        task_main = task_filtered.drop(columns=['计划执行明细'], errors='ignore')
         st.dataframe(
-            task_filtered,
+            task_main,
             use_container_width=True,
             hide_index=True,
             height=650,
             column_config={
-                '款式主图': st.column_config.ImageColumn('款式主图', width='small'),
+                '款式主图': st.column_config.LinkColumn(
+                    '款式主图链接',
+                    width='medium',
+                    help='仅显示链接，不预加载图片',
+                ),
             },
         )
+
+        st.markdown("#### 计划执行明细")
+        st.caption(
+            "主表保持一行一个宝贝ID；计划动作对象为商品-计划级，不代表修改整个共享计划。"
+            "计划指标先按所选周期完整累计，再按周期花费展示Top3关键计划（按周期花费排序）；"
+            "计划名称、预算和出价未提供时不会推断。"
+        )
+        task_choices = task_filtered.reset_index(drop=True)
+        selected_task_index = st.selectbox(
+            "选择商品查看计划动作",
+            options=list(task_choices.index),
+            format_func=lambda idx: (
+                f"{task_choices.at[idx, '宝贝ID']}｜"
+                f"{task_choices.at[idx, '货号']}｜"
+                f"{task_choices.at[idx, '商品名称']}｜"
+                f"{task_choices.at[idx, '计划执行摘要']}"
+            ),
+            key='ai_task_plan_detail_product',
+        )
+        selected_task = task_choices.iloc[selected_task_index]
+        st.caption(
+            f"动作对象：{selected_task['动作对象']}｜{selected_task['计划数据说明']}｜"
+            f"计划覆盖率：{selected_task['计划覆盖率']}｜"
+            f"AI可信度：{selected_task['AI可信度']}（{selected_task['AI可信度说明']}）"
+        )
+        selected_plan_details = parse_plan_execution_details(selected_task['计划执行明细'])
+        if selected_plan_details.empty:
+            st.info(selected_task['计划执行摘要'])
+        else:
+            st.dataframe(
+                selected_plan_details,
+                use_container_width=True,
+                hide_index=True,
+                height=min(420, 72 + 36 * len(selected_plan_details)),
+            )
 
 # ── Tab 4: 执行表 ────────────────────────────────────────
 with tab4:
@@ -1324,7 +1381,7 @@ with tab4:
                 XLSX_MIME, key="dl_exec")
     with ce2:
         if st.button("📦 生成全部 Sheet Excel", key="export_all"):
-            with st.spinner(f"生成中({len(filtered)} 行 × 8 sheet)..."):
+            with st.spinner(f"生成中({len(filtered)} 行 × 9 sheet)..."):
                 st.session_state["all_xlsx"] = export_all_sheets(filtered)
                 st.session_state["all_xlsx_meta"] = \
                     f"{len(filtered)}行 {datetime.now().strftime('%H:%M:%S')}"
