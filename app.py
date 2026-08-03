@@ -22,7 +22,7 @@ from core.segmentation import segment_products
 from core.analysis import (
     calc_kpis, calc_kpi_mom_percent, grade_distribution, channel_summary,
     segment_summary, category_analysis, refund_risk, channel_top, inventory_actions,
-    build_operating_daily_report,
+    build_operating_daily_report, build_ai_task_view,
 )
 from core.acceptance import build_source_status
 from core.v93_signal import parse_v93_report
@@ -1021,12 +1021,13 @@ if not st.session_state.loaded:
 
 st.session_state.df = _normalize_display_columns(st.session_state.df)
 df = st.session_state.df
+ai_task_df = build_ai_task_view(st.session_state.df)
 kpis = st.session_state.kpis
 kpi_mom = st.session_state.kpi_mom or calc_kpi_mom_percent(kpis, {})
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-    "📈 数据看板", "📋 数据验收", "📊 执行表", "🎯 商品分层",
-    "📂 品类分析", "⚠ 退款风险", "🔑 渠道分析", "📦 库存动作"
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    "📈 数据看板", "📋 数据验收", "🤖 AI任务视图", "📊 执行表",
+    "🎯 商品分层", "📂 品类分析", "⚠ 退款风险", "🔑 渠道分析", "📦 库存动作"
 ])
 
 # ── Tab 1: 数据看板 ───────────────────────────────────────
@@ -1121,8 +1122,111 @@ with tab2:
     exec_spend = df['付费'].sum()
     st.write(f"执行表 GMV: ¥{exec_gmv/1e4:.2f}万 | 执行表 花费: ¥{exec_spend/1e4:.2f}万")
 
-# ── Tab 3: 执行表 ────────────────────────────────────────
+# ── Tab 3: AI任务视图 ────────────────────────────────────
 with tab3:
+    st.subheader("🤖 AI任务视图")
+    st.caption(
+        "只读决策视图：仅基于最终执行表生成商品级建议，不重读数据、不重跑MetoX或商品分层，"
+        "也不会修改执行表及推广平台预算。"
+    )
+
+    task_counts = {
+        '全部任务': len(ai_task_df),
+        'P1': int((ai_task_df['执行优先级'] == 'P1').sum()),
+        '放量': int((ai_task_df['AI任务类型'] == '放量任务').sum()),
+        '测试': int((ai_task_df['AI任务类型'].isin(['测试任务', '恢复测试任务'])).sum()),
+        '稳量': int((ai_task_df['AI任务类型'] == '稳量任务').sum()),
+        '渠道调整': int((ai_task_df['AI任务类型'] == '渠道调整任务').sum()),
+        '止损': int((ai_task_df['AI任务类型'] == '止损任务').sum()),
+        '人工复核': int((ai_task_df['AI任务类型'] == '人工复核任务').sum()),
+    }
+    metric_cols = st.columns(len(task_counts))
+    for metric_col, (label, value) in zip(metric_cols, task_counts.items()):
+        metric_col.metric(label, value)
+
+    def _task_options(column):
+        if column not in ai_task_df.columns:
+            return []
+        return sorted({
+            str(value).strip() for value in ai_task_df[column].dropna()
+            if str(value).strip() not in ('', 'nan', 'None')
+        })
+
+    f1, f2, f3, f4 = st.columns(4)
+    with f1:
+        task_type_filter = st.multiselect(
+            "AI任务类型", _task_options('AI任务类型'), key='ai_task_type_filter'
+        )
+    with f2:
+        task_priority_filter = st.multiselect(
+            "执行优先级", ['P1', 'P2', 'P3', 'P4'], key='ai_task_priority_filter'
+        )
+    with f3:
+        task_grade_filter = st.multiselect(
+            "综合等级", _task_options('综合等级'), key='ai_task_grade_filter'
+        )
+    with f4:
+        task_position_filter = st.multiselect(
+            "商品定位", _task_options('商品定位'), key='ai_task_position_filter'
+        )
+
+    f5, f6, f7 = st.columns(3)
+    with f5:
+        task_cycle_filter = st.multiselect(
+            "商品周期", _task_options('商品周期'), key='ai_task_cycle_filter'
+        )
+    with f6:
+        metox_filter_options = [
+            label for label in (
+                '明日之星', '强主推', '近3日潜力', '爆发', '亏损风险',
+                '加预算', '饱和观察', '保护持有', '削减', '溢出',
+            )
+            if ai_task_df['MetoX算法命中'].astype(str).str.contains(
+                label, regex=False, na=False
+            ).any()
+        ]
+        task_metox_filter = st.multiselect(
+            "MetoX算法命中", metox_filter_options, key='ai_task_metox_filter'
+        )
+    with f7:
+        task_category_filter = st.multiselect(
+            "淘宝类目", _task_options('淘宝类目'), key='ai_task_category_filter'
+        )
+
+    task_filtered = ai_task_df.copy()
+    for selected, column in (
+        (task_type_filter, 'AI任务类型'),
+        (task_priority_filter, '执行优先级'),
+        (task_grade_filter, '综合等级'),
+        (task_position_filter, '商品定位'),
+        (task_cycle_filter, '商品周期'),
+        (task_category_filter, '淘宝类目'),
+    ):
+        if selected:
+            task_filtered = task_filtered[task_filtered[column].astype(str).isin(selected)]
+    if task_metox_filter:
+        task_filtered = task_filtered[
+            task_filtered['MetoX算法命中'].astype(str).apply(
+                lambda text: any(label in text for label in task_metox_filter)
+            )
+        ]
+
+    st.caption(f"筛选结果：{len(task_filtered)} / {len(ai_task_df)} 条任务")
+    if task_filtered.empty:
+        st.info("当前筛选条件下暂无具有明确处理价值的商品任务")
+    else:
+        st.dataframe(
+            task_filtered,
+            use_container_width=True,
+            hide_index=True,
+            height=650,
+            column_config={
+                '款式主图': st.column_config.ImageColumn('款式主图', width='small'),
+            },
+        )
+
+# ── Tab 4: 执行表 ────────────────────────────────────────
+with tab4:
     st.subheader(f"商品推广执行表 ({len(df)} 条)")
 
     # 筛选 + 列设置(2026-07-11:列设置移到筛选行右侧,popover 下拉形式、占位小;
@@ -1232,8 +1336,8 @@ with tab3:
                 XLSX_MIME, key="dl_all")
     st.caption("提示:生成后下载按钮会一直保留;若改了筛选条件,重新点「生成」即可刷新内容")
 
-# ── Tab 4: 商品分层 ───────────────────────────────────────
-with tab4:
+# ── Tab 5: 商品分层 ───────────────────────────────────────
+with tab5:
     try:
         seg_data = segment_summary(df)
         if seg_data:
@@ -1243,8 +1347,8 @@ with tab4:
     except Exception as e:
         st.warning(f"分层数据加载失败: {e}")
 
-# ── Tab 5: 品类分析 ───────────────────────────────────────
-with tab5:
+# ── Tab 6: 品类分析 ───────────────────────────────────────
+with tab6:
     try:
         _ctx = st.session_state.get('cat_ctx') or {}
         if _ctx.get('sel_label'):
@@ -1262,8 +1366,8 @@ with tab5:
     except Exception as e:
         st.warning(f"品类分析加载失败: {e}")
 
-# ── Tab 6: 退款风险 ───────────────────────────────────────
-with tab6:
+# ── Tab 7: 退款风险 ───────────────────────────────────────
+with tab7:
     try:
         ref = refund_risk(df)
         st.caption(f"退款率>70%(聚水潭30日cohort口径): {len(ref)} 个")
@@ -1272,8 +1376,8 @@ with tab6:
     except Exception as e:
         st.warning(f"退款风险加载失败: {e}")
 
-# ── Tab 7: 渠道分析 ───────────────────────────────────────
-with tab7:
+# ── Tab 8: 渠道分析 ───────────────────────────────────────
+with tab8:
     try:
         c1, c2 = st.columns(2)
         with c1:
@@ -1293,8 +1397,8 @@ with tab7:
     except Exception as e:
         st.warning(f"渠道分析加载失败: {e}")
 
-# ── Tab 8: 库存动作 ───────────────────────────────────────
-with tab8:
+# ── Tab 9: 库存动作 ───────────────────────────────────────
+with tab9:
     try:
         inv = inventory_actions(df)
         st.subheader(f"高库存低动销 ({len(inv.get('hi_stock',[]))} 个)")

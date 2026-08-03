@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MetoX2.3 半自动推广工具新运营培训手册</title>
+  <title>MetoX2.4 半自动推广工具新运营培训手册</title>
   <style>
     :root {
       --bg: #f5f7fb;
@@ -160,24 +160,24 @@
 
     <main>
       <header>
-        <h1>MetoX2.3 半自动推广工具新运营培训手册</h1>
-        <div class="subtitle">适用对象：新接手天猫推广执行、渠道分析、商品分层复盘的运营同学。更新日期：2026-07-16。</div>
+        <h1>MetoX2.4 半自动推广工具新运营培训手册</h1>
+        <div class="subtitle">适用对象：新接手天猫推广执行、渠道分析、商品分层复盘的运营同学。更新日期：2026-08-03。</div>
       </header>
 
 
-      <section id="update-20260716" class="card">
-        <h2>2026-07-16 更新说明</h2>
-        <p><span class="tag">本次重点</span> 执行表里的 <code>宝贝ID</code>、<code>货号</code>、<code>款式主图</code>、<code>创建时间</code>、<code>在仓库存</code>、<code>在途</code>、<code>成本价（含税）</code> 改为按宝贝ID读取对应日期的款式级库存快照。</p>
+      <section id="update-20260803" class="card">
+        <h2>2026-08-03 更新说明</h2>
+        <p><span class="tag">本次重点</span> 在“数据验收”和“执行表”之间新增只读“AI任务视图”。任务页只读取最终执行表，不重新读数、不修改执行表，也不重算MetoX、商品分层或KPI。</p>
         <table>
           <thead><tr><th>项目</th><th>当前规则</th></tr></thead>
           <tbody>
-            <tr><td>库存快照日更目录</td><td><code>\\10.1.22.253\天猫mark\mark0706啊\聚水潭\库存快照\YYYY-MM</code></td></tr>
-            <tr><td>文件命名</td><td><code>库存快照_YYYY-MM-DD_款式级.csv</code></td></tr>
-            <tr><td>跨月规则</td><td>8 月自动创建 <code>2026-08</code> 文件夹，后续月份同理。</td></tr>
-            <tr><td>现场校验</td><td>宝贝ID <code>1059580001412</code> 已补齐：货号 <code>B1476C56262</code>，创建时间 <code>2026-06-16 13:13:59</code>，在仓库存 <code>0</code>，在途 <code>1271</code>，成本价 <code>70</code>。</td></tr>
+            <tr><td>任务类型</td><td>放量、测试、恢复测试、稳量、渠道调整、止损、优化、人工复核。</td></tr>
+            <tr><td>判断顺序</td><td>风险优先；机会与风险冲突进入人工复核P1；D级或滞销/清退商品不放量。</td></tr>
+            <tr><td>渠道动作</td><td>分别给出关键词、人群、全站动作，不虚构计划ID或精确预算金额。</td></tr>
+            <tr><td>库存边界</td><td>库存只生成提醒，不改变任务类型、策略、渠道动作和优先级。</td></tr>
           </tbody>
         </table>
-        <p class="note">如果这些字段仍为空，优先检查侧边栏“聚水潭库存快照目录”是否指向共享盘 <code>mark0706啊\聚水潭\库存快照</code>，然后重新点击“加载并处理数据”。</p>
+        <p class="note">任务页中的货号、款式主图和链接数均来自最终执行表原字段；原字段为空时保持为空，不做推断或拼接。</p>
       </section>
       <section id="overview" class="card">
         <h2>0. 培训目标</h2>
@@ -192,7 +192,7 @@
       <section id="start" class="card">
         <h2>1. 启动与交付包</h2>
         <ol>
-          <li>完整解压 <code>MetoX半自动推广工具_v2.2_第三方版_20260802.zip</code>。</li>
+          <li>完整解压 <code>MetoX半自动推广工具_v2.4_第三方版_20260803.zip</code>。</li>
           <li>进入 <code>MetoX半自动推广工具</code> 文件夹。</li>
           <li>双击 <code>启动MetoX半自动推广工具.bat</code>。</li>
           <li>浏览器会自动打开。如果没有自动打开，就复制启动窗口中 <code>METOX_URL=</code> 后面的实际地址；端口被占用时程序会自动换用可用端口。</li>
