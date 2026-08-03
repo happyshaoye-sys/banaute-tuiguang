@@ -8,6 +8,8 @@ import unittest
 import pandas as pd
 from pandas.testing import assert_frame_equal
 
+import core.analysis as analysis_module
+import core.task_engine as task_engine_module
 from core.analysis import AI_TASK_VIEW_COLUMNS, build_ai_task_view
 from core.task_engine import (
     AI_TASK_MAIN_COLUMNS,
@@ -260,6 +262,10 @@ class AITaskViewEighteenScenarioTests(unittest.TestCase):
 
 
 class AITaskViewAdditionalContractTests(unittest.TestCase):
+    def test_analysis_reexports_the_single_task_engine_implementation(self):
+        self.assertIs(analysis_module.build_ai_task_view, task_engine_module.build_ai_task_view)
+        self.assertIs(analysis_module.AI_TASK_VIEW_COLUMNS, task_engine_module.AI_TASK_VIEW_COLUMNS)
+
     def test_operating_metrics_are_passed_through_from_execution_table_without_recalculation(self):
         task = _one(
             MetoX算法命中='保护持有',

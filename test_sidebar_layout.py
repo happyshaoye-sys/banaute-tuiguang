@@ -49,6 +49,10 @@ class SidebarLayoutTests(unittest.TestCase):
         self.assertNotIn("周期环比范围与完整性", self.main)
         self.assertNotIn("性能耗时", self.main)
 
+    def test_streamlit_width_api_uses_current_parameter(self):
+        self.assertNotIn("use_container_width=", self.source)
+        self.assertIn("width=\"stretch\"", self.source)
+
 
 if __name__ == "__main__":
     unittest.main()

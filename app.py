@@ -9,6 +9,11 @@ import pandas as pd
 import streamlit as st
 
 from core.loader import read_prepared_source
+from core.data_validation import (
+    DataValidationError,
+    DataValidationIssue,
+    validate_paid_plan_consistency,
+)
 from core.merge import build_shared_dimensions, merge_sources
 from core.periods import (
     aggregate_category_metrics,
@@ -135,11 +140,13 @@ def _read_sources_for_date(
                 'name': fn, 'source': src_type, 'rows': len(df),
                 'cols': len(df.columns), 'period': period_label,
             })
+        except DataValidationError:
+            raise
         except Exception as e:
-            files_info.append({
-                'name': fn, 'source': src_type, 'rows': 0,
-                'cols': 0, 'period': f'{period_label} 错误: {str(e)[:80]}',
-            })
+            raise DataValidationError(DataValidationIssue(
+                f'{src_type}文件 {fp}',
+                f'读取失败，已停止处理：{str(e)[:160]}',
+            )) from e
 
     return sources, files_info, copied, len(file_list)
 
@@ -737,7 +744,7 @@ def _render_git_version_management():
     push_to_github = st.checkbox(
         "保存后同步 GitHub", value=True, key="git_push_to_github",
     )
-    if st.button("保存新版本", use_container_width=True, key="git_save_version"):
+    if st.button("保存新版本", width="stretch", key="git_save_version"):
         with st.spinner("正在创建版本..."):
             git_result = save_version(
                 git_repo, version_note, push=push_to_github,
@@ -787,7 +794,7 @@ with st.sidebar:
     load_requested = st.button(
         "加载并处理数据",
         type="primary",
-        use_container_width=True,
+        width="stretch",
     )
 
     # 低频配置和诊断统一收进一个高级设置，缩短日常加载首屏。
@@ -873,7 +880,7 @@ with st.sidebar:
 
             if st.button(
                 "重新应用分界点(不重新读数)",
-                use_container_width=True,
+                width="stretch",
                 key="reapply_segmentation_bounds",
             ):
                 tb = _parse_bounds(t_input)
@@ -902,7 +909,7 @@ with st.sidebar:
             st.markdown("#### 周期环比范围与完整性")
             st.dataframe(
                 pd.DataFrame(st.session_state.period_logs),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
 
@@ -930,6 +937,7 @@ with st.sidebar:
                 df, prev_df, files_info, plan_ids, prev_plan_ids, timings, period_logs, cat_ctx = \
                     None, None, [], set(), set(), [], [], {}
                 errors = []
+                validation_error = None
                 if not os.path.isdir(str(biz_folder)):
                     errors.append(f"商品目录不存在：{biz_folder}")
                 if not os.path.isdir(str(wujie_folder)):
@@ -952,16 +960,21 @@ with st.sidebar:
                     # ── 6. 加载当天数据，并自动计算日/3日/7日/15日环比 ──
                     with st.spinner("读取文件中..."):
                         t_load = time.perf_counter()
-                        df, prev_df, files_info, plan_ids, prev_plan_ids, timings, period_logs, cat_ctx = \
-                            _load_folder_cached(
-                                root, year, shop, date_str, product_folder,
-                                cache_dir=str(file_cache_dir),
-                                jst_snap_dir=(jst_snap_dir or "").strip().strip('"') or None,
-                                jst_refund_dir=(jst_refund_dir or "").strip().strip('"') or None,
-                                period_choice=period_choice,
-                            )
+                        try:
+                            df, prev_df, files_info, plan_ids, prev_plan_ids, timings, period_logs, cat_ctx = \
+                                _load_folder_cached(
+                                    root, year, shop, date_str, product_folder,
+                                    cache_dir=str(file_cache_dir),
+                                    jst_snap_dir=(jst_snap_dir or "").strip().strip('"') or None,
+                                    jst_refund_dir=(jst_refund_dir or "").strip().strip('"') or None,
+                                    period_choice=period_choice,
+                                )
+                        except DataValidationError as exc:
+                            validation_error = str(exc)
 
-                if df is None or len(df) == 0:
+                if validation_error:
+                    st.error(f"数据验收失败，已停止处理：{validation_error}")
+                elif df is None or len(df) == 0:
                     st.error("未找到任何数据文件")
                 else:
                     with st.spinner("分层计算中..."):
@@ -1031,6 +1044,11 @@ if not st.session_state.loaded:
 
 st.session_state.df = _normalize_display_columns(st.session_state.df)
 df = st.session_state.df
+try:
+    validate_paid_plan_consistency(df, 'AI任务视图')
+except DataValidationError as exc:
+    st.error(f"数据验收失败，AI任务视图已停止生成：{exc}")
+    st.stop()
 ai_task_df = build_ai_task_view(st.session_state.df)
 kpis = st.session_state.kpis
 kpi_mom = st.session_state.kpi_mom or calc_kpi_mom_percent(kpis, {})
@@ -1113,7 +1131,7 @@ with tab2:
     info = st.session_state.get('sources_info', [])
     if info:
         st.subheader("文件验收")
-        st.dataframe(pd.DataFrame(info), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(info), width="stretch", hide_index=True)
 
     st.divider()
 
@@ -1122,7 +1140,7 @@ with tab2:
         info,
         [SOURCE_PRODUCT_ROI, SOURCE_WUJIE_SUBJECT, SOURCE_STOCK, SOURCE_PRODUCT_INFO],
     )
-    st.dataframe(pd.DataFrame(status_data), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(status_data), width="stretch", hide_index=True)
 
     st.divider()
 
@@ -1235,7 +1253,7 @@ with tab3:
         task_main = task_filtered[AI_TASK_MAIN_COLUMNS].copy()
         st.dataframe(
             task_main,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             height=650,
             column_config={
@@ -1287,7 +1305,7 @@ with tab3:
         else:
             st.dataframe(
                 selected_plan_details,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 height=min(420, 72 + 36 * len(selected_plan_details)),
             )
@@ -1321,7 +1339,7 @@ with tab4:
     with cf4:
         with st.popover(
                 f"⚙️ 列设置({len(st.session_state['exec_cols_pref'])}/{len(all_cols)})",
-                use_container_width=True):
+                width="stretch"):
             picked = st.multiselect(
                 "展示列(可输入关键字快速查找;清空=全部列)",
                 options=all_cols,
@@ -1329,11 +1347,11 @@ with tab4:
                 key="exec_cols_ms",
             )
             cb1, cb2 = st.columns(2)
-            if cb1.button("应用并记住", use_container_width=True, key="exec_cols_apply"):
+            if cb1.button("应用并记住", width="stretch", key="exec_cols_apply"):
                 st.session_state["exec_cols_pref"] = picked or all_cols
                 _save_column_prefs(st.session_state["exec_cols_pref"])
                 st.rerun()
-            if cb2.button("恢复全部列", use_container_width=True, key="exec_cols_reset"):
+            if cb2.button("恢复全部列", width="stretch", key="exec_cols_reset"):
                 st.session_state["exec_cols_pref"] = all_cols
                 _save_column_prefs(all_cols)
                 st.rerun()
@@ -1367,7 +1385,7 @@ with tab4:
     show_cols = [c for c in all_cols if c in st.session_state["exec_cols_pref"]] or all_cols
     st.dataframe(
         style_execution_table(filtered[show_cols]),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         height=600,
     )
@@ -1408,7 +1426,7 @@ with tab5:
     try:
         seg_data = segment_summary(df)
         if seg_data:
-            st.dataframe(pd.DataFrame(seg_data), use_container_width=True, hide_index=True, height=600)
+            st.dataframe(pd.DataFrame(seg_data), width="stretch", hide_index=True, height=600)
         else:
             st.info("暂无分层数据")
     except Exception as e:
@@ -1424,12 +1442,12 @@ with tab6:
         cat = category_analysis(df, cat_ctx=_ctx)
         if cat['basic']:
             st.subheader("品类基础分析")
-            st.dataframe(pd.DataFrame(cat['basic']), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(cat['basic']), width="stretch", hide_index=True)
             t = cat.get('total', {})
             st.caption(f"合计: {t.get('cnt',0)} 商品 | GMV ¥{t.get('gmv',0)/1e4:.2f}万 | ROI {t.get('roi',0)}")
         if cat.get('invest'):
             st.subheader("品类投放占比与ROI")
-            st.dataframe(pd.DataFrame(cat['invest']), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(cat['invest']), width="stretch", hide_index=True)
     except Exception as e:
         st.warning(f"品类分析加载失败: {e}")
 
@@ -1439,7 +1457,7 @@ with tab7:
         ref = refund_risk(df)
         st.caption(f"退款率>70%(聚水潭30日cohort口径): {len(ref)} 个")
         if ref:
-            st.dataframe(pd.DataFrame(ref), use_container_width=True, hide_index=True, height=500)
+            st.dataframe(pd.DataFrame(ref), width="stretch", hide_index=True, height=500)
     except Exception as e:
         st.warning(f"退款风险加载失败: {e}")
 
@@ -1450,16 +1468,16 @@ with tab8:
         with c1:
             st.subheader("关键词 TOP30")
             kw = channel_top(df, '关键词')
-            if kw: st.dataframe(pd.DataFrame(kw), use_container_width=True, hide_index=True)
+            if kw: st.dataframe(pd.DataFrame(kw), width="stretch", hide_index=True)
             else: st.caption("暂无关键词数据")
         with c2:
             st.subheader("人群 TOP30")
             cr = channel_top(df, '人群')
-            if cr: st.dataframe(pd.DataFrame(cr), use_container_width=True, hide_index=True)
+            if cr: st.dataframe(pd.DataFrame(cr), width="stretch", hide_index=True)
             else: st.caption("暂无人群数据")
         st.subheader("全站 TOP30")
         om = channel_top(df, '全站')
-        if om: st.dataframe(pd.DataFrame(om), use_container_width=True, hide_index=True)
+        if om: st.dataframe(pd.DataFrame(om), width="stretch", hide_index=True)
         else: st.caption("暂无全站数据")
     except Exception as e:
         st.warning(f"渠道分析加载失败: {e}")
@@ -1469,8 +1487,8 @@ with tab9:
     try:
         inv = inventory_actions(df)
         st.subheader(f"高库存低动销 ({len(inv.get('hi_stock',[]))} 个)")
-        if inv.get('hi_stock'): st.dataframe(pd.DataFrame(inv['hi_stock']), use_container_width=True, hide_index=True)
+        if inv.get('hi_stock'): st.dataframe(pd.DataFrame(inv['hi_stock']), width="stretch", hide_index=True)
         st.subheader(f"缺货且在投 ({len(inv.get('no_stock',[]))} 个)")
-        if inv.get('no_stock'): st.dataframe(pd.DataFrame(inv['no_stock']), use_container_width=True, hide_index=True)
+        if inv.get('no_stock'): st.dataframe(pd.DataFrame(inv['no_stock']), width="stretch", hide_index=True)
     except Exception as e:
         st.warning(f"库存动作加载失败: {e}")

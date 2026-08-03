@@ -14,16 +14,20 @@ from .schema import (
     WUJIE_REMAP, classify_file, SOURCE_PRODUCT_ROI, SOURCE_STOCK,
     SOURCE_PRODUCT_INFO,
 )
+from .data_validation import (
+    SOURCE_REQUIRED_FIELDS,
+    validate_source_dataframe,
+)
 
 
 XLSX_NS = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
 RELS_NS = '{http://schemas.openxmlformats.org/package/2006/relationships}'
 OFFICE_RELS_NS = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
 COL_REF_RE = re.compile(r'([A-Z]+)')
-PARSED_CACHE_VERSION = 'v9'  # v9: 直购数量改读"直接购物车数"并废止旧成交笔数/总成交成本缓存
+PARSED_CACHE_VERSION = 'v10'  # v10: 原始字段契约与有付费无PlanID校验
 
 
-SOURCE_REQUIRED_FIELDS = {
+SOURCE_ALLOWED_FIELDS = {
     SOURCE_PRODUCT_ROI: {
         '宝贝ID', '商品名称', 'GMV', '商品访客数', '统计日期', '淘宝类目',
         '成功退款金额', '访客平均价值', '成本价（含税）', '支付买家数',
@@ -50,7 +54,7 @@ SOURCE_REQUIRED_FIELDS = {
 
 
 def _allowed_raw_columns(source_type):
-    fields = SOURCE_REQUIRED_FIELDS.get(source_type)
+    fields = SOURCE_ALLOWED_FIELDS.get(source_type)
     if not fields:
         return None
 
@@ -278,10 +282,12 @@ def read_prepared_source(filepath, source_type, parsed_cache_dir=None):
     """读取并标准化单个源文件，使用磁盘缓存避免重复解析 Excel。"""
     cache_path = _parsed_cache_path(filepath, source_type, parsed_cache_dir=parsed_cache_dir)
     if cache_path.exists():
-        return pd.read_pickle(cache_path)
+        cached = pd.read_pickle(cache_path)
+        return validate_source_dataframe(cached, source_type, str(filepath))
 
     raw = read_table(filepath, source_type=source_type)
     df = prepare_source(raw, source_type)
+    validate_source_dataframe(df, source_type, str(filepath))
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = cache_path.with_suffix('.tmp')
     df.to_pickle(tmp_path)

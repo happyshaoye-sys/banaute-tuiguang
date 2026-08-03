@@ -12,6 +12,7 @@ from core.analysis import (
     calc_kpi_mom_percent,
     calc_kpis,
 )
+from core.plan_metrics import summarize_plan_records
 
 
 ROOT = Path(__file__).resolve().parent
@@ -50,6 +51,20 @@ class OperatingDailyReportTests(unittest.TestCase):
                 "全站": 0.0, "全站归因成交": 0.0,
             },
         ])
+        plan_metadata = []
+        for row in self.current.to_dict('records'):
+            spend = float(row['付费'])
+            plans = [] if spend <= 0 else [{
+                '计划ID': f"P{row['宝贝ID']}", '当前花费': spend,
+                '归因成交': row['GMV'], '加购': 1, '点击': 10,
+                '所属渠道': '关键词',
+            }]
+            plan_metadata.append(summarize_plan_records(
+                plans, period_days=7, actual_days=7,
+                period_start='2026-07-25', period_end='2026-07-31',
+            ))
+        for column in plan_metadata[0]:
+            self.current[column] = [metadata[column] for metadata in plan_metadata]
         self.previous = pd.DataFrame([
             {
                 "宝贝ID": "1", "淘宝类目": "羽绒服",

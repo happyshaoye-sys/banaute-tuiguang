@@ -2,6 +2,7 @@
 import io
 import pandas as pd
 from .analysis import build_ai_task_view
+from .data_validation import validate_paid_plan_consistency
 from .schema import EXPORT_COLS, safe_div
 
 
@@ -12,6 +13,7 @@ def style_execution_table(df):
 
 def export_execution_table(df):
     """导出执行表为 Excel bytes"""
+    validate_paid_plan_consistency(df, '执行表Excel导出')
     output = io.BytesIO()
     cols = [c for c in EXPORT_COLS if c in df.columns]
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -22,6 +24,7 @@ def export_execution_table(df):
 
 def export_all_sheets(df):
     """导出全部分析 Sheet"""
+    validate_paid_plan_consistency(df, '全部Sheet Excel导出')
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         # 1. 执行表

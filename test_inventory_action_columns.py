@@ -9,10 +9,16 @@ from openpyxl import load_workbook
 
 from core.analysis import inventory_actions
 from core.exporter import export_all_sheets
+from core.plan_metrics import summarize_plan_records
 
 
 class InventoryActionColumnTests(unittest.TestCase):
     def setUp(self):
+        no_plan = summarize_plan_records([], period_days=1, actual_days=1)
+        active_plan = summarize_plan_records([{
+            '计划ID': 'P10002', '当前花费': 20, '归因成交': 0,
+            '加购': 0, '点击': 10, '所属渠道': '关键词',
+        }], period_days=1, actual_days=1)
         self.frame = pd.DataFrame([
             {
                 "宝贝ID": "10001",
@@ -25,6 +31,7 @@ class InventoryActionColumnTests(unittest.TestCase):
                 "付费": 0,
                 "综合等级": "C",
                 "风险标签": "",
+                **no_plan,
             },
             {
                 "宝贝ID": "10002",
@@ -37,6 +44,7 @@ class InventoryActionColumnTests(unittest.TestCase):
                 "付费": 20,
                 "综合等级": "B",
                 "风险标签": "",
+                **active_plan,
             },
         ])
 

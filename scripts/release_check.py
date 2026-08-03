@@ -16,6 +16,7 @@ PROTECTED_FILES = {
     "app.py",
     "launcher.py",
     "core/analysis.py",
+    "core/data_validation.py",
     "core/exporter.py",
     "core/field_mapping.py",
     "core/jst_refund.py",
@@ -105,6 +106,10 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.ai_task_experience")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("ai_task_no_plan_semantics"):
         errors.append("VERSION.json must record rule_versions.ai_task_no_plan_semantics")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("ai_task_plan_pipeline"):
+        errors.append("VERSION.json must record rule_versions.ai_task_plan_pipeline")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("data_contract_validation"):
+        errors.append("VERSION.json must record rule_versions.data_contract_validation")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()
@@ -178,8 +183,16 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("direct-purchase quantity must map from 直接购物车数")
     if "'直接成交笔数':'直购数量'" in schema:
         errors.append("direct-purchase quantity must not map from 直接成交笔数")
-    if "PARSED_CACHE_VERSION = 'v9'" not in loader:
-        errors.append("direct-purchase source change requires parsed cache v9")
+    if "PARSED_CACHE_VERSION = 'v10'" not in loader:
+        errors.append("source-schema validation requires parsed cache v10")
+    data_validation = (ROOT / "core" / "data_validation.py").read_text(encoding="utf-8")
+    for snippet in (
+        "validate_required_columns",
+        "有付费但没有PlanID",
+        "有付费但计划数据缺失或不一致",
+    ):
+        if snippet not in data_validation:
+            errors.append(f"source-schema validation contract missing: {snippet}")
     if "grouped['直购成本'] = _safe_div_series(" not in merge:
         errors.append("daily direct-purchase cost must be spend divided by quantity")
     if 'grouped["直购成本"] = _ratio_series(spend, grouped["直购数量"])' not in periods:

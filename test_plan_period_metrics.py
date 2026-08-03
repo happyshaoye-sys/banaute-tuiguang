@@ -7,8 +7,9 @@ import unittest
 import pandas as pd
 
 from core.periods import aggregate_period_frame, build_period_ranges
-from core.merge import _promotion_detail_agg
+from core.merge import _promotion_detail_agg, merge_sources
 from core.plan_metrics import parse_full_plan_details
+from core.schema import SOURCE_WUJIE_SUBJECT
 from core.task_engine import build_ai_task_view, parse_plan_execution_details
 
 
@@ -91,6 +92,47 @@ class PlanPeriodAggregationTests(unittest.TestCase):
         self.assertEqual(merged['推广计划展示数'], 3)
         self.assertIn('计划ID:P1', merged['推广明细'])
         self.assertNotIn('计划ID:P4', merged['推广明细'])
+
+    def test_merge_sources_preserves_plan_metadata_through_period_and_task_pipeline(self):
+        raw = pd.DataFrame([
+            {
+                '宝贝ID': '1001', '计划ID': 'P1', '付费': 100,
+                '推广投产': 3, 'GMV': 300, '商品加购件数': 10,
+                '点击': 50, '场景名字': '关键词推广',
+                '转化周期': '15天转化', '主体类型': '商品',
+            },
+            {
+                '宝贝ID': '1001', '计划ID': 'P2', '付费': 40,
+                '推广投产': 2, 'GMV': 80, '商品加购件数': 4,
+                '点击': 20, '场景名字': '人群推广',
+                '转化周期': '15天转化', '主体类型': '商品',
+            },
+        ])
+
+        daily, plan_ids = merge_sources({
+            SOURCE_WUJIE_SUBJECT: [('无界-商品主体-2026-08-01.xlsx', raw)],
+        })
+        daily_row = daily.iloc[0]
+        self.assertEqual(plan_ids, {'P1', 'P2'})
+        self.assertEqual(daily_row['推广计划总数'], 2)
+        self.assertEqual(daily_row['推广计划展示数'], 2)
+        self.assertEqual(daily_row['计划覆盖率'], 1.0)
+        self.assertEqual(daily_row['计划数据完整度'], 1.0)
+        self.assertEqual(daily_row['计划统计天数'], 1)
+        self.assertEqual(daily_row['计划实际数据天数'], 1)
+        self.assertEqual(daily_row['计划数据口径'], '当日累计')
+        self.assertEqual(daily_row['计划数据范围'], '')
+        self.assertEqual(len(parse_full_plan_details(daily_row['推广计划全量明细'])), 2)
+
+        daily['_数据日期'] = '2026-08-01'
+        period = aggregate_period_frame(
+            daily, 1, actual_days=1,
+            period_start='2026-08-01', period_end='2026-08-01',
+        ).iloc[0]
+        task, plans = _plans_from_period(period)
+        self.assertEqual(period['推广计划总数'], 2)
+        self.assertEqual(task['推广计划数'], 2)
+        self.assertEqual(list(plans['计划ID']), ['P1', 'P2'])
 
     def test_7_day_aggregates_all_plans_before_top3(self):
         rows = [

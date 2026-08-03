@@ -21,6 +21,7 @@ from .plan_metrics import (
     PLAN_TOTAL_COUNT_COLUMN,
     summarize_plan_records,
 )
+from .data_validation import validate_paid_plan_consistency
 
 
 LEGACY_SOURCE_PRODUCT_ROI = '生意参谋商品数据'
@@ -449,7 +450,11 @@ def _finalize_result(base):
     result_df = pd.DataFrame()
     result_df['宝贝ID'] = base['宝贝ID'].astype(str) if '宝贝ID' in base.columns else pd.Series(dtype=str)
 
-    for col in ['款式主图', '货号', '商品名称', '统计日期', '淘宝类目', '创建时间', '推广明细']:
+    for col in [
+        '款式主图', '货号', '商品名称', '统计日期', '淘宝类目', '创建时间',
+        '推广明细', FULL_PLAN_DETAIL_COLUMN, PLAN_PERIOD_LABEL_COLUMN,
+        PLAN_PERIOD_RANGE_COLUMN,
+    ]:
         result_df[col] = base[col].fillna('').astype(str) if col in base.columns else ''
 
     for col in [
@@ -460,6 +465,8 @@ def _finalize_result(base):
         '成功退款金额', '搜索引导访客数',
         '直购数量', '直购成本', '展现', '点击',
         '在仓库存', '在途', '成本价（含税）', '日销7',
+        PLAN_TOTAL_COUNT_COLUMN, PLAN_DISPLAY_COUNT_COLUMN, PLAN_COVERAGE_COLUMN,
+        PLAN_COMPLETENESS_COLUMN, PLAN_PERIOD_DAYS_COLUMN, PLAN_ACTUAL_DAYS_COLUMN,
     ]:
         result_df[col] = _numeric_series(base[col]) if col in base.columns else 0.0
 
@@ -534,7 +541,9 @@ def merge_sources(sources, dimensions=None):
     ).dropna().drop_duplicates()
 
     if base_ids.empty:
-        return _finalize_result(pd.DataFrame(columns=['宝贝ID'])), plan_ids
+        result = _finalize_result(pd.DataFrame(columns=['宝贝ID']))
+        validate_paid_plan_consistency(result, '每日数据合并')
+        return result, plan_ids
 
     base = base_ids.merge(product, on='宝贝ID', how='left')
     base = base.merge(wujie, on='宝贝ID', how='left', suffixes=('', '_wujie'))
@@ -578,4 +587,6 @@ def merge_sources(sources, dimensions=None):
         if col in base.columns:
             base[col] = _numeric_series(base[col])
 
-    return _finalize_result(base), plan_ids
+    result = _finalize_result(base)
+    validate_paid_plan_consistency(result, '每日数据合并')
+    return result, plan_ids

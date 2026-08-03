@@ -18,6 +18,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from .data_validation import (
+    DataValidationError,
+    DataValidationIssue,
+    validate_required_columns,
+)
+
 DEFECT_WMS = {"12994511", "12097444"}
 _OPER_PLUS = ["qty", "in_qty", "return_qty", "customize_qty_1", "customize_qty_2",
               "customize_qty_4", "allocate_qty", "purchase_qty", "sale_refund_qty",
@@ -122,10 +128,20 @@ def load_snapshot_as_stock(path):
     ② SKU×仓原始镜像;③ 款式级预聚合(i_id/oper/onway)。"""
     head = pd.read_csv(path, encoding="utf-8-sig", nrows=0)
     if {"宝贝ID", "货号", "在仓库存"}.issubset(set(head.columns)):
+        validate_required_columns(
+            head.columns,
+            {"宝贝ID", "货号", "在仓库存", "在途"},
+            f"聚水潭增强库存快照 {path}",
+        )
         out = pd.read_csv(path, encoding="utf-8-sig", dtype=str)
         return _normalize_enriched_stock(out)
 
     if "oper" in head.columns and "i_id" in head.columns:
+        validate_required_columns(
+            head.columns,
+            {"i_id", "oper", "onway"},
+            f"聚水潭款式级库存快照 {path}",
+        )
         out = pd.read_csv(path, encoding="utf-8-sig", dtype={"i_id": str})
         out = out.rename(columns={"i_id": "货号", "oper": "在仓库存", "onway": "在途"})
         out["货号"] = out["货号"].astype(str).str.strip()
@@ -133,6 +149,17 @@ def load_snapshot_as_stock(path):
         out["在途"] = pd.to_numeric(out.get("在途"), errors="coerce").fillna(0.0)
         return out[out["货号"] != ""][["货号", "在仓库存", "在途"]].reset_index(drop=True)
 
+    raw_required = set(_OPER_PLUS) | {"order_lock", "wms_co_id", "sku_id", "i_id"}
+    if not raw_required.intersection(head.columns):
+        raise DataValidationError(DataValidationIssue(
+            f"聚水潭库存快照 {path}",
+            "无法识别库存快照结构，未发现增强、款式级或SKU仓级必需字段",
+        ))
+    validate_required_columns(
+        head.columns,
+        raw_required,
+        f"聚水潭SKU仓级库存快照 {path}",
+    )
     df = pd.read_csv(path, encoding="utf-8-sig", dtype=str,
                      usecols=lambda c: c in set(_OPER_PLUS) | {"order_lock", "wms_co_id",
                                                                "sku_id", "i_id"})

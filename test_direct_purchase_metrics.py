@@ -6,6 +6,7 @@ import pandas as pd
 from core.loader import _filter_source_columns, prepare_source
 from core.merge import merge_sources
 from core.periods import aggregate_period_frame
+from core.plan_metrics import summarize_plan_records
 from core.schema import SOURCE_WUJIE_SUBJECT
 
 
@@ -35,6 +36,8 @@ class DirectPurchaseMetricTests(unittest.TestCase):
             "主体类型": ["商品", "商品", "商品", "店铺", "商品"],
             "转化周期": ["15天", "15天", "30天", "15天", "15天"],
             "付费": [100.0, 50.0, 600.0, 900.0, 40.0],
+            "计划ID": ["P1", "P2", "P3", "SHOP", "P4"],
+            "场景名字": ["关键词推广"] * 5,
             "直接购物车数": [4, 1, 30, 30, 0],
             "总成交成本": [999.0, 999.0, 999.0, 999.0, 999.0],
         })
@@ -54,12 +57,20 @@ class DirectPurchaseMetricTests(unittest.TestCase):
         self.assertEqual(float(no_cart["直购成本"]), 0.0)
 
     def test_period_cost_is_recalculated_from_period_totals(self):
-        daily = pd.DataFrame({
-            "宝贝ID": ["1001", "1001"],
-            "付费": [100.0, 50.0],
-            "直购数量": [4.0, 1.0],
-            "直购成本": [25.0, 50.0],
-        })
+        rows = []
+        for spend, quantity in ((100.0, 4.0), (50.0, 1.0)):
+            row = {
+                "宝贝ID": "1001",
+                "付费": spend,
+                "直购数量": quantity,
+                "直购成本": spend / quantity,
+            }
+            row.update(summarize_plan_records([{
+                '计划ID': 'P1', '当前花费': spend, '归因成交': 0,
+                '加购': quantity, '点击': 1, '所属渠道': '关键词',
+            }], period_days=1, actual_days=1))
+            rows.append(row)
+        daily = pd.DataFrame(rows)
 
         for period_days in (7, 15, 30):
             with self.subTest(period_days=period_days):

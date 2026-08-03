@@ -17,6 +17,7 @@ from .plan_metrics import (
     PLAN_TOTAL_COUNT_COLUMN,
     summarize_period_product_plans,
 )
+from .data_validation import validate_paid_plan_consistency
 
 
 PERIOD_SPECS = [
@@ -239,6 +240,7 @@ def aggregate_period_frame(
     daily_sales = grouped["日销7"]
     grouped["可售天数"] = (grouped["在仓库存"] / daily_sales.where(daily_sales > 0)).round(1)
 
+    validate_paid_plan_consistency(grouped, '周期累计')
     return grouped
 
 

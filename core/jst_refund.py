@@ -17,6 +17,8 @@ from datetime import date, timedelta
 
 import pandas as pd
 
+from .data_validation import validate_required_columns
+
 COHORT_DAYS = 30
 SHOP_IDS = ("15031784", "18469727")
 
@@ -38,11 +40,12 @@ def find_refund_snapshot(root, date_str, max_back_days=7):
 def load_refund_rates(path):
     """CSV → 宝贝ID/退款率 DataFrame。"""
     df = pd.read_csv(path, encoding="utf-8-sig", dtype={"宝贝ID": str})
-    if "宝贝ID" not in df.columns:
-        raise ValueError(f"退款率快照缺少宝贝ID列: {path}")
-    rate_col = "退款率" if "退款率" in df.columns else df.columns[-1]
-    out = df[["宝贝ID", rate_col]].copy()
-    out = out.rename(columns={rate_col: "退款率"})
+    validate_required_columns(
+        df.columns,
+        {"宝贝ID", "退款率"},
+        f"聚水潭退款率快照 {path}",
+    )
+    out = df[["宝贝ID", "退款率"]].copy()
     out["宝贝ID"] = out["宝贝ID"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
     out["退款率"] = pd.to_numeric(out["退款率"], errors="coerce")
     out = out.dropna(subset=["宝贝ID"]).drop_duplicates(subset=["宝贝ID"], keep="last")
