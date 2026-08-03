@@ -340,8 +340,17 @@ class AITaskViewAdditionalContractTests(unittest.TestCase):
         )
         self.assertEqual(task['计划总数'], 0)
         self.assertEqual(task['计划覆盖率'], '无计划')
+        self.assertEqual(task['计划数据完整度'], '无计划')
         self.assertIn('无计划数据', task['计划数据说明'])
         self.assertNotIn('100.0%', task['计划数据说明'])
+
+    def test_paid_without_plan_is_not_mislabeled_as_no_plan(self):
+        task = _one(
+            MetoX算法命中='保护持有', 付费=100, 推广成交金额=0,
+            推广计划总数=0, 推广计划展示数=0,
+            计划覆盖率=0.0, 计划数据完整度=0.0, 推广明细='',
+        )
+        self.assertEqual(task['计划数据完整度'], '0.0%')
 
     def test_no_plan_confidence_uses_product_and_channel_evidence_without_full_score(self):
         task = _one(

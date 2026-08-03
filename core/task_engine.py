@@ -1058,7 +1058,11 @@ def build_ai_task_view(df: pd.DataFrame) -> pd.DataFrame:
             '计划覆盖率': (
                 f"{ctx['plan_coverage']:.1%}" if ctx['has_plan_data'] else '无计划'
             ),
-            '计划数据完整度': f"{ctx['plan_completeness']:.1%}",
+            '计划数据完整度': (
+                '无计划'
+                if ctx['spend'] <= 0 and not ctx['has_plan_data']
+                else f"{ctx['plan_completeness']:.1%}"
+            ),
             '计划数据说明': _plan_data_explanation(ctx),
             'AI可信度': confidence,
             'AI可信度分': confidence_score,

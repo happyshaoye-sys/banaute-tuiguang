@@ -39,6 +39,7 @@ CURRENT_DOCS = {
     "README_离线使用说明.txt": "MetoX v{version}",
     "第三方使用说明_先看这个.txt": "MetoX v{version}",
     "半自动推广工具_数据源与指标说明.md": "MetoX v{version}",
+    "MetoX{version}_使用说明与运营操作顺序.md": "MetoX v{version}",
     "MetoX{version}_新运营培训手册.html": "MetoX{version}",
 }
 VERSION_RE = re.compile(r"^[1-9]\d*\.\d+$")
