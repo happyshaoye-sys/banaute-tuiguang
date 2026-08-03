@@ -14,7 +14,7 @@
 ## Product goals
 - Goals: let an operator load the normal daily dataset with minimal scanning; keep low-frequency configuration discoverable but unobtrusive; keep product identity immediately recognizable in action tables; surface a concise, reconciled operating explanation immediately below the dashboard KPIs; make the AI任务主表 answer priority, product, operating performance, strategy, action, validation, and confidence without exposing diagnostic sub-scores.
 - Non-goals: redesigning the analysis tabs, changing formulas, changing MetoX or any product/channel/product-plan decision rule, or hiding data-quality evidence.
-- Success signals: the collapsed sidebar presents date, period, and load action first, followed by one compact advanced entry; loading and threshold reapplication behave unchanged.
+- Success signals: the collapsed sidebar presents date, period, and load action first, followed by one compact advanced entry; loading and threshold reapplication behave unchanged. AI任务在无计划时明确显示“无计划”，不把不存在的计划解释成100%覆盖或满分可信度。
 
 ## Personas and jobs
 - Primary personas: Tmall operators doing daily promotion review; maintainers configuring paths or thresholds occasionally.
@@ -30,7 +30,7 @@
 - Principle 1: frequent actions stay visible; low-frequency settings use progressive disclosure.
 - Principle 2: data-quality evidence remains available without consuming the report first screen.
 - Principle 3: one operational concept has one visible score; confidence diagnostics remain available on demand rather than becoming extra main-table columns.
-- Tradeoffs: one advanced panel is longer when opened, but the default daily workflow is materially shorter. The AI任务主表 omits `商品名称` and diagnostic fields to reduce horizontal scanning, while the product selector and confidence detail retain the supporting context.
+- Tradeoffs: one advanced panel is longer when opened, but the default daily workflow is materially shorter. The AI任务主表及其导出不包含`商品名称`，以减少横向扫描；商品通过宝贝ID、货号和款式主图识别。可信度详情保留支持性上下文。
 
 ## Visual language
 - Color: retain Streamlit theme and existing primary-action color.
@@ -43,7 +43,7 @@
 ## Components
 - Existing components to reuse: `st.sidebar`, `st.expander`, `st.text_input`, `st.selectbox`, `st.button`, `st.caption`, `st.dataframe`.
 - New/changed components: a single collapsed `高级设置`; threshold reapply button moves inside its threshold section; inventory action tables use the stable identity order `宝贝ID` → `货号` → `商品名称` on page and in Excel; `AI经营日报` is a bordered, default-expanded five-line summary generated from deterministic local metrics; the AI任务主表 is an explicit presentation projection rather than every backend column; a selected task exposes one `AI可信度说明` disclosure.
-- Variants and states: before load, threshold inputs are editable but reapply is absent; after load, references, reapply, performance details, and period completeness are available inside advanced settings. A complete comparison window shows overview, grade, category, channel, and risk lines; an incomplete window shows a completeness warning and provisional overview only. AI可信度 always renders as one five-star-plus-percentage value; the detail uses `✓` for complete evidence and `△` for partial/missing evidence without exposing product/channel/plan sub-scores.
+- Variants and states: before load, threshold inputs are editable but reapply is absent; after load, references, reapply, performance details, and period completeness are available inside advanced settings. A complete comparison window shows overview, grade, category, channel, and risk lines; an incomplete window shows a completeness warning and provisional overview only. AI可信度 always renders as one five-star-plus-percentage value; the detail uses `✓` for complete evidence and `△` for partial/missing evidence without exposing product/channel/plan sub-scores. `计划总数=0`时，计划覆盖率显示`无计划`；AI可信度仅按商品和渠道证据计算并设为非五星上限，详情明确写明`当前无计划数据，计划可信度未参与计算`。
 - Token/component ownership: Streamlit native theme; no new CSS or component library.
 
 ## Accessibility

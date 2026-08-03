@@ -35,6 +35,7 @@ class ExportAllSheetsTests(unittest.TestCase):
         self.assertEqual(len(tasks), 1)
         self.assertEqual(tasks.loc[0, '款式主图'], image_url)
         self.assertIn('AI任务类型', tasks.columns)
+        self.assertNotIn('商品名称', tasks.columns)
         self.assertTrue(str(tasks.loc[0, 'AI任务类型']).strip())
 
 

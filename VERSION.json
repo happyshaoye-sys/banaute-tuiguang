@@ -1,6 +1,6 @@
 {
   "product": "MetoX",
-  "version": "2.7",
+  "version": "2.8",
   "release_date": "2026-08-03",
   "external_strategy_version": "v9.3",
   "rule_versions": {
@@ -13,6 +13,7 @@
     "ai_task_view": "2026-08-03",
     "ai_task_period_alignment": "2026-08-03",
     "direct_purchase_metrics": "2026-08-03",
-    "ai_task_experience": "2026-08-03"
+    "ai_task_experience": "2026-08-03",
+    "ai_task_no_plan_semantics": "2026-08-03"
   }
 }

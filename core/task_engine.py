@@ -18,7 +18,7 @@ from .schema import safe_div, to_num
 
 AI_TASK_VIEW_COLUMNS = [
     '执行优先级', '任务优先分', '款式主图', '货号', '链接数', '宝贝ID',
-    'GMV', '商品访客数', '链接投产', '商品名称', '淘宝类目', '综合等级',
+    'GMV', '商品访客数', '链接投产', '淘宝类目', '综合等级',
     '商品定位', '商品周期', 'MetoX算法命中',
     'AI任务类型', '商品级总策略', '动作对象', '主执行动作',
     '关键词状态', '关键词动作', '人群状态', '人群动作', '全站状态', '全站动作',
@@ -383,7 +383,11 @@ def _build_product_context(row, columns, benchmarks):
         plan_total = len(plans)
     if plan_display <= 0 and plans:
         plan_display = len(plans)
-    plan_coverage = to_num(row.get('计划覆盖率', 1.0 if plan_total <= 3 else 0.0))
+    has_plan_data = plan_total > 0
+    plan_coverage = (
+        to_num(row.get('计划覆盖率', 1.0 if plan_total <= 3 else 0.0))
+        if has_plan_data else None
+    )
     plan_completeness = to_num(row.get('计划数据完整度', 1.0 if plans or spend <= 0 else 0.0))
     period_label = _text(row.get('计划数据口径', ''))
     source_window = _source_window(period_label)
@@ -394,7 +398,7 @@ def _build_product_context(row, columns, benchmarks):
     else:
         period_match = re.fullmatch(r'近(\d+)天累计', period_label)
         label_days = int(period_match.group(1)) if period_match else 0
-    plan_applicable = plan_total > 0 or spend > 0
+    plan_applicable = has_plan_data or spend > 0
     period_consistent = (
         True if not plan_applicable
         else bool(plan_period_days > 0 and label_days == plan_period_days)
@@ -427,8 +431,11 @@ def _build_product_context(row, columns, benchmarks):
         'low_channels': low_channels, 'mixed_channels': mixed_channels,
         'all_active_low': all_active_low, 'plans': plans, 'plan_states': plan_states,
         'plan_parse_error': plan_parse_error,
+        'has_plan_data': has_plan_data,
         'plan_total': plan_total, 'plan_display': plan_display,
-        'plan_coverage': max(0.0, min(plan_coverage, 1.0)),
+        'plan_coverage': (
+            max(0.0, min(plan_coverage, 1.0)) if has_plan_data else None
+        ),
         'plan_completeness': max(0.0, min(plan_completeness, 1.0)),
         'plan_period_days': plan_period_days, 'plan_actual_days': plan_actual_days,
         'period_consistent': period_consistent,
@@ -758,6 +765,8 @@ def _data_source_labels(ctx) -> tuple[str, str, str]:
 
 def _plan_data_explanation(ctx) -> str:
     period = ctx['period_label'] or '当前执行表口径'
+    if not ctx['has_plan_data']:
+        return f'{period}｜无计划数据'
     return (
         f'{period}｜Top3关键计划（按周期花费排序）｜'
         f'覆盖{ctx["plan_display"]}/{ctx["plan_total"]}个计划｜'
@@ -778,7 +787,20 @@ def _ai_confidence(ctx) -> tuple[str, int, str]:
     channel_complete = sum(
         metrics['state'] != '数据不足' for metrics in ctx['channels'].values()
     ) / max(len(ctx['channels']), 1)
-    plan_applicable = ctx['plan_total'] > 0 or ctx['spend'] > 0
+    if not ctx['has_plan_data']:
+        score = min(round(50 * product_complete + 50 * channel_complete), 89)
+        star_count = 4 if score >= 75 else 3 if score >= 60 else 2 if score >= 40 else 1
+        display = f'{"★" * star_count}{"☆" * (5 - star_count)}（{score}%）'
+        reasons = [
+            '✓ 商品数据完整' if product_complete == 1 else '△ 商品关键数据缺失',
+            '✓ 渠道数据完整' if channel_complete == 1 else '△ 部分渠道数据不足',
+            '△ 当前无计划数据，计划可信度未参与计算',
+            '— Top3计划覆盖率不适用',
+            '— 计划周期一致性不适用',
+        ]
+        return display, score, '\n'.join(reasons)
+
+    plan_applicable = True
     plan_complete = ctx['plan_completeness'] if plan_applicable else 1.0
     if plan_applicable and (ctx['plan_parse_error'] or (ctx['plan_total'] > 0 and not ctx['plans'])):
         plan_complete = 0.0
@@ -1015,7 +1037,6 @@ def build_ai_task_view(df: pd.DataFrame) -> pd.DataFrame:
             'GMV': _raw_or_blank(row.get('GMV', '')),
             '商品访客数': _raw_or_blank(row.get('商品访客数', '')),
             '链接投产': _raw_or_blank(row.get('链接投产', '')),
-            '商品名称': _raw_or_blank(row.get('商品名称', '')),
             '淘宝类目': _raw_or_blank(row.get('淘宝类目', '')),
             '综合等级': _raw_or_blank(row.get('综合等级', '')),
             '商品定位': _raw_or_blank(row.get('商品定位', '')),
@@ -1034,7 +1055,9 @@ def build_ai_task_view(df: pd.DataFrame) -> pd.DataFrame:
             '推广计划数': len(plan_actions),
             '计划总数': ctx['plan_total'],
             '计划展示数': ctx['plan_display'],
-            '计划覆盖率': f"{ctx['plan_coverage']:.1%}",
+            '计划覆盖率': (
+                f"{ctx['plan_coverage']:.1%}" if ctx['has_plan_data'] else '无计划'
+            ),
             '计划数据完整度': f"{ctx['plan_completeness']:.1%}",
             '计划数据说明': _plan_data_explanation(ctx),
             'AI可信度': confidence,

@@ -287,6 +287,11 @@ class AITaskViewAdditionalContractTests(unittest.TestCase):
         self.assertNotIn('商品可信度', AI_TASK_MAIN_COLUMNS)
         self.assertNotIn('渠道可信度', AI_TASK_MAIN_COLUMNS)
         self.assertNotIn('计划可信度', AI_TASK_MAIN_COLUMNS)
+        self.assertNotIn('商品名称', AI_TASK_VIEW_COLUMNS)
+
+    def test_product_name_is_absent_from_task_output_not_only_hidden_by_page_projection(self):
+        task = _one(MetoX算法命中='保护持有')
+        self.assertNotIn('商品名称', task.index)
 
     def test_confidence_is_one_composite_value_with_operational_checklist(self):
         task = _one(MetoX算法命中='保护持有')
@@ -318,6 +323,50 @@ class AITaskViewAdditionalContractTests(unittest.TestCase):
         self.assertGreater(complete['AI可信度分'], partial['AI可信度分'])
         self.assertIn('△ 当前仅展示Top3关键计划', partial['AI可信度说明'])
         self.assertIn('△ 部分计划数据缺失', partial['AI可信度说明'])
+
+    def test_no_plan_coverage_is_not_reported_as_one_hundred_percent(self):
+        task = _one(
+            MetoX算法命中='保护持有', 付费=0, 推广成交金额=0,
+            关键词=0, 人群=0, 全站=0,
+            关键词归因成交=0, 人群归因成交=0, 全站归因成交=0,
+            推广计划总数=0, 推广计划展示数=0,
+            计划覆盖率=1.0, 计划数据完整度=1.0, 推广明细='',
+        )
+        self.assertEqual(task['计划总数'], 0)
+        self.assertEqual(task['计划覆盖率'], '无计划')
+        self.assertIn('无计划数据', task['计划数据说明'])
+        self.assertNotIn('100.0%', task['计划数据说明'])
+
+    def test_no_plan_confidence_uses_product_and_channel_evidence_without_full_score(self):
+        task = _one(
+            MetoX算法命中='保护持有', 付费=0, 推广成交金额=0,
+            关键词=0, 人群=0, 全站=0,
+            关键词归因成交=0, 人群归因成交=0, 全站归因成交=0,
+            推广计划总数=0, 推广计划展示数=0,
+            计划覆盖率=1.0, 计划数据完整度=1.0, 推广明细='',
+        )
+        self.assertLess(task['AI可信度分'], 90)
+        self.assertNotEqual(task['AI可信度'], '★★★★★（100%）')
+        self.assertIn('当前无计划数据，计划可信度未参与计算', task['AI可信度说明'])
+        self.assertNotIn('✓ 商品-计划数据完整', task['AI可信度说明'])
+
+    def test_no_plan_explainability_metadata_does_not_change_business_actions(self):
+        left = _one(
+            MetoX算法命中='保护持有', 推广计划总数=0,
+            推广计划展示数=0, 计划覆盖率=1.0, 计划数据完整度=1.0,
+            推广明细='',
+        )
+        right = _one(
+            MetoX算法命中='保护持有', 推广计划总数=0,
+            推广计划展示数=0, 计划覆盖率=0.0, 计划数据完整度=0.0,
+            推广明细='',
+        )
+        for field in (
+            'AI任务类型', '商品级总策略', '关键词状态', '关键词动作',
+            '人群状态', '人群动作', '全站状态', '全站动作',
+            '计划执行摘要', '计划执行明细', '执行优先级', '任务优先分',
+        ):
+            self.assertEqual(left[field], right[field], field)
 
     def test_declining_product_budget_receiver_is_kept_not_increased(self):
         task = _one(
@@ -410,6 +459,7 @@ class AITaskViewUIContractTests(unittest.TestCase):
         self.assertIn('task_main = task_filtered[AI_TASK_MAIN_COLUMNS].copy()', view)
         self.assertIn('parse_plan_execution_details', view)
         self.assertIn('选择商品查看计划动作', view)
+        self.assertNotIn("task_choices.at[idx, '商品名称']", view)
 
     def test_main_table_renames_strategy_and_exposes_one_confidence_detail(self):
         view = self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]

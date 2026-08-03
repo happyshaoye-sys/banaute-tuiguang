@@ -1268,7 +1268,6 @@ with tab3:
             format_func=lambda idx: (
                 f"{task_choices.at[idx, '宝贝ID']}｜"
                 f"{task_choices.at[idx, '货号']}｜"
-                f"{task_choices.at[idx, '商品名称']}｜"
                 f"{task_choices.at[idx, '计划执行摘要']}"
             ),
             key='ai_task_plan_detail_product',
