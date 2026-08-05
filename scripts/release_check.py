@@ -16,6 +16,7 @@ PROTECTED_FILES = {
     "app.py",
     "launcher.py",
     "core/analysis.py",
+    "core/dataframe_clipboard.py",
     "core/data_validation.py",
     "core/exporter.py",
     "core/field_mapping.py",
@@ -111,6 +112,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.ai_task_plan_pipeline")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("data_contract_validation"):
         errors.append("VERSION.json must record rule_versions.data_contract_validation")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("category_analysis_copy"):
+        errors.append("VERSION.json must record rule_versions.category_analysis_copy")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()

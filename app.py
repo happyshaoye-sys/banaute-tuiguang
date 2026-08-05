@@ -36,6 +36,7 @@ from core.task_engine import AI_TASK_MAIN_COLUMNS, parse_plan_execution_details
 from core.jst_stock import find_snapshot, load_snapshot_as_stock
 from core.jst_refund import find_refund_snapshot, load_refund_rates
 from core.exporter import export_execution_table, export_all_sheets, style_execution_table
+from core.dataframe_clipboard import build_dataframe_copy_button_html
 from core.version_control import find_repository, get_status, next_version_name, save_version
 from core.version import APP_VERSION, DISPLAY_VERSION, PRODUCT_NAME
 from core.schema import (
@@ -1442,7 +1443,15 @@ with tab6:
         cat = category_analysis(df, cat_ctx=_ctx)
         if cat['basic']:
             st.subheader("品类基础分析")
-            st.dataframe(pd.DataFrame(cat['basic']), width="stretch", hide_index=True)
+            basic_category_df = pd.DataFrame(cat['basic'])
+            st.html(
+                build_dataframe_copy_button_html(
+                    basic_category_df,
+                    button_key="category-basic",
+                ),
+                unsafe_allow_javascript=True,
+            )
+            st.dataframe(basic_category_df, width="stretch", hide_index=True)
             t = cat.get('total', {})
             st.caption(f"合计: {t.get('cnt',0)} 商品 | GMV ¥{t.get('gmv',0)/1e4:.2f}万 | ROI {t.get('roi',0)}")
         if cat.get('invest'):
