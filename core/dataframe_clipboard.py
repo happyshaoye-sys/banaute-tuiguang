@@ -14,11 +14,15 @@ def dataframe_to_clipboard_text(frame: pd.DataFrame) -> str:
 
 
 def build_dataframe_copy_button_html(frame: pd.DataFrame, *, button_key: str) -> str:
-    """Return a zero-height component that adds a copy button beside a dataframe."""
+    """Return a zero-height component that extends the next dataframe toolbar."""
     marker = "metox-copy-" + re.sub(r"[^a-zA-Z0-9_-]+", "-", button_key).strip("-")
     payload = base64.b64encode(dataframe_to_clipboard_text(frame).encode("utf-8")).decode("ascii")
     marker_json = json.dumps(marker)
     payload_json = json.dumps(payload)
+    copy_label_json = json.dumps("一键复制")
+    copied_label_json = json.dumps("已复制")
+    copy_title_json = json.dumps("一键复制（含表头，可粘贴到 Excel）")
+    failed_title_json = json.dumps("复制失败，请重试")
 
     return f"""<!doctype html>
 <html>
@@ -27,12 +31,40 @@ def build_dataframe_copy_button_html(frame: pd.DataFrame, *, button_key: str) ->
 (() => {{
   const marker = {marker_json};
   const encoded = {payload_json};
+  const copyLabel = {copy_label_json};
+  const copiedLabel = {copied_label_json};
+  const copyTitle = {copy_title_json};
+  const failedTitle = {failed_title_json};
+  const nativeToolbarLabels = new Set([
+    "Show/hide columns",
+    "Download as CSV",
+    "Search",
+    "Fullscreen"
+  ]);
   const bytes = Uint8Array.from(atob(encoded), char => char.charCodeAt(0));
   const clipboardText = new TextDecoder("utf-8").decode(bytes);
-  const copyLabel = "一键复制";
-  const copiedLabel = "已复制";
-  const copyIcon = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1Zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Zm0 16H8V7h11v14Z"/></svg>';
-  const copiedIcon = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="m9 16.2-3.5-3.5L4.1 14.1 9 19 20.3 7.7l-1.4-1.4L9 16.2Z"/></svg>';
+  const copyPath = "M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1Zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Zm0 16H8V7h11v14Z";
+  const copiedPath = "m9 16.2-3.5-3.5L4.1 14.1 9 19 20.3 7.7l-1.4-1.4L9 16.2Z";
+
+  let parentWindow;
+  let parentDocument;
+  let frame;
+  let host;
+  try {{
+    parentWindow = window.parent;
+    parentDocument = parentWindow.document;
+    frame = window.frameElement;
+    host = frame && frame.closest('[data-testid="stElementContainer"]');
+  }} catch (error) {{
+    console.error("MetoX copy component could not access the parent page", error);
+    return;
+  }}
+  if (!host) return;
+
+  frame.style.display = "none";
+  host.style.height = "0";
+  host.style.minHeight = "0";
+  host.style.overflow = "hidden";
 
   function fallbackCopy(text) {{
     const textarea = parentDocument.createElement("textarea");
@@ -60,80 +92,126 @@ def build_dataframe_copy_button_html(frame: pd.DataFrame, *, button_key: str) ->
     fallbackCopy(clipboardText);
   }}
 
-  let parentWindow;
-  let parentDocument;
-  let frame;
-  let host;
-  try {{
-    parentWindow = window.parent;
-    parentDocument = parentWindow.document;
-    frame = window.frameElement;
-    host = frame && frame.closest('[data-testid="stElementContainer"]');
-  }} catch (error) {{
-    console.error("MetoX copy component could not access the parent page", error);
-    return;
-  }}
-  if (!host) return;
-
-  frame.style.display = "none";
-  host.style.position = "relative";
-  host.style.height = "0";
-  host.style.minHeight = "0";
-  host.style.overflow = "visible";
-  host.style.zIndex = "1000";
-
-  const previous = parentDocument.querySelector(`[data-metox-copy="${{marker}}"]`);
-  if (previous) previous.remove();
-  const button = parentDocument.createElement("button");
-  button.type = "button";
-  button.setAttribute("data-metox-copy", marker);
-  button.setAttribute("aria-label", copyLabel);
-  button.setAttribute("title", copyLabel + "（含表头，可粘贴到 Excel）");
-  button.innerHTML = copyIcon;
-  button.style.cssText = [
-    "position:absolute",
-    "top:0.75rem",
-    "right:6.25rem",
-    "width:1.4rem",
-    "height:1.4rem",
-    "display:inline-flex",
-    "align-items:center",
-    "justify-content:center",
-    "padding:0",
-    "color:inherit",
-    "background:transparent",
-    "border:0",
-    "border-radius:0.5rem",
-    "cursor:pointer",
-    "pointer-events:auto",
-    "z-index:1001"
-  ].join(";");
-  button.dataset.metoxCopyBound = "true";
-  button.addEventListener("mouseenter", () => {{
-    button.style.background = "rgba(128, 128, 128, 0.18)";
-  }});
-  button.addEventListener("mouseleave", () => {{
-    button.style.background = "transparent";
-  }});
-  button.addEventListener("click", async event => {{
-    event.preventDefault();
-    event.stopPropagation();
-    try {{
-      await copyToClipboard();
-      button.setAttribute("aria-label", copiedLabel);
-      button.setAttribute("title", copiedLabel);
-      button.innerHTML = copiedIcon;
-      window.setTimeout(() => {{
-        button.setAttribute("aria-label", copyLabel);
-        button.setAttribute("title", copyLabel + "（含表头，可粘贴到 Excel）");
-        button.innerHTML = copyIcon;
-      }}, 1600);
-    }} catch (error) {{
-      console.error("MetoX dataframe copy failed", error);
-      button.setAttribute("title", "复制失败，请重试");
+  function findTargetDataframe() {{
+    const followingFlag = parentWindow.Node.DOCUMENT_POSITION_FOLLOWING;
+    const dataframes = parentDocument.querySelectorAll('[data-testid="stDataFrame"]');
+    for (const dataframe of dataframes) {{
+      if (host.compareDocumentPosition(dataframe) & followingFlag) return dataframe;
     }}
-  }});
-  host.appendChild(button);
+    return null;
+  }}
+
+  function lowestCommonAncestor(elements, stopAt) {{
+    let candidate = elements[0] && elements[0].parentElement;
+    while (candidate && candidate !== stopAt) {{
+      if (elements.every(element => candidate.contains(element))) return candidate;
+      candidate = candidate.parentElement;
+    }}
+    return null;
+  }}
+
+  function toolbarSlot(button, toolbar) {{
+    let slot = button;
+    while (slot.parentElement && slot.parentElement !== toolbar) slot = slot.parentElement;
+    return slot.parentElement === toolbar ? slot : null;
+  }}
+
+  function clearDuplicateIds(root) {{
+    if (root.removeAttribute) root.removeAttribute("id");
+    for (const element of root.querySelectorAll("[id]")) element.removeAttribute("id");
+  }}
+
+  function renderNativeSizedIcon(button, pathData) {{
+    const svg = button.querySelector("svg");
+    if (!svg) return;
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.replaceChildren();
+    const path = parentDocument.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("fill", "currentColor");
+    path.setAttribute("d", pathData);
+    svg.appendChild(path);
+  }}
+
+  function bindCopyButton(button) {{
+    button.type = "button";
+    button.setAttribute("data-metox-copy", marker);
+    button.setAttribute("aria-label", copyLabel);
+    button.setAttribute("title", copyTitle);
+    renderNativeSizedIcon(button, copyPath);
+    button.addEventListener("click", async event => {{
+      event.preventDefault();
+      event.stopPropagation();
+      try {{
+        await copyToClipboard();
+        button.setAttribute("aria-label", copiedLabel);
+        button.setAttribute("title", copiedLabel);
+        renderNativeSizedIcon(button, copiedPath);
+        window.setTimeout(() => {{
+          button.setAttribute("aria-label", copyLabel);
+          button.setAttribute("title", copyTitle);
+          renderNativeSizedIcon(button, copyPath);
+        }}, 1600);
+      }} catch (error) {{
+        console.error("MetoX dataframe copy failed", error);
+        button.setAttribute("title", failedTitle);
+      }}
+    }});
+  }}
+
+  function installInNativeToolbar() {{
+    const dataframe = findTargetDataframe();
+    if (!dataframe) return false;
+
+    const current = dataframe.querySelector(`[data-metox-copy="${{marker}}"]`);
+    if (current) return true;
+    const stale = parentDocument.querySelector(`[data-metox-copy="${{marker}}"]`);
+    if (stale) {{
+      const staleSlot = stale.closest('[data-metox-copy-slot]');
+      if (staleSlot) staleSlot.remove();
+      else stale.remove();
+    }}
+
+    const nativeButtons = Array.from(dataframe.querySelectorAll("button[aria-label]"))
+      .filter(button => nativeToolbarLabels.has(button.getAttribute("aria-label")));
+    if (nativeButtons.length < nativeToolbarLabels.size) return false;
+
+    const toolbar = lowestCommonAncestor(nativeButtons, dataframe);
+    if (!toolbar) return false;
+    const templateButton = nativeButtons.find(
+      button => button.getAttribute("aria-label") === "Download as CSV"
+    ) || nativeButtons[0];
+    const templateSlot = toolbarSlot(templateButton, toolbar);
+    const firstSlot = toolbarSlot(nativeButtons[0], toolbar);
+    if (!templateSlot || !firstSlot) return false;
+
+    const copySlot = templateSlot.cloneNode(true);
+    const copyButton = copySlot.matches("button") ? copySlot : copySlot.querySelector("button");
+    if (!copyButton) return false;
+    clearDuplicateIds(copySlot);
+    copySlot.setAttribute("data-metox-copy-slot", marker);
+    bindCopyButton(copyButton);
+    toolbar.insertBefore(copySlot, firstSlot);
+    return true;
+  }}
+
+  let scheduled = false;
+  const scheduleInstall = () => {{
+    if (scheduled) return;
+    scheduled = true;
+    parentWindow.requestAnimationFrame(() => {{
+      scheduled = false;
+      installInNativeToolbar();
+    }});
+  }};
+  const observer = new parentWindow.MutationObserver(scheduleInstall);
+  observer.observe(parentDocument.body, {{childList: true, subtree: true}});
+
+  let attempts = 0;
+  const retryTimer = window.setInterval(() => {{
+    attempts += 1;
+    if (installInNativeToolbar() || attempts >= 100) window.clearInterval(retryTimer);
+  }}, 100);
+  installInNativeToolbar();
 }})();
 </script>
 </body>
