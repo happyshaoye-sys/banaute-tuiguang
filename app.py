@@ -7,6 +7,7 @@ from datetime import datetime
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from core.loader import read_prepared_source
 from core.data_validation import (
@@ -1444,12 +1445,13 @@ with tab6:
         if cat['basic']:
             st.subheader("品类基础分析")
             basic_category_df = pd.DataFrame(cat['basic'])
-            st.html(
+            components.html(
                 build_dataframe_copy_button_html(
                     basic_category_df,
                     button_key="category-basic",
                 ),
-                unsafe_allow_javascript=True,
+                height=0,
+                scrolling=False,
             )
             st.dataframe(basic_category_df, width="stretch", hide_index=True)
             t = cat.get('total', {})

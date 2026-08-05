@@ -19,18 +19,19 @@ class DataframeClipboardTests(unittest.TestCase):
 
         self.assertEqual(text, "品类\tGMV\n连衣裙\t288392.96\n")
 
-    def test_copy_component_targets_the_native_dataframe_toolbar(self):
+    def test_copy_component_renders_a_visible_toolbar_button(self):
         frame = pd.DataFrame([{"品类": "连衣裙"}])
 
         html = build_dataframe_copy_button_html(frame, button_key="category-basic")
 
-        self.assertIn('button[aria-label="Download as CSV"]', html)
-        self.assertIn("一键复制", html)
-        self.assertIn("document.currentScript", html)
-        self.assertIn("navigator.clipboard.writeText", html)
-        self.assertIn('document.execCommand("copy")', html)
-        self.assertIn("MutationObserver", html)
+        self.assertIn("window.frameElement", html)
+        self.assertIn("window.parent", html)
+        self.assertIn('button.setAttribute("aria-label", copyLabel)', html)
+        self.assertIn('"right:6.25rem"', html)
+        self.assertIn("clipboard.writeText", html)
+        self.assertIn('parentDocument.execCommand("copy")', html)
         self.assertIn("metox-copy-category-basic", html)
+        self.assertNotIn('button[aria-label="Download as CSV"]', html)
 
 
 if __name__ == "__main__":
