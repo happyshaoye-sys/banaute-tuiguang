@@ -1326,7 +1326,10 @@ with tab4:
     st.session_state["exec_cols_pref"] = [
         c for c in st.session_state["exec_cols_pref"] if c in all_cols
     ] or all_cols
-    for c in ["v9.3信号", "MetoX算法命中", "MetoX算法分", "MetoX算法原因"]:
+    for c in [
+        "v9.3信号", "MetoX算法命中", "MetoX算法分", "MetoX算法原因",
+        "商品加购率", "推广加购率",
+    ]:
         if c in all_cols and c not in st.session_state["exec_cols_pref"]:
             st.session_state["exec_cols_pref"].append(c)
 
@@ -1390,17 +1393,30 @@ with tab4:
         width="stretch",
         hide_index=True,
         height=600,
+        column_config={
+            "商品加购率": st.column_config.NumberColumn(
+                "商品加购率",
+                format="percent",
+            ),
+            "推广加购率": st.column_config.NumberColumn(
+                "推广加购率",
+                format="percent",
+            ),
+        },
     )
 
     # 导出(2026-07-10 修复:此前下载按钮嵌在导出按钮的 if 里,任意页面刷新即消失、
     # 点下载后自身触发的 rerun 也会让它消失导致"下载不了"。改为:生成结果存 session,
     # 下载按钮持久显示;生成时记录行数与时间,筛选变化后重新生成即可)
     XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    export_cat_ctx = st.session_state.get('cat_ctx') or {}
     ce1, ce2 = st.columns(2)
     with ce1:
         if st.button("📥 生成执行表 Excel", key="export_exec"):
-            with st.spinner(f"生成中({len(filtered)} 行)..."):
-                st.session_state["exec_xlsx"] = export_execution_table(filtered)
+            with st.spinner(f"生成中({len(filtered)} 行，含品类投放表)..."):
+                st.session_state["exec_xlsx"] = export_execution_table(
+                    filtered, cat_ctx=export_cat_ctx
+                )
                 st.session_state["exec_xlsx_meta"] = \
                     f"{len(filtered)}行 {datetime.now().strftime('%H:%M:%S')}"
         if st.session_state.get("exec_xlsx"):
@@ -1411,8 +1427,10 @@ with tab4:
                 XLSX_MIME, key="dl_exec")
     with ce2:
         if st.button("📦 生成全部 Sheet Excel", key="export_all"):
-            with st.spinner(f"生成中({len(filtered)} 行 × 9 sheet)..."):
-                st.session_state["all_xlsx"] = export_all_sheets(filtered)
+            with st.spinner(f"生成中({len(filtered)} 行，含品类投放表)..."):
+                st.session_state["all_xlsx"] = export_all_sheets(
+                    filtered, cat_ctx=export_cat_ctx
+                )
                 st.session_state["all_xlsx_meta"] = \
                     f"{len(filtered)}行 {datetime.now().strftime('%H:%M:%S')}"
         if st.session_state.get("all_xlsx"):

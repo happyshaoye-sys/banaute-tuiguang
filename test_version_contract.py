@@ -16,7 +16,7 @@ class VersionContractTests(unittest.TestCase):
     def test_version_json_is_the_application_identity(self):
         info = json.loads((ROOT / "VERSION.json").read_text(encoding="utf-8"))
         self.assertEqual(info["product"], "MetoX")
-        self.assertEqual(info["version"], "2.12")
+        self.assertEqual(info["version"], "2.13")
         self.assertEqual(info["release_date"], "2026-08-06")
         self.assertEqual(info["external_strategy_version"], "v9.3")
         self.assertEqual(info["rule_versions"]["refund_risk"], "2026-08-02")
@@ -35,8 +35,10 @@ class VersionContractTests(unittest.TestCase):
         self.assertEqual(info["rule_versions"]["category_analysis_copy"], "2026-08-05")
         self.assertEqual(info["rule_versions"]["metox_cart_burst_label"], "2026-08-06")
         self.assertEqual(info["rule_versions"]["ai_task_metox_priority"], "2026-08-06")
+        self.assertEqual(info["rule_versions"]["execution_cart_rates"], "2026-08-06")
+        self.assertEqual(info["rule_versions"]["category_investment_export"], "2026-08-06")
         self.assertEqual(version.VERSION_INFO, info)
-        self.assertEqual(version.DISPLAY_VERSION, "MetoX v2.12")
+        self.assertEqual(version.DISPLAY_VERSION, "MetoX v2.13")
 
     def test_app_imports_version_instead_of_assigning_one(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
@@ -59,12 +61,12 @@ class VersionContractTests(unittest.TestCase):
 
     def test_current_operator_documents_show_v2_contract(self):
         documents = {
-            "README.md": "MetoX v2.12",
-            "README_离线使用说明.txt": "MetoX v2.12",
-            "第三方使用说明_先看这个.txt": "MetoX v2.12",
-            "半自动推广工具_数据源与指标说明.md": "MetoX v2.12",
-            "MetoX2.12_使用说明与运营操作顺序.md": "MetoX v2.12",
-            "MetoX2.12_新运营培训手册.html": "MetoX2.12",
+            "README.md": "MetoX v2.13",
+            "README_离线使用说明.txt": "MetoX v2.13",
+            "第三方使用说明_先看这个.txt": "MetoX v2.13",
+            "半自动推广工具_数据源与指标说明.md": "MetoX v2.13",
+            "MetoX2.13_使用说明与运营操作顺序.md": "MetoX v2.13",
+            "MetoX2.13_新运营培训手册.html": "MetoX2.13",
         }
         for relative, marker in documents.items():
             with self.subTest(relative=relative):

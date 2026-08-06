@@ -118,6 +118,10 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.metox_cart_burst_label")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("ai_task_metox_priority"):
         errors.append("VERSION.json must record rule_versions.ai_task_metox_priority")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("execution_cart_rates"):
+        errors.append("VERSION.json must record rule_versions.execution_cart_rates")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("category_investment_export"):
+        errors.append("VERSION.json must record rule_versions.category_investment_export")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()
@@ -205,6 +209,16 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("daily direct-purchase cost must be spend divided by quantity")
     if 'grouped["直购成本"] = _ratio_series(spend, grouped["直购数量"])' not in periods:
         errors.append("period direct-purchase cost must be recalculated from period totals")
+    if "result_df['商品加购率'] = _safe_div_series(add_cart, visitors)" not in merge:
+        errors.append("daily product cart rate must be add-cart quantity divided by product visitors")
+    if "result_df['推广加购率'] = _safe_div_series(result_df['推广加购数'], clicks)" not in merge:
+        errors.append("daily promotion cart rate must be filtered subject carts divided by clicks")
+    if 'grouped["商品加购率"] = _ratio_series(add_cart, visitors)' not in periods:
+        errors.append("period product cart rate must be recalculated from period totals")
+    if 'grouped["推广加购率"] = _ratio_series(grouped["推广加购数"], clicks)' not in periods:
+        errors.append("period promotion cart rate must be recalculated from period totals")
+    if "CATEGORY_INVESTMENT_SHEET = '品类投放占比与ROI'" not in exporter:
+        errors.append("Excel exports must include the category investment and ROI sheet")
 
     for relative_template, marker_template in CURRENT_DOCS.items():
         relative = relative_template.format(version=version)

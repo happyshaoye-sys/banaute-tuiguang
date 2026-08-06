@@ -6,7 +6,7 @@ import unittest
 
 import pandas as pd
 
-from core.exporter import export_all_sheets
+from core.exporter import export_all_sheets, export_execution_table
 from core.plan_metrics import summarize_plan_records
 
 
@@ -30,6 +30,10 @@ class ExportAllSheetsTests(unittest.TestCase):
             'MetoX算法分': 15,
             'GMV': 1000,
             '付费': 100,
+            '商品访客数': 40,
+            '关键词': 60,
+            '人群': 25,
+            '全站': 15,
             **plan,
         }])
 
@@ -62,6 +66,10 @@ class ExportAllSheetsTests(unittest.TestCase):
             'MetoX算法分': 15,
             'GMV': 1000,
             '付费': 0,
+            '商品访客数': 40,
+            '关键词': 0,
+            '人群': 0,
+            '全站': 0,
             '推广计划总数': 0,
             '推广计划展示数': 0,
             '计划覆盖率': 1.0,
@@ -75,6 +83,56 @@ class ExportAllSheetsTests(unittest.TestCase):
 
         self.assertEqual(tasks.loc[0, '计划覆盖率'], '无计划')
         self.assertEqual(tasks.loc[0, '计划数据完整度'], '无计划')
+
+    def test_category_investment_and_roi_sheet_is_in_both_downloads(self):
+        plan = summarize_plan_records([{
+            '计划ID': 'P1003', '当前花费': 100, '归因成交': 200,
+            '加购': 10, '点击': 50, '所属渠道': '关键词',
+        }], period_days=7, actual_days=7)
+        source = pd.DataFrame([{
+            '宝贝ID': '1003',
+            '淘宝类目': '连衣裙',
+            'GMV': 1000.0,
+            '付费': 100.0,
+            '商品访客数': 40,
+            '关键词': 60.0,
+            '人群': 25.0,
+            '全站': 15.0,
+            **plan,
+        }])
+        category_context = {
+            'h7_cur_gmv': {'连衣裙': 1000.0},
+            'h7_prev_gmv': {'连衣裙': 800.0},
+            'h7_prev_spend': {'连衣裙': 90.0},
+            'h7_prev_keyword': {'连衣裙': 50.0},
+            'h7_prev_crowd': {'连衣裙': 30.0},
+            'h7_prev_omni': {'连衣裙': 10.0},
+        }
+        expected_columns = [
+            '品类', 'GMV', 'GMV占比', '7天GMV', '7日GMV环比',
+            '付费', '付费占比', '上周期付费', '关键词', '人群', '全站',
+            '上周期关键词', '上周期人群', '上周期全站', 'ROI',
+        ]
+
+        for workbook in (
+            export_execution_table(source, cat_ctx=category_context),
+            export_all_sheets(source, cat_ctx=category_context),
+        ):
+            with self.subTest(sheet_names=pd.ExcelFile(io.BytesIO(workbook)).sheet_names):
+                excel = pd.ExcelFile(io.BytesIO(workbook))
+                self.assertIn('品类投放占比与ROI', excel.sheet_names)
+                category = pd.read_excel(
+                    io.BytesIO(workbook), sheet_name='品类投放占比与ROI'
+                )
+                self.assertEqual(category.columns.tolist(), expected_columns)
+                self.assertEqual(category.loc[0, '品类'], '连衣裙')
+                self.assertEqual(category.loc[0, '7天GMV'], 800.0)
+                self.assertEqual(category.loc[0, '7日GMV环比'], '25.0%')
+                self.assertEqual(category.loc[0, '上周期付费'], 90.0)
+                self.assertEqual(category.loc[0, '上周期关键词'], 50.0)
+                self.assertEqual(category.loc[0, '上周期人群'], 30.0)
+                self.assertEqual(category.loc[0, '上周期全站'], 10.0)
+                self.assertEqual(category.loc[0, 'ROI'], 10.0)
 
 
 if __name__ == '__main__':

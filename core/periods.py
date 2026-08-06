@@ -227,6 +227,9 @@ def aggregate_period_frame(
     grouped["预估利润"] = (gmv - refund) * grouped["利润率"]
     grouped["倍率"] = _ratio_series(grouped["件单价"], cost)
     grouped["商品支付转化率"] = _ratio_series(buyers, visitors)
+    # 周期切换后必须用累计分子÷累计分母重算，不累加或平均每日比率。
+    grouped["商品加购率"] = _ratio_series(add_cart, visitors)
+    grouped["推广加购率"] = _ratio_series(grouped["推广加购数"], clicks)
     grouped["访客平均价值"] = _ratio_series(gmv, visitors)
     grouped["购物车价值"] = _ratio_series(gmv, add_cart)
     grouped["链接投产"] = _ratio_series(gmv, spend)
