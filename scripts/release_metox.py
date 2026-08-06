@@ -107,10 +107,16 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _audit(stage: Path, version: str, manual_name: str) -> dict[str, int]:
+def _audit(
+    stage: Path,
+    version: str,
+    operator_manual_name: str,
+    training_manual_name: str,
+) -> dict[str, int]:
     missing = [relative for relative in REQUIRED_PATHS if not (stage / relative).exists()]
-    if not (stage / manual_name).is_file():
-        missing.append(manual_name)
+    for manual_name in (operator_manual_name, training_manual_name):
+        if not (stage / manual_name).is_file():
+            missing.append(manual_name)
     if missing:
         raise RuntimeError("release is missing required paths: " + ", ".join(missing))
 
@@ -155,7 +161,8 @@ def build_release(baseline: Path, launcher_runtime: Path, output_root: Path) -> 
     release_date = str(info["release_date"])
     compact_date = release_date.replace("-", "")
     package_name = f"MetoX半自动推广工具_v{version}_第三方版_{compact_date}"
-    manual_name = f"MetoX{version}_新运营培训手册.html"
+    operator_manual_name = f"MetoX{version}_使用说明与运营操作顺序.md"
+    training_manual_name = f"MetoX{version}_新运营培训手册.html"
     destination = output_root / package_name
     zip_path = output_root / f"{package_name}.zip"
     hash_path = output_root / f"{package_name}.zip.sha256.txt"
@@ -199,9 +206,13 @@ def build_release(baseline: Path, launcher_runtime: Path, output_root: Path) -> 
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
 
+        for old_manual in stage.glob("MetoX*_使用说明与运营操作顺序.md"):
+            old_manual.unlink()
+        shutil.copy2(ROOT / operator_manual_name, stage / operator_manual_name)
+
         for old_manual in stage.glob("MetoX*_新运营培训手册.html"):
             old_manual.unlink()
-        shutil.copy2(ROOT / manual_name, stage / manual_name)
+        shutil.copy2(ROOT / training_manual_name, stage / training_manual_name)
 
         manifest = {
             "product": info["product"],
@@ -234,7 +245,7 @@ def build_release(baseline: Path, launcher_runtime: Path, output_root: Path) -> 
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
 
-        audit = _audit(stage, version, manual_name)
+        audit = _audit(stage, version, operator_manual_name, training_manual_name)
         _write_zip(stage, package_name, temp_zip)
         stage.rename(destination)
         published_dir = True

@@ -79,6 +79,19 @@ class VersionContractTests(unittest.TestCase):
         self.assertIn(">70%", rule_text)
         self.assertIn("40%", rule_text)
 
+    def test_release_packager_replaces_both_versioned_manuals(self):
+        source = (ROOT / "scripts" / "release_metox.py").read_text(encoding="utf-8")
+        self.assertIn(
+            'operator_manual_name = f"MetoX{version}_使用说明与运营操作顺序.md"',
+            source,
+        )
+        self.assertIn(
+            'training_manual_name = f"MetoX{version}_新运营培训手册.html"',
+            source,
+        )
+        self.assertIn('stage.glob("MetoX*_使用说明与运营操作顺序.md")', source)
+        self.assertIn('stage.glob("MetoX*_新运营培训手册.html")', source)
+
 
 if __name__ == "__main__":
     unittest.main()
