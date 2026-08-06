@@ -150,7 +150,7 @@ class AITaskViewEighteenScenarioTests(unittest.TestCase):
 
     def test_08_all_channels_zero_never_generates_budget_migration(self):
         task = _one(
-            MetoX算法命中='爆发', 付费=0, 推广成交金额=0,
+            MetoX算法命中='加购爆发', 付费=0, 推广成交金额=0,
             关键词=0, 人群=0, 全站=0,
             关键词归因成交=0, 人群归因成交=0, 全站归因成交=0,
             推广明细='',
@@ -192,7 +192,7 @@ class AITaskViewEighteenScenarioTests(unittest.TestCase):
 
     def test_12_single_valid_plan_is_parsed_and_acted_on(self):
         task = _one(
-            MetoX算法命中='爆发',
+            MetoX算法命中='加购爆发',
             推广明细=_detail({'id': 'ONLY-1', 'spend': 300, 'roi': 8, 'cart': 20}),
         )
         details = _plans(task)
@@ -220,8 +220,8 @@ class AITaskViewEighteenScenarioTests(unittest.TestCase):
         self.assertIn('预算迁移', '/'.join(conflicts))
 
     def test_15_low_stock_does_not_cancel_scale(self):
-        normal = _one(MetoX算法命中='强主推|爆发', 综合等级='A+', 在仓库存=100)
-        low = _one(MetoX算法命中='强主推|爆发', 综合等级='A+', 在仓库存=2)
+        normal = _one(MetoX算法命中='强主推|加购爆发', 综合等级='A+', 在仓库存=100)
+        low = _one(MetoX算法命中='强主推|加购爆发', 综合等级='A+', 在仓库存=2)
         self.assertEqual(low['商品级总策略'], normal['商品级总策略'])
         self.assertEqual(low['任务优先分'], normal['任务优先分'])
         self.assertEqual(low['关键词动作'], normal['关键词动作'])
@@ -283,7 +283,7 @@ class AITaskViewAdditionalContractTests(unittest.TestCase):
         self.assertEqual(AI_TASK_MAIN_COLUMNS, [
             '执行优先级', '任务优先分', '款式主图', '货号', '链接数', '宝贝ID',
             'GMV', '商品访客数', '链接投产', '淘宝类目', '综合等级', '商品定位',
-            '商品周期', 'MetoX算法命中', 'AI任务类型', '商品级总策略', '主执行动作',
+            '商品周期', 'MetoX算法命中', '优先级', 'AI任务类型', '商品级总策略', '主执行动作',
             '动作对象', '关键词动作', '人群动作', '全站动作', '计划执行摘要',
             '观察周期', '成功标准', '停止条件', '任务触发原因', 'AI可信度', '库存提醒',
         ])
@@ -294,6 +294,37 @@ class AITaskViewAdditionalContractTests(unittest.TestCase):
         self.assertNotIn('渠道可信度', AI_TASK_MAIN_COLUMNS)
         self.assertNotIn('计划可信度', AI_TASK_MAIN_COLUMNS)
         self.assertNotIn('商品名称', AI_TASK_VIEW_COLUMNS)
+
+    def test_metox_priority_is_immediately_after_label_and_uses_highest_matching_level(self):
+        self.assertEqual(
+            AI_TASK_MAIN_COLUMNS.index('优先级'),
+            AI_TASK_MAIN_COLUMNS.index('MetoX算法命中') + 1,
+        )
+        self.assertEqual(
+            AI_TASK_VIEW_COLUMNS.index('优先级'),
+            AI_TASK_VIEW_COLUMNS.index('MetoX算法命中') + 1,
+        )
+        expected = {
+            '亏损风险': 'P0',
+            '削减': 'P0',
+            '加预算': 'P1',
+            '强主推': 'P1',
+            '饱和观察': 'P1',
+            '加购爆发': 'P2',
+            '明日之星': 'P2',
+            '近3日潜力': 'P2',
+            '保护持有': 'P3',
+            '溢出': 'P3',
+            '加购爆发|削减': 'P0',
+        }
+        for labels, priority in expected.items():
+            with self.subTest(labels=labels):
+                self.assertEqual(_one(MetoX算法命中=labels)['优先级'], priority)
+
+    def test_external_v93_burst_remains_compatible_without_filling_metox_priority(self):
+        task = _one(MetoX算法命中='', **{'v9.3信号': '爆发'})
+        self.assertTrue(task['AI任务类型'])
+        self.assertEqual(task['优先级'], '')
 
     def test_product_name_is_absent_from_task_output_not_only_hidden_by_page_projection(self):
         task = _one(MetoX算法命中='保护持有')
@@ -482,6 +513,11 @@ class AITaskViewUIContractTests(unittest.TestCase):
         self.assertIn("'AI可信度': st.column_config.TextColumn(", view)
         self.assertIn('with st.expander("AI可信度说明"', view)
         self.assertIn("selected_task['AI可信度说明'].splitlines()", view)
+
+    def test_metox_filter_uses_the_renamed_cart_burst_label(self):
+        view = self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]
+        self.assertIn("'加购爆发'", view)
+        self.assertNotIn("'爆发'", view)
 
     def test_plan_explanation_states_period_top3_and_coverage(self):
         view = self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]

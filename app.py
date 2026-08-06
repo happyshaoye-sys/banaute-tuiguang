@@ -1215,7 +1215,7 @@ with tab3:
     with f6:
         metox_filter_options = [
             label for label in (
-                '明日之星', '强主推', '近3日潜力', '爆发', '亏损风险',
+                '明日之星', '强主推', '近3日潜力', '加购爆发', '亏损风险',
                 '加预算', '饱和观察', '保护持有', '削减', '溢出',
             )
             if ai_task_df['MetoX算法命中'].astype(str).str.contains(

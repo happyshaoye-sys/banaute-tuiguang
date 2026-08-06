@@ -356,8 +356,8 @@ def channel_summary(df):
 
 def segment_summary(df):
     """商品分层明细（按组合聚合）。
-    v9.3信号(2026-07-11 新增):分组表每行是一批商品,该列汇总组内各信号的命中商品数
-    (如 `明日之星×12 | 爆发×3`,按命中数降序;一品多标签则分别计数),无信号留空。"""
+    v9.3信号和MetoX算法命中按各自标签汇总命中商品数（例如v9.3的`爆发×3`
+    与MetoX的`加购爆发×3`）；按命中数降序，一品多标签分别计数，无信号留空。"""
     if '组合' not in df.columns or '综合等级' not in df.columns:
         return []
     group_keys = ['组合', '综合等级', '商品定位', '对应操作']
@@ -554,7 +554,10 @@ def _channel_decision(row, spend, attr, roi, base_roi):
     grade = str(row.get('综合等级', '') or '')
     op = str(row.get('对应操作', '') or '')
     risks = str(row.get('风险标签', '') or '')
-    strong_signal = any(x in labels for x in ['爆发', '溢出', '加预算', '明日之星', '近3日潜力', '强主推'])
+    strong_signal = any(
+        x in labels
+        for x in ['加购爆发', '爆发', '溢出', '加预算', '明日之星', '近3日潜力', '强主推']
+    )
     risk_signal = (
         grade in ('C', 'D')
         or op in ('观察期', '淘汰', '衰退期', '待优化')

@@ -41,6 +41,11 @@ class ExportAllSheetsTests(unittest.TestCase):
         self.assertEqual(len(tasks), 1)
         self.assertEqual(tasks.loc[0, '款式主图'], image_url)
         self.assertIn('AI任务类型', tasks.columns)
+        self.assertEqual(tasks.loc[0, '优先级'], 'P3')
+        self.assertEqual(
+            tasks.columns.get_loc('优先级'),
+            tasks.columns.get_loc('MetoX算法命中') + 1,
+        )
         self.assertNotIn('商品名称', tasks.columns)
         self.assertTrue(str(tasks.loc[0, 'AI任务类型']).strip())
 

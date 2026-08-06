@@ -19,7 +19,7 @@ from .schema import safe_div, to_num
 AI_TASK_VIEW_COLUMNS = [
     '执行优先级', '任务优先分', '款式主图', '货号', '链接数', '宝贝ID',
     'GMV', '商品访客数', '链接投产', '淘宝类目', '综合等级',
-    '商品定位', '商品周期', 'MetoX算法命中',
+    '商品定位', '商品周期', 'MetoX算法命中', '优先级',
     'AI任务类型', '商品级总策略', '动作对象', '主执行动作',
     '关键词状态', '关键词动作', '人群状态', '人群动作', '全站状态', '全站动作',
     '推广计划数', '计划总数', '计划展示数', '计划覆盖率', '计划数据完整度',
@@ -34,7 +34,7 @@ AI_TASK_VIEW_COLUMNS = [
 AI_TASK_MAIN_COLUMNS = [
     '执行优先级', '任务优先分', '款式主图', '货号', '链接数', '宝贝ID',
     'GMV', '商品访客数', '链接投产', '淘宝类目', '综合等级', '商品定位',
-    '商品周期', 'MetoX算法命中', 'AI任务类型', '商品级总策略', '主执行动作',
+    '商品周期', 'MetoX算法命中', '优先级', 'AI任务类型', '商品级总策略', '主执行动作',
     '动作对象', '关键词动作', '人群动作', '全站动作', '计划执行摘要',
     '观察周期', '成功标准', '停止条件', '任务触发原因', 'AI可信度', '库存提醒',
 ]
@@ -46,10 +46,17 @@ PLAN_DETAIL_COLUMNS = [
     '观察周期', '成功标准', '停止条件', '数据来源',
 ]
 
-_OPPORTUNITY_LABELS = {'明日之星', '强主推', '近3日潜力', '爆发', '加预算'}
+# “爆发”仅用于兼容外部v9.3信号与历史缓存；内置MetoX从v2.12起输出“加购爆发”。
+_OPPORTUNITY_LABELS = {'明日之星', '强主推', '近3日潜力', '加购爆发', '爆发', '加预算'}
 _RISK_LABELS = {'亏损风险', '削减'}
 _CORRECTION_LABELS = {'饱和观察', '保护持有', '溢出'}
 _KNOWN_LABELS = _OPPORTUNITY_LABELS | _RISK_LABELS | _CORRECTION_LABELS
+_METOX_PRIORITY_RULES = (
+    ('P0', {'亏损风险', '削减'}),
+    ('P1', {'加预算', '强主推', '饱和观察'}),
+    ('P2', {'加购爆发', '爆发', '明日之星', '近3日潜力'}),
+    ('P3', {'保护持有', '溢出'}),
+)
 _GROWTH_CYCLES = {'测试期', '成长期', '爆发期', '重点', '加预算', '上升验证', '放量', '适当放量'}
 _DECLINE_CYCLES = {'衰退预警', '衰退期', '清退期', '淘汰'}
 _HISTORY_FIELDS = {
@@ -86,6 +93,19 @@ def _field_available(row, columns, field: str, allow_blank: bool = False) -> boo
 def _labels(value) -> set[str]:
     text = _text(value)
     return {label for label in _KNOWN_LABELS if label in text}
+
+
+def _metox_priority(value) -> str:
+    """把内置 MetoX 多标签归入任务优先级；命中多档时取最高优先级。"""
+    labels = {
+        label.strip()
+        for label in _text(value).split('|')
+        if label.strip()
+    }
+    for priority, priority_labels in _METOX_PRIORITY_RULES:
+        if labels & priority_labels:
+            return priority
+    return ''
 
 
 def _series_num(df: pd.DataFrame, column: str) -> pd.Series:
@@ -517,7 +537,7 @@ def _resolve_product_strategy(ctx, diagnosis) -> tuple[str, str]:
         if ctx['position'] == '金牛款' or ctx['cycle'] == '成熟期':
             return '稳量任务', '保持投放'
         if ctx['position'] in ('冲刺款', '明星款') and growth:
-            strong = bool(ctx['opportunity'] & {'强主推', '爆发', '加预算'})
+            strong = bool(ctx['opportunity'] & {'强主推', '加购爆发', '爆发', '加预算'})
             return '放量任务', '重点放量' if strong and ctx['grade'] in ('S', 'A+') else '谨慎放量'
         return '放量任务', '谨慎放量'
 
@@ -883,7 +903,7 @@ def _calculate_task_priority(ctx, task_type: str, strategy: str, conflicts: list
     elif task_type == '止损任务':
         score = 84 if diagnosis['severe_loss'] else 76
     elif task_type == '放量任务':
-        score = 78 if ctx['opportunity'] & {'强主推', '爆发', '加预算'} else 70
+        score = 78 if ctx['opportunity'] & {'强主推', '加购爆发', '爆发', '加预算'} else 70
     elif task_type == '渠道调整任务':
         score = 66
     elif task_type == '测试任务':
@@ -1042,6 +1062,7 @@ def build_ai_task_view(df: pd.DataFrame) -> pd.DataFrame:
             '商品定位': _raw_or_blank(row.get('商品定位', '')),
             '商品周期': _raw_or_blank(row.get('商品周期', '')),
             'MetoX算法命中': _raw_or_blank(row.get('MetoX算法命中', '')),
+            '优先级': _metox_priority(row.get('MetoX算法命中', '')),
             'AI任务类型': task_type,
             '商品级总策略': strategy,
             '动作对象': '商品-计划级',

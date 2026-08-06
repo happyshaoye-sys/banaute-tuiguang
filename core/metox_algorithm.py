@@ -207,7 +207,7 @@ def apply_metox_algorithm(df, day_map=None, date_str=None):
         growth = _safe_div(item["yd_carts"] - item["baseline_carts"], item["baseline_carts"])
         if growth > SCALE_GATE["total_growth"] and item["yd_carts"] >= SCALE_GATE["min_current_carts"]:
             scale_pids.add(pid)
-            labels[pid].append("爆发")
+            labels[pid].append("加购爆发")
             scores[pid] += 30
             org_growth = _safe_div(item["yd_org_carts"] - item["baseline_org_carts"], item["baseline_org_carts"])
             if org_growth > SCALE_GATE["organic_growth_strong"] and item["yd_spend"] < SCALE_GATE["low_spend"]:

@@ -25,7 +25,6 @@ OVERLAY_FILES = (
     "README_离线使用说明.txt",
     "第三方使用说明_先看这个.txt",
     "半自动推广工具_数据源与指标说明.md",
-    "MetoX2.10_使用说明与运营操作顺序.md",
     "执行表字段字典_20260710.html",
     "字段字典.xlsx",
     "VERSION.json",
@@ -46,7 +45,6 @@ REQUIRED_PATHS = (
     "VERSION.md",
     "启动MetoX半自动推广工具.bat",
     "第三方使用说明_先看这个.txt",
-    "MetoX2.10_使用说明与运营操作顺序.md",
 )
 FORBIDDEN_NAMES = {".git", ".env", "cache", "cache_result", "__pycache__"}
 

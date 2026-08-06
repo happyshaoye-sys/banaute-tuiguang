@@ -93,7 +93,12 @@ def test_builtin_v93_threshold_labels():
     )
     check(
         "scale threshold detects burst item",
-        "爆发" in by_pid.loc["scale", "MetoX算法命中"],
+        "加购爆发" in by_pid.loc["scale", "MetoX算法命中"],
+        by_pid.loc["scale", "MetoX算法命中"],
+    )
+    check(
+        "scale threshold no longer emits the old burst label",
+        "爆发" not in by_pid.loc["scale", "MetoX算法命中"].split("|"),
         by_pid.loc["scale", "MetoX算法命中"],
     )
     check(
