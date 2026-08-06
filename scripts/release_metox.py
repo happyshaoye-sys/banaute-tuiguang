@@ -287,9 +287,11 @@ def main() -> int:
         _run([sys.executable, str(ROOT / "_regression_export_period.py")])
         _run([sys.executable, str(ROOT / "自检_造数套件.py")])
         result = build_release(
-            args.baseline_package.resolve(),
-            args.launcher_runtime.resolve(),
-            args.output_root.resolve(),
+            # Keep caller-provided directory junctions intact. Resolving them here
+            # reintroduces non-ASCII target paths in legacy Windows subprocesses.
+            args.baseline_package.absolute(),
+            args.launcher_runtime.absolute(),
+            args.output_root.absolute(),
         )
     except Exception as exc:
         print(f"release-build FAIL: {exc}", file=sys.stderr)

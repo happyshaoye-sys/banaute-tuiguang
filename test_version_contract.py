@@ -93,6 +93,10 @@ class VersionContractTests(unittest.TestCase):
         )
         self.assertIn('stage.glob("MetoX*_使用说明与运营操作顺序.md")', source)
         self.assertIn('stage.glob("MetoX*_新运营培训手册.html")', source)
+        self.assertIn("args.baseline_package.absolute()", source)
+        self.assertIn("args.launcher_runtime.absolute()", source)
+        self.assertIn("args.output_root.absolute()", source)
+        self.assertNotIn("args.launcher_runtime.resolve()", source)
 
 
 if __name__ == "__main__":
