@@ -46,7 +46,7 @@ REQUIRED_PATHS = (
     "启动MetoX半自动推广工具.bat",
     "第三方使用说明_先看这个.txt",
 )
-FORBIDDEN_NAMES = {".git", ".env", "cache", "cache_result", "__pycache__"}
+FORBIDDEN_NAMES = {".git", ".env", ".agents", "cache", "cache_result", "__pycache__"}
 
 
 def _run(command: list[str]) -> None:

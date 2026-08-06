@@ -97,6 +97,7 @@ class VersionContractTests(unittest.TestCase):
         self.assertIn("args.launcher_runtime.absolute()", source)
         self.assertIn("args.output_root.absolute()", source)
         self.assertNotIn("args.launcher_runtime.resolve()", source)
+        self.assertIn('".agents"', source)
 
 
 if __name__ == "__main__":
