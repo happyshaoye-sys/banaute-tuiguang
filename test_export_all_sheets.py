@@ -134,6 +134,46 @@ class ExportAllSheetsTests(unittest.TestCase):
                 self.assertEqual(category.loc[0, '上周期全站'], 10.0)
                 self.assertEqual(category.loc[0, 'ROI'], 10.0)
 
+    def test_metric_status_rule_document_is_in_both_downloads(self):
+        source = pd.DataFrame([{
+            '宝贝ID': '1004',
+            '淘宝类目': '连衣裙',
+            'GMV': 1000.0,
+            '付费': 0.0,
+            '商品访客数': 200,
+            '商品加购件数': 20,
+            '支付买家数': 10,
+            '关键词': 60.0,
+            '人群': 25.0,
+            '全站': 15.0,
+        }])
+        expected_fields = [
+            '链接投产状态',
+            '商品支付转化率状态',
+            '商品加购率状态',
+            '可售天数状态',
+            '推广加购率状态',
+        ]
+        expected_columns = [
+            '状态字段', '指标口径', '基准或参考线', '判定标准', '特殊情况', '运营解释',
+        ]
+
+        for workbook in (export_execution_table(source), export_all_sheets(source)):
+            with self.subTest(sheet_names=pd.ExcelFile(io.BytesIO(workbook)).sheet_names):
+                excel = pd.ExcelFile(io.BytesIO(workbook))
+                self.assertIn('指标状态规则', excel.sheet_names)
+                rules = pd.read_excel(io.BytesIO(workbook), sheet_name='指标状态规则')
+                self.assertEqual(rules.columns.tolist(), expected_columns)
+                self.assertEqual(rules['状态字段'].tolist(), expected_fields)
+                self.assertIn('GMV÷付费', rules.loc[0, '指标口径'])
+                self.assertIn('max(盈亏平衡线×1.2，同层P75)', rules.loc[0, '判定标准'])
+                self.assertIn('不使用链接实际投产或退款率过滤', rules.loc[0, '特殊情况'])
+                self.assertIn('支付买家数÷商品访客数', rules.loc[1, '指标口径'])
+                self.assertIn('商品加购件数÷商品访客数', rules.loc[2, '指标口径'])
+                self.assertIn('14≤可售天数<28：需关注', rules.loc[3, '判定标准'])
+                self.assertIn('推广加购件数÷推广访客数', rules.loc[4, '指标口径'])
+                self.assertIn('当前访客数<100', rules.loc[4, '特殊情况'])
+
 
 if __name__ == '__main__':
     unittest.main()

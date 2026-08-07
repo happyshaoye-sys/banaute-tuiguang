@@ -1,6 +1,6 @@
 {
   "product": "MetoX",
-  "version": "2.14",
+  "version": "2.15",
   "release_date": "2026-08-07",
   "external_strategy_version": "v9.3",
   "rule_versions": {
@@ -23,6 +23,7 @@
     "execution_cart_rates": "2026-08-06",
     "category_investment_export": "2026-08-06",
     "execution_metric_statuses": "2026-08-07",
-    "promotion_cart_rate": "2026-08-07"
+    "promotion_cart_rate": "2026-08-07",
+    "metric_status_rule_export": "2026-08-07"
   }
 }

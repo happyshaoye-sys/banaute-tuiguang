@@ -3,6 +3,7 @@ import io
 import pandas as pd
 from .analysis import build_ai_task_view, category_analysis
 from .data_validation import validate_paid_plan_consistency
+from .metric_labels import METRIC_STATUS_RULE_SHEET, metric_status_rule_frame
 from .schema import EXPORT_COLS, safe_div
 
 
@@ -30,6 +31,47 @@ def _write_category_investment_sheet(writer, df, cat_ctx=None):
     )
 
 
+def _write_metric_status_rule_sheet(writer):
+    """写入与页面五项状态算法同源的运营规则文档。"""
+    rules = metric_status_rule_frame()
+    rules.to_excel(writer, sheet_name=METRIC_STATUS_RULE_SHEET, index=False)
+
+    workbook = writer.book
+    worksheet = writer.sheets[METRIC_STATUS_RULE_SHEET]
+    header_format = workbook.add_format({
+        'bold': True,
+        'font_color': '#FFFFFF',
+        'bg_color': '#1F4E78',
+        'border': 1,
+        'align': 'center',
+        'valign': 'vcenter',
+        'text_wrap': True,
+    })
+    body_format = workbook.add_format({
+        'border': 1,
+        'valign': 'top',
+        'text_wrap': True,
+    })
+    for column_index, column_name in enumerate(rules.columns):
+        worksheet.write(0, column_index, column_name, header_format)
+    worksheet.set_column('A:A', 22, body_format)
+    worksheet.set_column('B:B', 34, body_format)
+    worksheet.set_column('C:C', 68, body_format)
+    worksheet.set_column('D:D', 66, body_format)
+    worksheet.set_column('E:E', 58, body_format)
+    worksheet.set_column('F:F', 52, body_format)
+    worksheet.set_row(0, 32)
+    for row_index in range(1, len(rules) + 1):
+        worksheet.set_row(row_index, 76)
+    worksheet.freeze_panes(1, 1)
+    worksheet.autofilter(0, 0, len(rules), len(rules.columns) - 1)
+    worksheet.hide_gridlines(2)
+    worksheet.set_zoom(85)
+    worksheet.set_landscape()
+    worksheet.fit_to_pages(1, 1)
+    worksheet.repeat_rows(0)
+
+
 def export_execution_table(df, cat_ctx=None):
     """导出执行表及品类投放占比与 ROI 为 Excel bytes。"""
     validate_paid_plan_consistency(df, '执行表Excel导出')
@@ -37,6 +79,7 @@ def export_execution_table(df, cat_ctx=None):
     cols = [c for c in EXPORT_COLS if c in df.columns]
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df[cols].to_excel(writer, sheet_name='商品推广执行表', index=False)
+        _write_metric_status_rule_sheet(writer)
         _write_category_investment_sheet(writer, df, cat_ctx=cat_ctx)
     output.seek(0)
     return output.read()
@@ -51,11 +94,14 @@ def export_all_sheets(df, cat_ctx=None):
         cols = [c for c in EXPORT_COLS if c in df.columns]
         df[cols].to_excel(writer, sheet_name='商品推广执行表', index=False)
 
-        # 2. AI任务视图（基于当前导出范围的最终执行表）
+        # 2. 五项核心指标状态规则文档
+        _write_metric_status_rule_sheet(writer)
+
+        # 3. AI任务视图（基于当前导出范围的最终执行表）
         ai_tasks = build_ai_task_view(df)
         ai_tasks.to_excel(writer, sheet_name='AI任务视图', index=False)
 
-        # 3. 分层
+        # 4. 分层
         seg_cols = [c for c in ['组合','综合等级','商品定位','对应操作'] if c in df.columns]
         if seg_cols and '宝贝ID' in df.columns and 'GMV' in df.columns:
             seg = df.groupby(seg_cols).agg(
@@ -63,7 +109,7 @@ def export_all_sheets(df, cat_ctx=None):
             ).reset_index()
             seg.to_excel(writer, sheet_name='商品分层明细', index=False)
 
-        # 4. 品类
+        # 5. 品类
         if '淘宝类目' in df.columns:
             work = df.copy()
             if '退款率' in work.columns:
@@ -85,17 +131,17 @@ def export_all_sheets(df, cat_ctx=None):
             cat = cat.drop(columns=['_退款率加权金额'])
             cat.to_excel(writer, sheet_name='品类分析', index=False)
 
-        # 5. 与页面一致的品类投放占比与 ROI
+        # 6. 与页面一致的品类投放占比与 ROI
         _write_category_investment_sheet(writer, df, cat_ctx=cat_ctx)
 
-        # 6. 退款风险（聚水潭cohort退款率>70%，与页面阈值一致）
+        # 7. 退款风险（聚水潭cohort退款率>70%，与页面阈值一致）
         if '退款率' in df.columns:
             ref_cols = [c for c in ['宝贝ID','商品名称','淘宝类目','GMV','成功退款金额','退款率','付费','综合等级','对应操作','风险标签'] if c in df.columns]
             if ref_cols:
                 ref = df[df['退款率'] > 0.7].sort_values('退款率', ascending=False)[ref_cols]
                 ref.to_excel(writer, sheet_name='退款风险', index=False)
 
-        # 7-9. 渠道
+        # 8-10. 渠道
         for col, name in [('关键词','关键词建议'),('人群','人群建议'),('全站','全站建议')]:
             if col in df.columns:
                 attr_col = f'{col}归因成交'
@@ -106,7 +152,7 @@ def export_all_sheets(df, cat_ctx=None):
                         ch['渠道投产'] = ch[attr_col] / ch[col].replace(0, float('nan'))
                     ch.to_excel(writer, sheet_name=name, index=False)
 
-        # 10. 库存
+        # 11. 库存
         if '在仓库存' in df.columns:
             inv_cols = [c for c in ['宝贝ID','货号','商品名称','在仓库存','在途','商品访客数','GMV','付费','综合等级','风险标签'] if c in df.columns]
             if inv_cols:

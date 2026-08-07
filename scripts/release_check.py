@@ -125,6 +125,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.category_investment_export")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("execution_metric_statuses"):
         errors.append("VERSION.json must record rule_versions.execution_metric_statuses")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("metric_status_rule_export"):
+        errors.append("VERSION.json must record rule_versions.metric_status_rule_export")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()
@@ -235,6 +237,23 @@ def check_release(require_release_branch: bool = False) -> list[str]:
     ):
         if snippet not in metric_labels:
             errors.append(f"execution metric status contract missing: {snippet}")
+    for snippet in (
+        'METRIC_STATUS_RULE_SHEET = "指标状态规则"',
+        '"状态字段": "链接投产状态"',
+        '"状态字段": "商品支付转化率状态"',
+        '"状态字段": "商品加购率状态"',
+        '"状态字段": "可售天数状态"',
+        '"状态字段": "推广加购率状态"',
+        '不使用链接实际投产或退款率过滤',
+    ):
+        if snippet not in metric_labels:
+            errors.append(f"metric status rule document contract missing: {snippet}")
+    for snippet in (
+        'def _write_metric_status_rule_sheet(writer):',
+        '_write_metric_status_rule_sheet(writer)',
+    ):
+        if snippet not in exporter:
+            errors.append(f"metric status rule export contract missing: {snippet}")
     if "CATEGORY_INVESTMENT_SHEET = '品类投放占比与ROI'" not in exporter:
         errors.append("Excel exports must include the category investment and ROI sheet")
 
