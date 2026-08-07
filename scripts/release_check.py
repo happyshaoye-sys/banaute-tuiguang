@@ -24,6 +24,7 @@ PROTECTED_FILES = {
     "core/jst_stock.py",
     "core/loader.py",
     "core/merge.py",
+    "core/metric_labels.py",
     "core/metox_algorithm.py",
     "core/periods.py",
     "core/schema.py",
@@ -122,6 +123,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.execution_cart_rates")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("category_investment_export"):
         errors.append("VERSION.json must record rule_versions.category_investment_export")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("execution_metric_statuses"):
+        errors.append("VERSION.json must record rule_versions.execution_metric_statuses")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()
@@ -211,12 +214,27 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("period direct-purchase cost must be recalculated from period totals")
     if "result_df['商品加购率'] = _safe_div_series(add_cart, visitors)" not in merge:
         errors.append("daily product cart rate must be add-cart quantity divided by product visitors")
-    if "result_df['推广加购率'] = _safe_div_series(result_df['推广加购数'], clicks)" not in merge:
-        errors.append("daily promotion cart rate must be filtered subject carts divided by clicks")
+    if "result_df['MetoX推广加购件数'], result_df['MetoX推广访客数']" not in merge:
+        errors.append("daily promotion cart rate must be promotion cart quantity divided by promotion visitors")
     if 'grouped["商品加购率"] = _ratio_series(add_cart, visitors)' not in periods:
         errors.append("period product cart rate must be recalculated from period totals")
-    if 'grouped["推广加购率"] = _ratio_series(grouped["推广加购数"], clicks)' not in periods:
-        errors.append("period promotion cart rate must be recalculated from period totals")
+    if 'grouped["MetoX推广加购件数"], grouped["MetoX推广访客数"]' not in periods:
+        errors.append("period promotion cart rate must be recalculated from promotion totals")
+    metric_labels = (ROOT / "core" / "metric_labels.py").read_text(encoding="utf-8")
+    for snippet in (
+        'HISTORY_DAYS = 28',
+        'RATE_SAMPLE_MIN_VISITORS = 100',
+        'breakeven * 1.2',
+        'quantile(0.75)',
+        'sellable_days < 14',
+        'sellable_days >= 28',
+        'sellable_days > 60',
+        'out["商品加购率状态"]',
+        'out["商品支付转化率状态"]',
+        'out["推广加购率状态"]',
+    ):
+        if snippet not in metric_labels:
+            errors.append(f"execution metric status contract missing: {snippet}")
     if "CATEGORY_INVESTMENT_SHEET = '品类投放占比与ROI'" not in exporter:
         errors.append("Excel exports must include the category investment and ROI sheet")
 

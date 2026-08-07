@@ -9,11 +9,13 @@ from core.periods import aggregate_period_frame
 from core.schema import EXPORT_COLS, SOURCE_PRODUCT_ROI, SOURCE_WUJIE_SUBJECT
 
 
-def _product_row(pid, visitors, carts):
+def _product_row(pid, visitors, carts, ad_visitors=0, ad_carts=0):
     return {
         "宝贝ID": pid,
         "商品访客数": visitors,
         "商品加购件数": carts,
+        "关键词推广访客数": ad_visitors,
+        "关键词推广加购数": ad_carts,
         "GMV": 0,
     }
 
@@ -36,9 +38,9 @@ def _raw_plan_row(pid, plan_id, period, subject_type, clicks, carts):
 
 
 class CartRateTests(unittest.TestCase):
-    def test_daily_rates_use_product_source_and_15_day_product_subject_totals(self):
+    def test_daily_rates_use_product_source_for_product_and_promotion_rates(self):
         product = pd.DataFrame([
-            _product_row("1001", visitors=100, carts=20),
+            _product_row("1001", visitors=100, carts=20, ad_visitors=80, ad_carts=12),
             _product_row("1002", visitors=0, carts=3),
         ])
         wujie = prepare_source(pd.DataFrame([
@@ -60,7 +62,7 @@ class CartRateTests(unittest.TestCase):
 
         row = merged.loc[merged["宝贝ID"] == "1001"].iloc[0]
         self.assertAlmostEqual(float(row["商品加购率"]), 20 / 100)
-        self.assertAlmostEqual(float(row["推广加购率"]), (10 + 5) / (100 + 50))
+        self.assertAlmostEqual(float(row["推广加购率"]), 12 / 80)
 
         zero = merged.loc[merged["宝贝ID"] == "1002"].iloc[0]
         self.assertEqual(float(zero["商品加购率"]), 0.0)
@@ -70,12 +72,14 @@ class CartRateTests(unittest.TestCase):
         daily = pd.DataFrame([
             {
                 "宝贝ID": "1001", "商品访客数": 100, "商品加购件数": 20,
-                "点击": 150, "推广加购数": 15, "商品加购率": 0.2,
+                "MetoX推广访客数": 150, "MetoX推广加购件数": 15,
+                "商品加购率": 0.2,
                 "推广加购率": 0.1,
             },
             {
                 "宝贝ID": "1001", "商品访客数": 20, "商品加购件数": 5,
-                "点击": 50, "推广加购数": 10, "商品加购率": 0.25,
+                "MetoX推广访客数": 50, "MetoX推广加购件数": 10,
+                "商品加购率": 0.25,
                 "推广加购率": 0.2,
             },
         ])

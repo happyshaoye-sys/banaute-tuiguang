@@ -33,6 +33,7 @@ from core.analysis import (
 from core.acceptance import build_source_status
 from core.v93_signal import parse_v93_report
 from core.metox_algorithm import apply_metox_algorithm
+from core.metric_labels import apply_metric_labels
 from core.task_engine import AI_TASK_MAIN_COLUMNS, parse_plan_execution_details
 from core.jst_stock import find_snapshot, load_snapshot_as_stock
 from core.jst_refund import find_refund_snapshot, load_refund_rates
@@ -380,7 +381,10 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
     # ── 1. 收集所有需要的日期（去重）──
     t0 = time.perf_counter()
     all_needed_dates = {date_str}  # 本期当天
-    # 日销/花费滚动字段固定需要近 15 天；环比只读取当前选择周期，避免 7 天口径额外读取 30 天历史。
+    # 日销/花费滚动字段固定需要近15天；核心指标状态的同层基准固定读取过去28天。
+    baseline_start = (pd.Timestamp(date_str) - pd.Timedelta(days=27)).date().isoformat()
+    for d in iter_dates(baseline_start, date_str):
+        all_needed_dates.add(d)
     rolling_start = periods.get("15日环比", {}).get("current_start", date_str)
     for d in iter_dates(rolling_start, date_str):
         all_needed_dates.add(d)
@@ -471,6 +475,9 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
     df = apply_rolling_daily_metrics(df, day_map, date_str)
     _log_time(timings, "滚动日销花费计算", t_step, "3/7/15 天")
     t_step = time.perf_counter()
+    df = apply_metric_labels(df, day_map, date_str)
+    _log_time(timings, "核心指标状态打标", t_step, "28日同层基准")
+    t_step = time.perf_counter()
     df = apply_metox_algorithm(df, day_map, date_str)
     _log_time(timings, "MetoX算法打标", t_step, f"{len(df)} 行")
     # 链接数:当前表内同一货号(款式)的链接个数——多链接共享同一款式库存池,
@@ -531,6 +538,7 @@ ROUND2_COLS = [
     '人群环比', '关键词环比', '全站环比',
     '推广实际投产', '链接实际投产', '购物车价值', '件单价', '倍率',
 ]
+RATE4_COLS = ['商品加购率', '商品支付转化率', '推广加购率']
 
 
 def _finalize_display_columns(df):
@@ -561,6 +569,9 @@ def _finalize_display_columns(df):
     for col in ROUND2_COLS:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").round(2)
+    for col in RATE4_COLS:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").round(4)
     return df
 
 
@@ -1315,6 +1326,15 @@ with tab3:
 # ── Tab 4: 执行表 ────────────────────────────────────────
 with tab4:
     st.subheader(f"商品推广执行表 ({len(df)} 条)")
+    with st.expander("查看高/正常/低判定口径", expanded=False):
+        st.markdown(
+            """
+            - **链接投产状态**：链接投产=`GMV÷推广花费`；高线取`max(盈亏平衡线×1.2，同层商品P75)`，不使用实际投产过滤。
+            - **可售天数状态**：`<14天=紧急`、`14~28天=需关注`、`28~60天=充足`、`>60天=积压`。
+            - **商品加购率 / 商品支付转化率 / 推广加购率**：与同店铺、同类目、同价格段过去28天加权基准B比较；`≥1.2B=高`、`0.8B~1.2B=正常`、`<0.8B=低`。
+            - 商品或推广访客不足100时显示**样本不足**；退款率和实际投产只保留为风险与动作闸门。
+            """
+        )
 
     # 筛选 + 列设置(2026-07-11:列设置移到筛选行右侧,popover 下拉形式、占位小;
     # 勾选持久化到 cache/column_prefs.json,展示顺序固定按 EXPORT_COLS,仅影响显示、导出仍全量)
@@ -1327,6 +1347,8 @@ with tab4:
         c for c in st.session_state["exec_cols_pref"] if c in all_cols
     ] or all_cols
     for c in [
+        "链接投产状态", "可售天数状态",
+        "商品加购率状态", "商品支付转化率状态", "推广加购率状态",
         "v9.3信号", "MetoX算法命中", "MetoX算法分", "MetoX算法原因",
         "商品加购率", "推广加购率",
     ]:
@@ -1400,6 +1422,10 @@ with tab4:
             ),
             "推广加购率": st.column_config.NumberColumn(
                 "推广加购率",
+                format="percent",
+            ),
+            "商品支付转化率": st.column_config.NumberColumn(
+                "商品支付转化率",
                 format="percent",
             ),
         },

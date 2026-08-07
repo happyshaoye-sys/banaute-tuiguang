@@ -1,7 +1,7 @@
 {
   "product": "MetoX",
-  "version": "2.13",
-  "release_date": "2026-08-06",
+  "version": "2.14",
+  "release_date": "2026-08-07",
   "external_strategy_version": "v9.3",
   "rule_versions": {
     "refund_risk": "2026-08-02",
@@ -21,6 +21,8 @@
     "metox_cart_burst_label": "2026-08-06",
     "ai_task_metox_priority": "2026-08-06",
     "execution_cart_rates": "2026-08-06",
-    "category_investment_export": "2026-08-06"
+    "category_investment_export": "2026-08-06",
+    "execution_metric_statuses": "2026-08-07",
+    "promotion_cart_rate": "2026-08-07"
   }
 }

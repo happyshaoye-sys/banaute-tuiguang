@@ -114,7 +114,7 @@ def aggregate_period_frame(
 
     sum_cols = [
         "GMV", "推广成交金额", "付费", "关键词", "人群", "全站", "店铺直达",
-        "MetoX推广花费", "MetoX推广成交金额", "MetoX推广加购数", "MetoX推广访客数",
+        "MetoX推广花费", "MetoX推广成交金额", "MetoX推广加购数", "MetoX推广加购件数", "MetoX推广访客数",
         "关键词归因成交", "人群归因成交", "全站归因成交", "店铺直达归因成交",
         "商品访客数", "支付买家数", "支付件数", "商品加购件数", "推广加购数",
         "成功退款金额", "搜索引导访客数", "直购数量",
@@ -229,7 +229,9 @@ def aggregate_period_frame(
     grouped["商品支付转化率"] = _ratio_series(buyers, visitors)
     # 周期切换后必须用累计分子÷累计分母重算，不累加或平均每日比率。
     grouped["商品加购率"] = _ratio_series(add_cart, visitors)
-    grouped["推广加购率"] = _ratio_series(grouped["推广加购数"], clicks)
+    grouped["推广加购率"] = _ratio_series(
+        grouped["MetoX推广加购件数"], grouped["MetoX推广访客数"]
+    )
     grouped["访客平均价值"] = _ratio_series(gmv, visitors)
     grouped["购物车价值"] = _ratio_series(gmv, add_cart)
     grouped["链接投产"] = _ratio_series(gmv, spend)

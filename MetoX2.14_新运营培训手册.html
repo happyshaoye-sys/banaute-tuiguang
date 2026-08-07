@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MetoX2.14 半自动推广工具新运营培训手册</title>
+  <style>
+    :root { --ink:#172033; --muted:#667085; --line:#d9e0ea; --blue:#155eef; --soft:#f5f7fb; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--soft); color:var(--ink); font-family:"Microsoft YaHei","PingFang SC",Arial,sans-serif; line-height:1.7; }
+    main { max-width:1100px; margin:32px auto; background:#fff; padding:42px 50px; border-radius:16px; box-shadow:0 10px 30px rgba(16,24,40,.08); }
+    h1 { margin-top:0; font-size:34px; }
+    h2 { margin-top:34px; border-left:5px solid var(--blue); padding-left:12px; }
+    table { width:100%; border-collapse:collapse; margin:14px 0; }
+    th,td { border:1px solid var(--line); padding:10px 12px; text-align:left; vertical-align:top; }
+    th { background:#eef4ff; }
+    code { background:#eef2f7; padding:2px 6px; border-radius:5px; }
+    .note { background:#fff7e8; border:1px solid #fedf89; padding:14px 16px; border-radius:10px; }
+    .good { background:#ecfdf3; border:1px solid #abefc6; padding:14px 16px; border-radius:10px; }
+    footer { color:var(--muted); margin-top:40px; font-size:14px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>MetoX2.14 新运营培训手册</h1>
+  <p>发布日期：2026-08-07｜外部策略算法：v9.3（本次未修改）</p>
+
+  <div class="good">本版新增5个状态字段，目标是让运营快速分清“商品承接”和“推广效率”，同时保留原始数值供复核。</div>
+
+  <h2>一、五项状态怎么判断</h2>
+  <table>
+    <thead><tr><th>状态字段</th><th>计算口径</th><th>判定</th></tr></thead>
+    <tbody>
+      <tr><td>链接投产状态</td><td>GMV÷付费</td><td>高线=max(盈亏平衡线×1.2，同层28日P75)；达到盈亏平衡线为正常，低于盈亏平衡线为低</td></tr>
+      <tr><td>可售天数状态</td><td>在仓库存÷近7日日均销量</td><td>&lt;14紧急；14~28需关注；28~60充足；&gt;60积压</td></tr>
+      <tr><td>商品加购率状态</td><td>商品加购件数÷商品访客数</td><td>相对同层基准B：≥1.2B高；0.8B~1.2B正常；&lt;0.8B低</td></tr>
+      <tr><td>商品支付转化率状态</td><td>支付买家数÷商品访客数</td><td>同上</td></tr>
+      <tr><td>推广加购率状态</td><td>推广加购件数÷推广访客数</td><td>同上</td></tr>
+    </tbody>
+  </table>
+  <p class="note">商品或推广访客不足100时显示“样本不足”。链接投产不使用实际投产过滤；退款率和实际投产仍按原规则参与风险与动作。</p>
+
+  <h2>二、如何判断承接与推广效率</h2>
+  <ul>
+    <li>商品加购率、商品支付转化率均高：商品承接好，可以结合库存与利润评估放量。</li>
+    <li>商品承接正常或高，但推广加购率低：推广流量质量偏低，优先检查定向、素材和渠道结构。</li>
+    <li>推广加购率高，但商品支付转化率低：流量有兴趣但成交承接弱，优先检查价格、详情、评价、优惠和库存。</li>
+    <li>链接投产低且可售天数积压：避免继续粗放投放，先优化商品与库存策略。</li>
+    <li>可售天数紧急：即使投产高，也要先确认补货交期，防止放量后断货。</li>
+  </ul>
+
+  <h2>三、标准操作顺序</h2>
+  <ol>
+    <li>选择日期、店铺和周期，点击“加载并处理数据”。</li>
+    <li>先看数据验收，再看数据看板与AI经营日报。</li>
+    <li>按P0、P1顺序查看AI任务视图。</li>
+    <li>进入执行表，展开“查看高/正常/低判定口径”。</li>
+    <li>结合五项状态、退款风险、渠道分析和库存动作形成运营决策。</li>
+    <li>导出Excel并记录最终执行动作。</li>
+  </ol>
+
+  <h2>四、默认数据路径</h2>
+  <p>商品映射默认优先读取：<code>\\10.1.22.253\天猫mark\mark0706啊\聚水潭</code></p>
+  <p>如果货号为空，先检查共享映射表是否有该商品ID，再确认浏览器标题为MetoX v2.14并重新加载数据。</p>
+
+  <h2>五、版本边界</h2>
+  <p>本次未修改外部v9.3策略、既有MetoX动作、渠道动作或商品-计划动作。原MetoX加购人数指标保持不变，新推广加购件数字段仅用于推广加购率与状态基准。</p>
+
+  <footer>MetoX2.14｜半自动推广工具新运营培训手册</footer>
+</main>
+</body>
+</html>

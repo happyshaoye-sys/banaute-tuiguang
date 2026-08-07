@@ -33,7 +33,9 @@ SUM_COLS = [
     'GMV', '商品访客数', '支付买家数', '支付件数', '成功退款金额',
     '商品加购件数', '搜索引导访客数',
 ]
-METOX_PRODUCT_SUM_COLS = ['MetoX推广成交金额', 'MetoX推广加购数', 'MetoX推广访客数']
+METOX_PRODUCT_SUM_COLS = [
+    'MetoX推广成交金额', 'MetoX推广加购数', 'MetoX推广加购件数', 'MetoX推广访客数',
+]
 METOX_VISITOR_COLS = ['关键词推广访客数', '人群推广访客数', '场景推广访客数']
 METOX_CART_PEOPLE_COLS = ['关键词推广加购人数', '人群推广加购人数', '场景推广加购人数']
 METOX_CART_COUNT_COLS = ['关键词推广加购数', '人群推广加购数', '场景推广加购数']
@@ -46,7 +48,7 @@ DIM_NUM_COLS = ['在途', '成本价（含税）']
 STOCK_NUM_COLS = ['在仓库存', '在途', '成本价（含税）', '日销7']
 REQUIRED_COLS = [
     'GMV','推广成交金额','付费','关键词','人群','全站','店铺直达',
-    'MetoX推广花费','MetoX推广成交金额','MetoX推广加购数','MetoX推广访客数',
+    'MetoX推广花费','MetoX推广成交金额','MetoX推广加购数','MetoX推广加购件数','MetoX推广访客数',
     '关键词归因成交','人群归因成交','全站归因成交','店铺直达归因成交',
     '商品访客数','支付买家数','支付件数','商品加购件数','推广加购数',
     '成功退款金额','退款率','商品加购率','推广加购率','商品支付转化率','访客平均价值',
@@ -155,6 +157,16 @@ def _product_roi_agg(sources):
         cart_count_cols = [col for col in METOX_CART_COUNT_COLS if col in work.columns]
         if cart_count_cols:
             work['MetoX推广加购数'] = sum(_numeric_series(work[col]) for col in cart_count_cols)
+
+    # 既有 MetoX 算法保留“人数优先”的推广加购数语义；状态标签按运营口径
+    # 使用“推广加购件数÷推广访客数”，因此单独保留件数字段。
+    cart_count_cols = [col for col in METOX_CART_COUNT_COLS if col in work.columns]
+    if cart_count_cols:
+        work['MetoX推广加购件数'] = sum(_numeric_series(work[col]) for col in cart_count_cols)
+    elif '推广总加购数' in work.columns:
+        work['MetoX推广加购件数'] = _numeric_series(work['推广总加购数'])
+    elif cart_people_cols:
+        work['MetoX推广加购件数'] = sum(_numeric_series(work[col]) for col in cart_people_cols)
 
     agg = {}
     for col in SUM_COLS + METOX_PRODUCT_SUM_COLS:
@@ -459,7 +471,7 @@ def _finalize_result(base):
 
     for col in [
         'GMV', '推广成交金额', '付费', '关键词', '人群', '全站', '店铺直达',
-        'MetoX推广花费', 'MetoX推广成交金额', 'MetoX推广加购数', 'MetoX推广访客数',
+        'MetoX推广花费', 'MetoX推广成交金额', 'MetoX推广加购数', 'MetoX推广加购件数', 'MetoX推广访客数',
         '关键词归因成交', '人群归因成交', '全站归因成交', '店铺直达归因成交',
         '商品访客数', '支付买家数', '支付件数', '商品加购件数', '推广加购数',
         '成功退款金额', '搜索引导访客数',
@@ -490,9 +502,11 @@ def _finalize_result(base):
         result_df['退款率'] = float('nan')
     result_df['商品支付转化率'] = _safe_div_series(buyers, visitors)
     result_df['商品加购率'] = _safe_div_series(add_cart, visitors)
-    # 无界数据已在 _filtered_wujie 仅保留15天转化+商品主体，
-    # 并在 _wujie_agg 按主体ID汇总；因此这里就是同主体总购物车数÷总点击量。
-    result_df['推广加购率'] = _safe_div_series(result_df['推广加购数'], clicks)
+    # 推广加购率统一使用商品经营投产比中的推广加购件数÷推广访客数；
+    # 无界总购物车数÷点击量不再作为该字段口径。
+    result_df['推广加购率'] = _safe_div_series(
+        result_df['MetoX推广加购件数'], result_df['MetoX推广访客数']
+    )
     result_df['访客平均价值'] = _safe_div_series(gmv, visitors)
     # 双投产口径(2026-07-10 拆分,此前链接*为推广*的赋值复制、恒等):
     # 推广投产=无界归因成交÷花费(纯广告效率);链接投产=全链接GMV÷花费(含自然流量);
