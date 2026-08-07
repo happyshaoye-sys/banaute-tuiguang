@@ -109,6 +109,10 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.ai_task_experience")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("ai_task_no_plan_semantics"):
         errors.append("VERSION.json must record rule_versions.ai_task_no_plan_semantics")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("link_roi_refund_breakeven"):
+        errors.append("VERSION.json must record rule_versions.link_roi_refund_breakeven")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("strict_same_group_baseline"):
+        errors.append("VERSION.json must record rule_versions.strict_same_group_baseline")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("ai_task_plan_pipeline"):
         errors.append("VERSION.json must record rule_versions.ai_task_plan_pipeline")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("data_contract_validation"):
@@ -228,6 +232,10 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         'RATE_SAMPLE_MIN_VISITORS = 100',
         'breakeven * 1.2',
         'quantile(0.75)',
+        'refund_after_gsv = gmv * (1 - refund_rate)',
+        'refund_after_cost = estimated_units * cost',
+        'available_gross_profit = refund_after_gsv - refund_after_cost',
+        'breakeven = gmv / available_gross_profit.where(available_gross_profit > 0)',
         'sellable_days < 14',
         'sellable_days >= 28',
         'sellable_days > 60',
@@ -244,7 +252,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         '"状态字段": "商品加购率状态"',
         '"状态字段": "可售天数状态"',
         '"状态字段": "推广加购率状态"',
-        '不使用链接实际投产或退款率过滤',
+        '同组无数据时不跨类目或价格段回退',
+        '不使用链接实际投产过滤',
     ):
         if snippet not in metric_labels:
             errors.append(f"metric status rule document contract missing: {snippet}")

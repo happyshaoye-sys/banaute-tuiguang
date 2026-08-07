@@ -27,28 +27,33 @@ METRIC_STATUS_RULE_COLUMNS = (
 METRIC_STATUS_RULES = (
     {
         "状态字段": "链接投产状态",
-        "指标口径": "链接投产=GMV÷付费。",
+        "指标口径": (
+            "链接投产=GMV÷付费；退款后GSV=GMV×(1-退款率)；"
+            "退款后销售成本=退款后GSV÷件单价×成本价（含税）；"
+            "可投放毛利额=退款后GSV-退款后销售成本。"
+        ),
         "基准或参考线": (
-            "盈亏平衡线=1÷毛利率，毛利率=(件单价-成本价（含税）)÷件单价；"
-            "同层P75=过去28日同店铺、同淘宝类目、同价格段（0-100/100-200/200-500/500+）"
-            "商品链接投产P75；同类目无数据时回退同价格段，再回退全店。"
+            "盈亏平衡线=GMV÷可投放毛利额；同组P75=过去28日当前所选店铺内，"
+            "同淘宝类目且同价格段（0-100/100-200/200-500/500+）商品的链接投产P75；"
+            "同组无数据时不跨类目或价格段回退。"
         ),
         "判定标准": (
-            "链接投产≥max(盈亏平衡线×1.2，同层P75)：高；"
+            "链接投产≥max(盈亏平衡线×1.2，同组P75)：高；"
             "盈亏平衡线≤链接投产<高线：正常；链接投产<盈亏平衡线：低。"
         ),
         "特殊情况": (
-            "无付费、缺件单价或成本价、毛利率无效：样本不足；"
-            "有付费且成本价≥件单价：低；不使用链接实际投产或退款率过滤。"
+            "无付费，或缺GMV、退款率、件单价、成本价：样本不足；"
+            "退款率不在0%~100%：样本不足；可投放毛利额≤0：低；"
+            "同组P75缺失时高线只取盈亏平衡线×1.2；不使用链接实际投产过滤。"
         ),
-        "运营解释": "高=明显高于不亏线且达到同层优秀水平；正常=达到不亏线；低=尚未达到盈亏平衡。",
+        "运营解释": "高=退款后仍明显高于不亏线且达到同组优秀水平；正常=退款后达到不亏线；低=退款后尚未盈亏平衡。",
     },
     {
         "状态字段": "商品支付转化率状态",
         "指标口径": "商品支付转化率=支付买家数÷商品访客数。",
         "基准或参考线": (
             "B=过去28日同店铺、同淘宝类目、同价格段累计支付买家数÷累计商品访客数；"
-            "同类目无数据时回退同价格段，再回退全店。"
+            "同组无数据时不跨类目或价格段回退。"
         ),
         "判定标准": "指标≥1.2B：高；0.8B≤指标<1.2B：正常；指标<0.8B：低。",
         "特殊情况": "当前访客数<100、B缺失或B≤0：样本不足。",
@@ -59,7 +64,7 @@ METRIC_STATUS_RULES = (
         "指标口径": "商品加购率=商品加购件数÷商品访客数。",
         "基准或参考线": (
             "B=过去28日同店铺、同淘宝类目、同价格段累计商品加购件数÷累计商品访客数；"
-            "同类目无数据时回退同价格段，再回退全店。"
+            "同组无数据时不跨类目或价格段回退。"
         ),
         "判定标准": "指标≥1.2B：高；0.8B≤指标<1.2B：正常；指标<0.8B：低。",
         "特殊情况": "当前访客数<100、B缺失或B≤0：样本不足。",
@@ -81,7 +86,7 @@ METRIC_STATUS_RULES = (
         "指标口径": "推广加购率=推广加购件数÷推广访客数。",
         "基准或参考线": (
             "B=过去28日同店铺、同淘宝类目、同价格段累计推广加购件数÷累计推广访客数；"
-            "同类目无数据时回退同价格段，再回退全店。"
+            "同组无数据时不跨类目或价格段回退。"
         ),
         "判定标准": "指标≥1.2B：高；0.8B≤指标<1.2B：正常；指标<0.8B：低。",
         "特殊情况": "当前访客数<100（使用推广访客数）、B缺失或B≤0：样本不足。",
@@ -99,6 +104,12 @@ def _numeric(frame, column):
     if column not in frame.columns:
         return pd.Series(0.0, index=frame.index, dtype=float)
     return pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
+
+
+def _nullable_numeric(frame, column):
+    if column not in frame.columns:
+        return pd.Series(np.nan, index=frame.index, dtype=float)
+    return pd.to_numeric(frame[column], errors="coerce")
 
 
 def _safe_ratio(numerator, denominator):
@@ -184,8 +195,6 @@ def _history_by_product(history):
 
 def _weighted_baseline_lookup(history, segments, numerator_col, denominator_col):
     exact = {}
-    band = {}
-    overall = np.nan
     if not history.empty:
         exact_totals = history.groupby(["淘宝类目", "价格段"])[[numerator_col, denominator_col]].sum()
         exact = {
@@ -193,44 +202,25 @@ def _weighted_baseline_lookup(history, segments, numerator_col, denominator_col)
             for key, row in exact_totals.iterrows()
             if row[denominator_col] > 0
         }
-        band_totals = history.groupby("价格段")[[numerator_col, denominator_col]].sum()
-        band = {
-            key: row[numerator_col] / row[denominator_col]
-            for key, row in band_totals.iterrows()
-            if row[denominator_col] > 0
-        }
-        total_denominator = history[denominator_col].sum()
-        if total_denominator > 0:
-            overall = history[numerator_col].sum() / total_denominator
 
     values = []
     for _, row in segments.iterrows():
         value = exact.get((row["淘宝类目"], row["价格段"]))
-        if value is None:
-            value = band.get(row["价格段"], overall)
         values.append(value)
     return pd.Series(values, index=segments.index, dtype=float)
 
 
 def _p75_lookup(history, segments):
     exact = {}
-    band = {}
-    overall = np.nan
     if not history.empty:
         eligible = history[history["付费"] > 0].copy()
         eligible["_链接投产"] = eligible["GMV"] / eligible["付费"]
         for key, part in eligible.groupby(["淘宝类目", "价格段"]):
             exact[key] = float(part["_链接投产"].quantile(0.75))
-        for key, part in eligible.groupby("价格段"):
-            band[key] = float(part["_链接投产"].quantile(0.75))
-        if len(eligible) > 0:
-            overall = float(eligible["_链接投产"].quantile(0.75))
 
     values = []
     for _, row in segments.iterrows():
         value = exact.get((row["淘宝类目"], row["价格段"]))
-        if value is None:
-            value = band.get(row["价格段"], overall)
         values.append(value)
     return pd.Series(values, index=segments.index, dtype=float)
 
@@ -244,19 +234,34 @@ def _relative_status(rate, baseline, sample):
     return result
 
 
-def _link_roi_status(frame, peer_p75):
+def _link_roi_status(frame, group_p75):
     spend = _numeric(frame, "付费")
     roi = _numeric(frame, "链接投产")
+    gmv = _nullable_numeric(frame, "GMV")
+    refund_rate = _nullable_numeric(frame, "退款率")
     price = _numeric(frame, "件单价")
     cost = _numeric(frame, "成本价（含税）")
-    margin = (price - cost) / price.where(price > 0)
-    breakeven = 1 / margin.where(margin > 0)
-    high_line = pd.concat([breakeven * 1.2, peer_p75], axis=1).max(axis=1, skipna=True)
+
+    refund_after_gsv = gmv * (1 - refund_rate)
+    estimated_units = refund_after_gsv / price.where(price > 0)
+    refund_after_cost = estimated_units * cost
+    available_gross_profit = refund_after_gsv - refund_after_cost
+    breakeven = gmv / available_gross_profit.where(available_gross_profit > 0)
+    high_line = pd.concat([breakeven * 1.2, group_p75], axis=1).max(axis=1, skipna=True)
 
     result = pd.Series(STATUS_INSUFFICIENT, index=frame.index, dtype=object)
-    impossible_margin = (spend > 0) & (price > 0) & (cost >= price)
-    eligible = (spend > 0) & (price > 0) & (cost > 0) & (margin > 0)
-    result.loc[impossible_margin] = STATUS_LOW
+    valid_inputs = (
+        (spend > 0)
+        & gmv.notna()
+        & (gmv >= 0)
+        & refund_rate.notna()
+        & refund_rate.between(0.0, 1.0, inclusive="both")
+        & (price > 0)
+        & (cost > 0)
+    )
+    no_available_profit = valid_inputs & (available_gross_profit <= 0)
+    eligible = valid_inputs & (available_gross_profit > 0)
+    result.loc[no_available_profit] = STATUS_LOW
     result.loc[eligible & (roi < breakeven)] = STATUS_LOW
     result.loc[eligible & (roi >= breakeven) & (roi < high_line)] = STATUS_NORMAL
     result.loc[eligible & (roi >= high_line)] = STATUS_HIGH

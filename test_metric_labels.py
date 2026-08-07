@@ -17,8 +17,8 @@ class MetricLabelsTests(unittest.TestCase):
             history_rows.append({
                 "宝贝ID": pid,
                 "淘宝类目": "连衣裙",
-                "GMV": 1000.0,
-                "付费": 100.0,
+                "GMV": 750.0,
+                "付费": 75.0,
                 "商品访客数": 100.0,
                 "商品加购件数": 10.0,
                 "支付买家数": 5.0,
@@ -33,6 +33,7 @@ class MetricLabelsTests(unittest.TestCase):
                 "付费": 100.0,
                 "链接投产": 10.0,
                 "链接实际投产": 0.0,
+                "退款率": 0.0,
                 "件单价": 150.0,
                 "成本价（含税）": 50.0,
                 "商品访客数": 100.0,
@@ -95,6 +96,94 @@ class MetricLabelsTests(unittest.TestCase):
         self.assertEqual(result.loc["1001", "可售天数状态"], "需关注")
         self.assertEqual(result.loc["1002", "可售天数状态"], "充足")
         self.assertEqual(result.loc["1003", "可售天数状态"], "积压")
+
+    def test_link_roi_breakeven_uses_refund_after_gsv_and_sales_cost(self):
+        current = pd.DataFrame([{
+            "宝贝ID": "target",
+            "淘宝类目": "连衣裙",
+            "GMV": 1000.0,
+            "付费": 250.0,
+            "链接投产": 4.0,
+            "退款率": 0.60,
+            "件单价": 100.0,
+            "成本价（含税）": 40.0,
+        }])
+        history = pd.DataFrame([{
+            "宝贝ID": "peer",
+            "淘宝类目": "连衣裙",
+            "GMV": 300.0,
+            "付费": 100.0,
+            "支付件数": 3.0,
+        }])
+
+        result = apply_metric_labels(
+            current,
+            day_map={"2026-08-07": (history,)},
+            date_str="2026-08-07",
+        )
+
+        # 退款后GSV=400，销售成本=400/100*40=160，可投放毛利额=240，
+        # 盈亏平衡链接投产=1000/240=4.1667，因此链接投产4.0为低。
+        self.assertEqual(result.loc[0, "链接投产状态"], "低")
+
+    def test_link_roi_requires_refund_rate_instead_of_assuming_zero(self):
+        current = pd.DataFrame([{
+            "宝贝ID": "target",
+            "淘宝类目": "连衣裙",
+            "GMV": 1000.0,
+            "付费": 100.0,
+            "链接投产": 10.0,
+            "件单价": 100.0,
+            "成本价（含税）": 40.0,
+        }])
+
+        result = apply_metric_labels(current)
+
+        self.assertEqual(result.loc[0, "链接投产状态"], "样本不足")
+
+    def test_same_group_p75_does_not_fallback_across_categories(self):
+        current = pd.DataFrame([{
+            "宝贝ID": "target",
+            "淘宝类目": "连衣裙",
+            "GMV": 300.0,
+            "付费": 100.0,
+            "链接投产": 3.0,
+            "退款率": 0.0,
+            "件单价": 150.0,
+            "成本价（含税）": 50.0,
+            "商品访客数": 100.0,
+            "商品加购件数": 10.0,
+        }])
+        non_matching_history = pd.DataFrame([
+            {
+                "宝贝ID": "other-category",
+                "淘宝类目": "上衣",
+                "GMV": 1500.0,
+                "付费": 150.0,
+                "支付件数": 10.0,
+                "商品访客数": 100.0,
+                "商品加购件数": 5.0,
+            },
+            {
+                "宝贝ID": "other-price-band",
+                "淘宝类目": "连衣裙",
+                "GMV": 3000.0,
+                "付费": 300.0,
+                "支付件数": 10.0,
+                "商品访客数": 100.0,
+                "商品加购件数": 5.0,
+            },
+        ])
+
+        result = apply_metric_labels(
+            current,
+            day_map={"2026-08-07": (non_matching_history,)},
+            date_str="2026-08-07",
+        )
+
+        # 同价格段但不同类目、同类目但不同价格段都不能贡献P75或加购率基准。
+        self.assertEqual(result.loc[0, "链接投产状态"], "高")
+        self.assertEqual(result.loc[0, "商品加购率状态"], "样本不足")
 
     def test_keeps_metox_people_metric_and_adds_count_metric(self):
         product = pd.DataFrame([{
