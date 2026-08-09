@@ -226,6 +226,7 @@ def build_release(baseline: Path, launcher_runtime: Path, output_root: Path) -> 
             "startup": {
                 "preferred_port": 8765,
                 "occupied_port_behavior": "select next available local port",
+                "first_run_email_prompt": "disabled",
                 "entry_points": [
                     "TuiGuangTool.exe",
                     "启动MetoX半自动推广工具.bat",
@@ -238,6 +239,7 @@ def build_release(baseline: Path, launcher_runtime: Path, output_root: Path) -> 
                 "refund_page_excel_line": ">70%",
                 "refund_action": "scale actions downgrade to 待优化",
                 "p1_p4_low_refund": "<40% unchanged",
+                "sellable_days_status": "<14 urgent; 14-<28 attention; 28-40 sufficient; >40 overstock",
             },
             "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         }

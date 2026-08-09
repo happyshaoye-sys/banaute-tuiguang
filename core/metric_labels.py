@@ -76,7 +76,7 @@ METRIC_STATUS_RULES = (
         "基准或参考线": "按库存交期风险固定阈值判定，不使用同层基准。",
         "判定标准": (
             "可售天数<14：紧急；14≤可售天数<28：需关注；"
-            "28≤可售天数≤60：充足；可售天数>60：积压。"
+            "28≤可售天数≤40：充足；可售天数>40：积压。"
         ),
         "特殊情况": "在仓库存≤0：紧急；在仓库存>0且日销7≤0：积压；必要字段不足：样本不足。",
         "运营解释": "紧急=优先补货；需关注=结合交期安排；充足=库存健康；积压=控货并关注去化。",
@@ -283,8 +283,8 @@ def _stock_status(frame):
     valid = (stock > 0) & (daily_sales > 0) & sellable_days.notna()
     result.loc[valid & (sellable_days < 14)] = "紧急"
     result.loc[valid & (sellable_days >= 14) & (sellable_days < 28)] = "需关注"
-    result.loc[valid & (sellable_days >= 28) & (sellable_days <= 60)] = "充足"
-    result.loc[valid & (sellable_days > 60)] = "积压"
+    result.loc[valid & (sellable_days >= 28) & (sellable_days <= 40)] = "充足"
+    result.loc[valid & (sellable_days > 40)] = "积压"
     return result
 
 

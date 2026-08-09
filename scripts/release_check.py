@@ -113,6 +113,10 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.link_roi_refund_breakeven")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("strict_same_group_baseline"):
         errors.append("VERSION.json must record rule_versions.strict_same_group_baseline")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("sellable_days_status"):
+        errors.append("VERSION.json must record rule_versions.sellable_days_status")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("first_run_email_prompt"):
+        errors.append("VERSION.json must record rule_versions.first_run_email_prompt")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("ai_task_plan_pipeline"):
         errors.append("VERSION.json must record rule_versions.ai_task_plan_pipeline")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("data_contract_validation"):
@@ -238,7 +242,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         'breakeven = gmv / available_gross_profit.where(available_gross_profit > 0)',
         'sellable_days < 14',
         'sellable_days >= 28',
-        'sellable_days > 60',
+        'sellable_days <= 40',
+        'sellable_days > 40',
         'out["商品加购率状态"]',
         'out["商品支付转化率状态"]',
         'out["推广加购率状态"]',
@@ -257,6 +262,15 @@ def check_release(require_release_branch: bool = False) -> list[str]:
     ):
         if snippet not in metric_labels:
             errors.append(f"metric status rule document contract missing: {snippet}")
+    streamlit_config = (ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8")
+    launcher = (ROOT / "launcher.py").read_text(encoding="utf-8")
+    smoke = (ROOT / "scripts" / "smoke_three_entries.ps1").read_text(encoding="utf-8")
+    if "showEmailPrompt=false" not in streamlit_config:
+        errors.append("project Streamlit config must disable the first-run email prompt")
+    if '"--server.showEmailPrompt"' not in launcher:
+        errors.append("launcher must disable the first-run email prompt")
+    if "Test-MetoXFreshProfile" not in smoke or 'Email:' not in smoke:
+        errors.append("release smoke must cover a fresh user profile without an email prompt")
     for snippet in (
         'def _write_metric_status_rule_sheet(writer):',
         '_write_metric_status_rule_sheet(writer)',

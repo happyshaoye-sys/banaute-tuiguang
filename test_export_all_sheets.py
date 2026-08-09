@@ -175,6 +175,9 @@ class ExportAllSheetsTests(unittest.TestCase):
                 self.assertIn('支付买家数÷商品访客数', rules.loc[1, '指标口径'])
                 self.assertIn('商品加购件数÷商品访客数', rules.loc[2, '指标口径'])
                 self.assertIn('14≤可售天数<28：需关注', rules.loc[3, '判定标准'])
+                self.assertIn('28≤可售天数≤40：充足', rules.loc[3, '判定标准'])
+                self.assertIn('可售天数>40：积压', rules.loc[3, '判定标准'])
+                self.assertNotIn('60', rules.loc[3, '判定标准'])
                 self.assertIn('推广加购件数÷推广访客数', rules.loc[4, '指标口径'])
                 self.assertIn('当前访客数<100', rules.loc[4, '特殊情况'])
 

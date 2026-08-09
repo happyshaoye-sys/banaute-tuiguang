@@ -40,6 +40,14 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(args[args.index("--server.address") + 1], "127.0.0.1")
         self.assertEqual(args[args.index("--server.port") + 1], "8877")
         self.assertEqual(args[args.index("--global.developmentMode") + 1], "false")
+        self.assertEqual(args[args.index("--server.showEmailPrompt") + 1], "false")
+        self.assertEqual(args[args.index("--browser.gatherUsageStats") + 1], "false")
+
+    def test_project_config_disables_first_run_email_prompt(self):
+        config = (
+            Path(__file__).resolve().parent / ".streamlit" / "config.toml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("showEmailPrompt=false", config)
 
     def test_dynamic_streamlit_runtime_dependency_is_importable(self):
         launcher.validate_runtime_dependencies()
@@ -66,6 +74,8 @@ class LauncherTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("METOX_APP_TEST", source)
         self.assertIn("METOX_APP_TEST=PASS", source)
+        self.assertIn("Test-MetoXFreshProfile", source)
+        self.assertIn('Email:', source)
 
     def test_batch_entry_points_do_not_force_fixed_port(self):
         root = Path(__file__).resolve().parent

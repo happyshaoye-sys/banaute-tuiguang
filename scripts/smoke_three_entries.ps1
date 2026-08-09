@@ -177,9 +177,70 @@ function Test-MetoXAppExecution {
     }
 }
 
+function Test-MetoXFreshProfile {
+    $stdout = Join-Path $LogRoot "fresh_profile.stdout.log"
+    $stderr = Join-Path $LogRoot "fresh_profile.stderr.log"
+    $freshProfile = Join-Path ([IO.Path]::GetTempPath()) ("metox-fresh-profile-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $freshProfile -Force | Out-Null
+    $oldUserProfile = $env:USERPROFILE
+    $oldBrowser = $env:BROWSER
+    $oldFreshHeadless = $env:METOX_HEADLESS
+    $entry = $null
+    $listenerPid = $null
+    try {
+        $env:USERPROFILE = $freshProfile
+        $env:BROWSER = "echo"
+        $env:METOX_HEADLESS = "0"
+        $entry = Start-Process -FilePath (Join-Path $runtime "TuiGuangTool.exe") `
+            -WorkingDirectory $runtime `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr `
+            -PassThru -WindowStyle Hidden
+        $createdPids.Add($entry.Id)
+        $port = Wait-MetoXUrl -StdoutPath $stdout -Process $entry
+        $health = Wait-MetoXHealth -Port $port -Process $entry -StderrPath $stderr
+        $rootResponse = Invoke-WebRequest -Uri "http://127.0.0.1:$port" -UseBasicParsing -TimeoutSec 5
+        $output = Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue
+        if ($output -match "Welcome to Streamlit" -or $output -match "Email:") {
+            throw "Fresh-profile startup displayed the Streamlit email prompt."
+        }
+        $listenerPid = [int](
+            Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort $port -State Listen |
+                Select-Object -First 1
+        ).OwningProcess
+        if (-not $createdPids.Contains($listenerPid)) {
+            $createdPids.Add($listenerPid)
+        }
+        return [pscustomobject]@{
+            Status = "PASS"
+            SelectedPort = $port
+            Health = [int]$health.StatusCode
+            Root = [int]$rootResponse.StatusCode
+            EmailPrompt = $false
+        }
+    } finally {
+        if ($null -ne $listenerPid) {
+            Stop-Process -Id $listenerPid -Force -ErrorAction SilentlyContinue
+        }
+        if ($null -ne $entry) {
+            Stop-Process -Id $entry.Id -Force -ErrorAction SilentlyContinue
+        }
+        $env:USERPROFILE = $oldUserProfile
+        $env:BROWSER = $oldBrowser
+        $env:METOX_HEADLESS = $oldFreshHeadless
+        Start-Sleep -Milliseconds 500
+        $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+        $freshProfileFull = [IO.Path]::GetFullPath($freshProfile)
+        if ($freshProfileFull.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            Remove-Item -LiteralPath $freshProfileFull -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 $blocker = $null
 try {
     $appExecution = Test-MetoXAppExecution
+    $freshProfileExecution = Test-MetoXFreshProfile
     $existing8765 = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue
     if (-not $existing8765) {
         $blocker = Start-Process -FilePath $PythonExecutable `
@@ -208,6 +269,7 @@ try {
     Test-MetoXEntry -Name "compatibility_bat" -Path $compatibilityBatch.FullName -IsBatch $true
     [pscustomobject]@{
         AppExecution = $appExecution
+        FreshProfileExecution = $freshProfileExecution
         EntrySmoke = $results
     } | ConvertTo-Json -Depth 4
 } finally {

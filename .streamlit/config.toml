@@ -12,4 +12,5 @@ toolbarMode = "viewer"
 
 [server]
 headless=false
+showEmailPrompt=false
 # Port is selected by launcher.py. Do not restore a fixed port here.

@@ -69,6 +69,8 @@ def streamlit_arguments(app_path: Path, port: int) -> list[str]:
         "false",
         "--server.headless",
         headless,
+        "--server.showEmailPrompt",
+        "false",
         "--browser.gatherUsageStats",
         "false",
     ]

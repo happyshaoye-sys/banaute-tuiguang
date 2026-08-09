@@ -97,6 +97,24 @@ class MetricLabelsTests(unittest.TestCase):
         self.assertEqual(result.loc["1002", "可售天数状态"], "充足")
         self.assertEqual(result.loc["1003", "可售天数状态"], "积压")
 
+    def test_sellable_days_status_uses_40_day_overstock_boundary(self):
+        current = pd.DataFrame({
+            "宝贝ID": ["under-14", "at-14", "under-28", "at-28", "at-40", "over-40", "missing"],
+            "可售天数": [13.9, 14.0, 27.9, 28.0, 40.0, 40.1, float("nan")],
+            "在仓库存": [100.0] * 7,
+            "日销7": [10.0] * 7,
+        })
+
+        result = apply_metric_labels(current).set_index("宝贝ID")
+
+        self.assertEqual(result.loc["under-14", "可售天数状态"], "紧急")
+        self.assertEqual(result.loc["at-14", "可售天数状态"], "需关注")
+        self.assertEqual(result.loc["under-28", "可售天数状态"], "需关注")
+        self.assertEqual(result.loc["at-28", "可售天数状态"], "充足")
+        self.assertEqual(result.loc["at-40", "可售天数状态"], "充足")
+        self.assertEqual(result.loc["over-40", "可售天数状态"], "积压")
+        self.assertEqual(result.loc["missing", "可售天数状态"], "样本不足")
+
     def test_link_roi_breakeven_uses_refund_after_gsv_and_sales_cost(self):
         current = pd.DataFrame([{
             "宝贝ID": "target",
