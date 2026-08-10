@@ -123,6 +123,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.data_contract_validation")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("category_analysis_copy"):
         errors.append("VERSION.json must record rule_versions.category_analysis_copy")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("execution_column_order"):
+        errors.append("VERSION.json must record rule_versions.execution_column_order")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("metox_cart_burst_label"):
         errors.append("VERSION.json must record rule_versions.metox_cart_burst_label")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("ai_task_metox_priority"):

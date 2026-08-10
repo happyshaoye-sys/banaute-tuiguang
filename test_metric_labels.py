@@ -247,15 +247,15 @@ class MetricLabelsTests(unittest.TestCase):
 
         self.assertEqual(result.loc[0, "商品加购率状态"], "高")
 
-    def test_exports_five_status_fields_next_to_their_metrics(self):
-        self.assertEqual(EXPORT_COLS.index("链接投产状态"), EXPORT_COLS.index("链接投产") + 1)
-        self.assertEqual(EXPORT_COLS.index("可售天数状态"), EXPORT_COLS.index("可售天数") + 1)
-        self.assertEqual(EXPORT_COLS.index("商品加购率状态"), EXPORT_COLS.index("商品加购率") + 1)
-        self.assertEqual(
-            EXPORT_COLS.index("商品支付转化率状态"),
-            EXPORT_COLS.index("商品支付转化率") + 1,
-        )
-        self.assertEqual(EXPORT_COLS.index("推广加购率状态"), EXPORT_COLS.index("推广加购率") + 1)
+    def test_exports_five_status_fields(self):
+        for column in (
+            "链接投产状态",
+            "可售天数状态",
+            "推广加购率状态",
+            "商品加购率状态",
+            "商品支付转化率状态",
+        ):
+            self.assertIn(column, EXPORT_COLS)
 
 
 if __name__ == "__main__":

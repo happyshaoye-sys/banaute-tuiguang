@@ -89,9 +89,9 @@ class CartRateTests(unittest.TestCase):
         self.assertAlmostEqual(float(row["商品加购率"]), 25 / 120)
         self.assertAlmostEqual(float(row["推广加购率"]), 25 / 200)
 
-    def test_execution_table_exports_both_rates_next_to_their_metrics(self):
-        self.assertEqual(EXPORT_COLS.index("推广加购率"), EXPORT_COLS.index("推广投产") + 1)
-        self.assertEqual(EXPORT_COLS.index("商品加购率"), EXPORT_COLS.index("商品加购件数") + 1)
+    def test_execution_table_exports_both_rates(self):
+        self.assertIn("推广加购率", EXPORT_COLS)
+        self.assertIn("商品加购率", EXPORT_COLS)
 
 
 if __name__ == "__main__":

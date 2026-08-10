@@ -4,7 +4,7 @@ import pandas as pd
 from .analysis import build_ai_task_view, category_analysis
 from .data_validation import validate_paid_plan_consistency
 from .metric_labels import METRIC_STATUS_RULE_SHEET, metric_status_rule_frame
-from .schema import EXPORT_COLS, safe_div
+from .schema import execution_export_frame, safe_div
 
 
 CATEGORY_INVESTMENT_SHEET = '品类投放占比与ROI'
@@ -76,9 +76,8 @@ def export_execution_table(df, cat_ctx=None):
     """导出执行表及品类投放占比与 ROI 为 Excel bytes。"""
     validate_paid_plan_consistency(df, '执行表Excel导出')
     output = io.BytesIO()
-    cols = [c for c in EXPORT_COLS if c in df.columns]
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df[cols].to_excel(writer, sheet_name='商品推广执行表', index=False)
+        execution_export_frame(df).to_excel(writer, sheet_name='商品推广执行表', index=False)
         _write_metric_status_rule_sheet(writer)
         _write_category_investment_sheet(writer, df, cat_ctx=cat_ctx)
     output.seek(0)
@@ -91,8 +90,7 @@ def export_all_sheets(df, cat_ctx=None):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         # 1. 执行表
-        cols = [c for c in EXPORT_COLS if c in df.columns]
-        df[cols].to_excel(writer, sheet_name='商品推广执行表', index=False)
+        execution_export_frame(df).to_excel(writer, sheet_name='商品推广执行表', index=False)
 
         # 2. 五项核心指标状态规则文档
         _write_metric_status_rule_sheet(writer)

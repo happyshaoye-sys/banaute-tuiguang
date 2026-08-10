@@ -44,6 +44,7 @@ from core.version import APP_VERSION, DISPLAY_VERSION, PRODUCT_NAME
 from core.schema import (
     ALLOWED_SOURCE_TYPES, SOURCE_PRODUCT_INFO, SOURCE_PRODUCT_ROI, SOURCE_STOCK,
     SOURCE_WUJIE_SUBJECT, classify_file, EXPORT_COLS, ACTION_RULES, compute_bounds,
+    ensure_export_columns,
 )
 
 st.set_page_config(page_title=f"{DISPLAY_VERSION} 半自动推广工具", layout="wide")
@@ -1326,6 +1327,7 @@ with tab3:
 # ── Tab 4: 执行表 ────────────────────────────────────────
 with tab4:
     st.subheader(f"商品推广执行表 ({len(df)} 条)")
+    execution_df = ensure_export_columns(df)
     with st.expander("查看高/正常/低判定口径", expanded=False):
         st.markdown(
             """
@@ -1339,7 +1341,7 @@ with tab4:
 
     # 筛选 + 列设置(2026-07-11:列设置移到筛选行右侧,popover 下拉形式、占位小;
     # 勾选持久化到 cache/column_prefs.json,展示顺序固定按 EXPORT_COLS,仅影响显示、导出仍全量)
-    all_cols = [c for c in EXPORT_COLS if c in df.columns]
+    all_cols = [c for c in EXPORT_COLS if c in execution_df.columns]
     if "exec_cols_pref" not in st.session_state:
         saved = _load_column_prefs()
         pref = [c for c in (saved or all_cols) if c in all_cols] or all_cols
@@ -1386,7 +1388,7 @@ with tab4:
             st.caption("仅影响表格显示;导出 Excel 仍包含全部字段")
 
     # 过滤
-    filtered = df.copy()
+    filtered = execution_df.copy()
     if level_filter:
         filtered = filtered[filtered['综合等级'] == level_filter]
     if action_filter:

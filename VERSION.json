@@ -1,6 +1,6 @@
 {
   "product": "MetoX",
-  "version": "2.18",
+  "version": "2.19",
   "release_date": "2026-08-10",
   "external_strategy_version": "v9.3",
   "rule_versions": {
@@ -18,6 +18,7 @@
     "ai_task_plan_pipeline": "2026-08-03",
     "data_contract_validation": "2026-08-03",
     "category_analysis_copy": "2026-08-10",
+    "execution_column_order": "2026-08-10",
     "metox_cart_burst_label": "2026-08-06",
     "ai_task_metox_priority": "2026-08-06",
     "execution_cart_rates": "2026-08-06",
