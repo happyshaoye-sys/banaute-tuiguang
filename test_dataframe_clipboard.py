@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 import pandas as pd
 
@@ -9,6 +10,9 @@ from core.dataframe_clipboard import (
     build_dataframe_copy_button_html,
     dataframe_to_clipboard_text,
 )
+
+
+ROOT = Path(__file__).resolve().parent
 
 
 class DataframeClipboardTests(unittest.TestCase):
@@ -39,6 +43,16 @@ class DataframeClipboardTests(unittest.TestCase):
         self.assertNotIn('"position:absolute"', html)
         self.assertNotIn('"right:6.25rem"', html)
         self.assertNotIn('removeAttribute("data-testid")', html)
+
+    def test_category_tables_use_distinct_copy_buttons(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
+
+        self.assertIn('button_key="category-basic"', source)
+        self.assertIn('button_key="category-investment"', source)
+        self.assertIn(
+            "st.dataframe(category_investment_df, width=\"stretch\", hide_index=True)",
+            source,
+        )
 
 
 if __name__ == "__main__":

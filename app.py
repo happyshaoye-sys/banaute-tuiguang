@@ -1503,7 +1503,16 @@ with tab6:
             st.caption(f"合计: {t.get('cnt',0)} 商品 | GMV ¥{t.get('gmv',0)/1e4:.2f}万 | ROI {t.get('roi',0)}")
         if cat.get('invest'):
             st.subheader("品类投放占比与ROI")
-            st.dataframe(pd.DataFrame(cat['invest']), width="stretch", hide_index=True)
+            category_investment_df = pd.DataFrame(cat['invest'])
+            components.html(
+                build_dataframe_copy_button_html(
+                    category_investment_df,
+                    button_key="category-investment",
+                ),
+                height=0,
+                scrolling=False,
+            )
+            st.dataframe(category_investment_df, width="stretch", hide_index=True)
     except Exception as e:
         st.warning(f"品类分析加载失败: {e}")
 
