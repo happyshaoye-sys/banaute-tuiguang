@@ -1,7 +1,7 @@
 {
   "product": "MetoX",
-  "version": "2.19",
-  "release_date": "2026-08-10",
+  "version": "2.20",
+  "release_date": "2026-08-13",
   "external_strategy_version": "v9.3",
   "rule_versions": {
     "refund_risk": "2026-08-02",
@@ -29,6 +29,7 @@
     "link_roi_refund_breakeven": "2026-08-07",
     "strict_same_group_baseline": "2026-08-07",
     "sellable_days_status": "2026-08-09",
-    "first_run_email_prompt": "2026-08-09"
+    "first_run_email_prompt": "2026-08-09",
+    "execution_status_colors": "2026-08-13"
   }
 }

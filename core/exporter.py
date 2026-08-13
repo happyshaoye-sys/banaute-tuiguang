@@ -14,10 +14,85 @@ CATEGORY_INVESTMENT_COLUMNS = [
     '上周期关键词', '上周期人群', '上周期全站', 'ROI',
 ]
 
+LIGHT_BLUE_BACKGROUND = '#DDEBF7'
+LIGHT_PINK_BACKGROUND = '#FCE4EC'
+EXECUTION_SHEET = '商品推广执行表'
+METRIC_STATUS_COLUMNS = (
+    '链接投产状态',
+    '推广加购率状态',
+    '商品加购率状态',
+    '商品支付转化率状态',
+)
+METRIC_STATUS_BACKGROUND_COLORS = {
+    '高': LIGHT_BLUE_BACKGROUND,
+    '低': LIGHT_PINK_BACKGROUND,
+}
+SELLABLE_DAYS_STATUS_BACKGROUND_COLORS = {
+    '紧急': LIGHT_PINK_BACKGROUND,
+    '需关注': LIGHT_BLUE_BACKGROUND,
+}
+METRIC_STATUS_STYLES = {
+    status: f'background-color: {color}'
+    for status, color in METRIC_STATUS_BACKGROUND_COLORS.items()
+}
+SELLABLE_DAYS_STATUS_STYLES = {
+    status: f'background-color: {color}'
+    for status, color in SELLABLE_DAYS_STATUS_BACKGROUND_COLORS.items()
+}
+
+
+def _map_status_background(series, style_map):
+    normalized = series.astype('string').str.strip()
+    return normalized.map(style_map).fillna('')
+
 
 def style_execution_table(df):
-    """页面执行表样式(环比高亮已移除,直接返回原表)。"""
-    return df
+    """为执行表的核心状态单元格添加运营提示底色。"""
+    styler = df.style
+    metric_columns = [column for column in METRIC_STATUS_COLUMNS if column in df.columns]
+    if metric_columns:
+        styler = styler.apply(
+            _map_status_background,
+            style_map=METRIC_STATUS_STYLES,
+            subset=metric_columns,
+        )
+    if '可售天数状态' in df.columns:
+        styler = styler.apply(
+            _map_status_background,
+            style_map=SELLABLE_DAYS_STATUS_STYLES,
+            subset=['可售天数状态'],
+        )
+    return styler
+
+
+def _write_execution_sheet(writer, df):
+    """写入执行表，并将页面状态底色同步到 Excel。"""
+    frame = execution_export_frame(df)
+    frame.to_excel(writer, sheet_name=EXECUTION_SHEET, index=False)
+
+    workbook = writer.book
+    worksheet = writer.sheets[EXECUTION_SHEET]
+    formats = {
+        color: workbook.add_format({'bg_color': color, 'pattern': 1})
+        for color in (LIGHT_BLUE_BACKGROUND, LIGHT_PINK_BACKGROUND)
+    }
+    column_color_maps = {
+        **{
+            column: METRIC_STATUS_BACKGROUND_COLORS
+            for column in METRIC_STATUS_COLUMNS
+        },
+        '可售天数状态': SELLABLE_DAYS_STATUS_BACKGROUND_COLORS,
+    }
+    for column, color_map in column_color_maps.items():
+        if column not in frame.columns:
+            continue
+        column_index = frame.columns.get_loc(column)
+        for excel_row, value in enumerate(frame[column], start=1):
+            color = color_map.get(str(value).strip())
+            if color:
+                worksheet.write(excel_row, column_index, value, formats[color])
+
+    return frame
 
 
 def _write_category_investment_sheet(writer, df, cat_ctx=None):
@@ -77,7 +152,7 @@ def export_execution_table(df, cat_ctx=None):
     validate_paid_plan_consistency(df, '执行表Excel导出')
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        execution_export_frame(df).to_excel(writer, sheet_name='商品推广执行表', index=False)
+        _write_execution_sheet(writer, df)
         _write_metric_status_rule_sheet(writer)
         _write_category_investment_sheet(writer, df, cat_ctx=cat_ctx)
     output.seek(0)
@@ -90,7 +165,7 @@ def export_all_sheets(df, cat_ctx=None):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         # 1. 执行表
-        execution_export_frame(df).to_excel(writer, sheet_name='商品推广执行表', index=False)
+        _write_execution_sheet(writer, df)
 
         # 2. 五项核心指标状态规则文档
         _write_metric_status_rule_sheet(writer)
