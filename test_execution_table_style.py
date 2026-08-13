@@ -16,6 +16,26 @@ from core.exporter import (
 
 
 class ExecutionTableStyleTests(unittest.TestCase):
+    def test_large_table_raises_pandas_styler_capacity_before_rendering(self):
+        original_limit = pd.get_option('styler.render.max_elements')
+        source = pd.DataFrame({
+            f'字段{column}': range(100)
+            for column in range(10)
+        })
+
+        try:
+            pd.set_option('styler.render.max_elements', 100)
+            styled = style_execution_table(source)
+
+            self.assertIs(styled.data, source)
+            self.assertGreaterEqual(
+                pd.get_option('styler.render.max_elements'),
+                source.size,
+            )
+            styled._compute()
+        finally:
+            pd.set_option('styler.render.max_elements', original_limit)
+
     def test_requested_statuses_receive_their_background_colors(self):
         source = pd.DataFrame({
             '链接投产状态': ['高', '低', '正常'],

@@ -46,8 +46,17 @@ def _map_status_background(series, style_map):
     return normalized.map(style_map).fillna('')
 
 
+def _ensure_styler_capacity(df):
+    """Ensure Pandas Styler can render every cell in the visible table."""
+    required_elements = int(df.size)
+    current_limit = int(pd.get_option('styler.render.max_elements'))
+    if required_elements > current_limit:
+        pd.set_option('styler.render.max_elements', required_elements)
+
+
 def style_execution_table(df):
     """为执行表的核心状态单元格添加运营提示底色。"""
+    _ensure_styler_capacity(df)
     styler = df.style
     metric_columns = [column for column in METRIC_STATUS_COLUMNS if column in df.columns]
     if metric_columns:

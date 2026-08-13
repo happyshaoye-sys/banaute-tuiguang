@@ -137,6 +137,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.execution_metric_statuses")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("metric_status_rule_export"):
         errors.append("VERSION.json must record rule_versions.metric_status_rule_export")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("execution_table_styler_capacity"):
+        errors.append("VERSION.json must record rule_versions.execution_table_styler_capacity")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()
