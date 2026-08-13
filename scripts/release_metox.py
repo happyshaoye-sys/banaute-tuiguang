@@ -262,6 +262,8 @@ def build_release(baseline: Path, launcher_runtime: Path, output_root: Path) -> 
                 "execution_top_products_positive_gmv_only": True,
                 "execution_top_product_background": "#FFF2CC",
                 "execution_top_product_text_color": "#1F2937",
+                "execution_status_high_background": "#DDEBF7",
+                "execution_status_low_background": "#FCE4EC",
             },
             "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         }

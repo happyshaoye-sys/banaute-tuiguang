@@ -23,6 +23,30 @@ TOP_PRODUCT_STYLE = (
     f'background-color: {TOP_PRODUCT_BACKGROUND}; '
     f'color: {TOP_PRODUCT_TEXT_COLOR}'
 )
+STATUS_HIGH_BACKGROUND = '#DDEBF7'
+STATUS_LOW_BACKGROUND = '#FCE4EC'
+STATUS_BACKGROUND_BY_COLUMN = {
+    '链接投产状态': {
+        '高': STATUS_HIGH_BACKGROUND,
+        '低': STATUS_LOW_BACKGROUND,
+    },
+    '推广加购率状态': {
+        '高': STATUS_HIGH_BACKGROUND,
+        '低': STATUS_LOW_BACKGROUND,
+    },
+    '商品加购率状态': {
+        '高': STATUS_HIGH_BACKGROUND,
+        '低': STATUS_LOW_BACKGROUND,
+    },
+    '商品支付转化率状态': {
+        '高': STATUS_HIGH_BACKGROUND,
+        '低': STATUS_LOW_BACKGROUND,
+    },
+    '可售天数状态': {
+        '紧急': STATUS_LOW_BACKGROUND,
+        '需关注': STATUS_HIGH_BACKGROUND,
+    },
+}
 
 
 def _ensure_styler_capacity(df):
@@ -78,23 +102,52 @@ def top_category_product_mask(
     return mask
 
 
-def _top_product_style_frame(df, ranking_df=None):
+def _style_for_background(background):
+    return (
+        f'background-color: {background}; '
+        f'color: {TOP_PRODUCT_TEXT_COLOR}'
+    )
+
+
+def _status_value(value):
+    if pd.isna(value):
+        return ''
+    return str(value).strip()
+
+
+def _status_background(column, value):
+    return STATUS_BACKGROUND_BY_COLUMN.get(column, {}).get(_status_value(value))
+
+
+def _top_product_row_mask(df, ranking_df=None):
     ranking_source = df if ranking_df is None else ranking_df
     ranking_mask = top_category_product_mask(ranking_source)
     if ranking_source is df:
-        row_mask = ranking_mask.to_numpy()
+        return ranking_mask.astype(bool)
     else:
         highlighted_indices = ranking_source.index[ranking_mask]
-        row_mask = df.index.isin(highlighted_indices)
+        return pd.Series(df.index.isin(highlighted_indices), index=df.index, dtype=bool)
 
+
+def _top_product_style_frame(df, ranking_df=None):
+    row_mask = _top_product_row_mask(df, ranking_df=ranking_df)
     styles = pd.DataFrame('', index=df.index, columns=df.columns)
     if row_mask.any():
-        styles.iloc[row_mask, :] = TOP_PRODUCT_STYLE
+        styles.loc[row_mask, :] = TOP_PRODUCT_STYLE
+        highlighted_index = row_mask[row_mask].index
+        for column, color_map in STATUS_BACKGROUND_BY_COLUMN.items():
+            if column not in df.columns:
+                continue
+            values = df.loc[highlighted_index, column].map(_status_value)
+            for status, background in color_map.items():
+                matching_index = values[values.eq(status)].index
+                if not matching_index.empty:
+                    styles.loc[matching_index, column] = _style_for_background(background)
     return styles
 
 
 def style_execution_table(df, ranking_df=None):
-    """仅为销售 Top15 品类内、各品类 Top50 单品添加整行底色。"""
+    """仅为销售 Top15 品类内、各品类 Top50 单品添加底色。"""
     _ensure_styler_capacity(df)
     styler = df.style
     styles = _top_product_style_frame(df, ranking_df=ranking_df)
@@ -103,8 +156,8 @@ def style_execution_table(df, ranking_df=None):
     return styler
 
 
-def _write_execution_sheet(writer, df):
-    """写入执行表，并将页面 Top 单品整行底色同步到 Excel。"""
+def _write_execution_sheet(writer, df, ranking_df=None):
+    """写入执行表，并将页面 Top 单品底色同步到 Excel。"""
     frame = execution_export_frame(df)
     frame.to_excel(writer, sheet_name=EXECUTION_SHEET, index=False)
 
@@ -115,9 +168,33 @@ def _write_execution_sheet(writer, df):
         'font_color': TOP_PRODUCT_TEXT_COLOR,
         'pattern': 1,
     })
-    for excel_row, highlighted in enumerate(top_category_product_mask(frame), start=1):
+    status_formats = {
+        background: workbook.add_format({
+            'bg_color': background,
+            'font_color': TOP_PRODUCT_TEXT_COLOR,
+            'pattern': 1,
+        })
+        for background in {STATUS_HIGH_BACKGROUND, STATUS_LOW_BACKGROUND}
+    }
+    ranking_frame = execution_export_frame(ranking_df) if ranking_df is not None else frame
+    top_product_mask = _top_product_row_mask(frame, ranking_df=ranking_frame)
+    column_positions = {column: position for position, column in enumerate(frame.columns)}
+    for row_position, highlighted in enumerate(top_product_mask):
+        excel_row = row_position + 1
         if highlighted:
             worksheet.set_row(excel_row, None, highlight_format)
+            for column in STATUS_BACKGROUND_BY_COLUMN:
+                if column not in column_positions:
+                    continue
+                value = frame.iloc[row_position][column]
+                background = _status_background(column, value)
+                if background:
+                    worksheet.write(
+                        excel_row,
+                        column_positions[column],
+                        value,
+                        status_formats[background],
+                    )
 
     return frame
 
@@ -174,25 +251,25 @@ def _write_metric_status_rule_sheet(writer):
     worksheet.repeat_rows(0)
 
 
-def export_execution_table(df, cat_ctx=None):
+def export_execution_table(df, cat_ctx=None, ranking_df=None):
     """导出执行表及品类投放占比与 ROI 为 Excel bytes。"""
     validate_paid_plan_consistency(df, '执行表Excel导出')
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        _write_execution_sheet(writer, df)
+        _write_execution_sheet(writer, df, ranking_df=ranking_df)
         _write_metric_status_rule_sheet(writer)
         _write_category_investment_sheet(writer, df, cat_ctx=cat_ctx)
     output.seek(0)
     return output.read()
 
 
-def export_all_sheets(df, cat_ctx=None):
+def export_all_sheets(df, cat_ctx=None, ranking_df=None):
     """导出全部分析 Sheet"""
     validate_paid_plan_consistency(df, '全部Sheet Excel导出')
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         # 1. 执行表
-        _write_execution_sheet(writer, df)
+        _write_execution_sheet(writer, df, ranking_df=ranking_df)
 
         # 2. 五项核心指标状态规则文档
         _write_metric_status_rule_sheet(writer)

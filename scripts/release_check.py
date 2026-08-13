@@ -141,6 +141,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.execution_table_styler_capacity")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("execution_top_category_products"):
         errors.append("VERSION.json must record rule_versions.execution_top_category_products")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("execution_top_status_colors"):
+        errors.append("VERSION.json must record rule_versions.execution_top_status_colors")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()
@@ -290,18 +292,18 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         'TOP_PRODUCT_LIMIT = 50',
         "TOP_PRODUCT_BACKGROUND = '#FFF2CC'",
         "TOP_PRODUCT_TEXT_COLOR = '#1F2937'",
+        "STATUS_HIGH_BACKGROUND = '#DDEBF7'",
+        "STATUS_LOW_BACKGROUND = '#FCE4EC'",
+        'STATUS_BACKGROUND_BY_COLUMN = {',
         'def top_category_product_mask(',
+        'def _top_product_row_mask(',
         "work['_gmv'].gt(0)",
         'worksheet.set_row(excel_row, None, highlight_format)',
+        'worksheet.write(',
+        'ranking_df=ranking_df',
     ):
         if snippet not in exporter:
             errors.append(f"execution top-category product highlight contract missing: {snippet}")
-    for removed_snippet in (
-        'METRIC_STATUS_BACKGROUND_COLORS',
-        'SELLABLE_DAYS_STATUS_BACKGROUND_COLORS',
-    ):
-        if removed_snippet in exporter:
-            errors.append(f"superseded status-cell background contract must be removed: {removed_snippet}")
 
     for relative_template, marker_template in CURRENT_DOCS.items():
         relative = relative_template.format(version=version)

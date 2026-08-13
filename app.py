@@ -1412,7 +1412,9 @@ with tab4:
                + (f"　|　生效筛选: {'; '.join(active_filters)}" if active_filters else ""))
     st.caption(
         "浅黄底色：当前周期 GMV Top15 品类内，各品类 GMV Top50 单品"
-        "（仅 GMV>0）；排名基于完整执行表，不随搜索、等级或操作筛选变化。"
+        "（仅 GMV>0）；这些行内的状态单元格叠加浅蓝/浅粉底色："
+        "高、需关注=浅蓝，低、紧急=浅粉；文字使用深色保证对比。"
+        "排名基于完整执行表，不随搜索、等级或操作筛选变化。"
     )
 
     # 显示列(按 EXPORT_COLS 固定顺序取勾选交集)
@@ -1448,7 +1450,7 @@ with tab4:
         if st.button("📥 生成执行表 Excel", key="export_exec"):
             with st.spinner(f"生成中({len(filtered)} 行，含品类投放表)..."):
                 st.session_state["exec_xlsx"] = export_execution_table(
-                    filtered, cat_ctx=export_cat_ctx
+                    filtered, cat_ctx=export_cat_ctx, ranking_df=execution_df
                 )
                 st.session_state["exec_xlsx_meta"] = \
                     f"{len(filtered)}行 {datetime.now().strftime('%H:%M:%S')}"
@@ -1462,7 +1464,7 @@ with tab4:
         if st.button("📦 生成全部 Sheet Excel", key="export_all"):
             with st.spinner(f"生成中({len(filtered)} 行，含品类投放表)..."):
                 st.session_state["all_xlsx"] = export_all_sheets(
-                    filtered, cat_ctx=export_cat_ctx
+                    filtered, cat_ctx=export_cat_ctx, ranking_df=execution_df
                 )
                 st.session_state["all_xlsx_meta"] = \
                     f"{len(filtered)}行 {datetime.now().strftime('%H:%M:%S')}"
