@@ -14,36 +14,15 @@ CATEGORY_INVESTMENT_COLUMNS = [
     '上周期关键词', '上周期人群', '上周期全站', 'ROI',
 ]
 
-LIGHT_BLUE_BACKGROUND = '#DDEBF7'
-LIGHT_PINK_BACKGROUND = '#FCE4EC'
 EXECUTION_SHEET = '商品推广执行表'
-METRIC_STATUS_COLUMNS = (
-    '链接投产状态',
-    '推广加购率状态',
-    '商品加购率状态',
-    '商品支付转化率状态',
+TOP_CATEGORY_LIMIT = 15
+TOP_PRODUCT_LIMIT = 50
+TOP_PRODUCT_BACKGROUND = '#FFF2CC'
+TOP_PRODUCT_TEXT_COLOR = '#1F2937'
+TOP_PRODUCT_STYLE = (
+    f'background-color: {TOP_PRODUCT_BACKGROUND}; '
+    f'color: {TOP_PRODUCT_TEXT_COLOR}'
 )
-METRIC_STATUS_BACKGROUND_COLORS = {
-    '高': LIGHT_BLUE_BACKGROUND,
-    '低': LIGHT_PINK_BACKGROUND,
-}
-SELLABLE_DAYS_STATUS_BACKGROUND_COLORS = {
-    '紧急': LIGHT_PINK_BACKGROUND,
-    '需关注': LIGHT_BLUE_BACKGROUND,
-}
-METRIC_STATUS_STYLES = {
-    status: f'background-color: {color}'
-    for status, color in METRIC_STATUS_BACKGROUND_COLORS.items()
-}
-SELLABLE_DAYS_STATUS_STYLES = {
-    status: f'background-color: {color}'
-    for status, color in SELLABLE_DAYS_STATUS_BACKGROUND_COLORS.items()
-}
-
-
-def _map_status_background(series, style_map):
-    normalized = series.astype('string').str.strip()
-    return normalized.map(style_map).fillna('')
 
 
 def _ensure_styler_capacity(df):
@@ -54,52 +33,91 @@ def _ensure_styler_capacity(df):
         pd.set_option('styler.render.max_elements', required_elements)
 
 
-def style_execution_table(df):
-    """为执行表的核心状态单元格添加运营提示底色。"""
+def top_category_product_mask(
+        df,
+        category_limit=TOP_CATEGORY_LIMIT,
+        product_limit=TOP_PRODUCT_LIMIT):
+    """返回品类 GMV Top N 内、每品类单品 GMV Top N 的行掩码。"""
+    mask = pd.Series(False, index=df.index, dtype=bool)
+    if (
+            df is None
+            or df.empty
+            or category_limit <= 0
+            or product_limit <= 0
+            or not {'淘宝类目', 'GMV'}.issubset(df.columns)):
+        return mask
+
+    work = pd.DataFrame({
+        '_category': df['淘宝类目'].astype('string').fillna('').str.strip(),
+        '_gmv': pd.to_numeric(df['GMV'], errors='coerce').fillna(0.0),
+        '_position': range(len(df)),
+    }, index=df.index)
+    eligible = work['_category'].ne('') & work['_gmv'].gt(0)
+    if not eligible.any():
+        return mask
+
+    category_totals = (
+        work.loc[eligible]
+        .groupby('_category', sort=False)['_gmv']
+        .sum()
+        .sort_values(ascending=False, kind='mergesort')
+    )
+    top_categories = category_totals.head(category_limit).index
+    selected_positions = (
+        work.loc[eligible & work['_category'].isin(top_categories)]
+        .sort_values(
+            ['_category', '_gmv', '_position'],
+            ascending=[True, False, True],
+            kind='mergesort',
+        )
+        .groupby('_category', sort=False)
+        .head(product_limit)['_position']
+        .to_numpy()
+    )
+    mask.iloc[selected_positions] = True
+    return mask
+
+
+def _top_product_style_frame(df, ranking_df=None):
+    ranking_source = df if ranking_df is None else ranking_df
+    ranking_mask = top_category_product_mask(ranking_source)
+    if ranking_source is df:
+        row_mask = ranking_mask.to_numpy()
+    else:
+        highlighted_indices = ranking_source.index[ranking_mask]
+        row_mask = df.index.isin(highlighted_indices)
+
+    styles = pd.DataFrame('', index=df.index, columns=df.columns)
+    if row_mask.any():
+        styles.iloc[row_mask, :] = TOP_PRODUCT_STYLE
+    return styles
+
+
+def style_execution_table(df, ranking_df=None):
+    """仅为销售 Top15 品类内、各品类 Top50 单品添加整行底色。"""
     _ensure_styler_capacity(df)
     styler = df.style
-    metric_columns = [column for column in METRIC_STATUS_COLUMNS if column in df.columns]
-    if metric_columns:
-        styler = styler.apply(
-            _map_status_background,
-            style_map=METRIC_STATUS_STYLES,
-            subset=metric_columns,
-        )
-    if '可售天数状态' in df.columns:
-        styler = styler.apply(
-            _map_status_background,
-            style_map=SELLABLE_DAYS_STATUS_STYLES,
-            subset=['可售天数状态'],
-        )
+    styles = _top_product_style_frame(df, ranking_df=ranking_df)
+    if not styles.eq('').all().all():
+        styler = styler.apply(lambda _: styles, axis=None)
     return styler
 
 
 def _write_execution_sheet(writer, df):
-    """写入执行表，并将页面状态底色同步到 Excel。"""
+    """写入执行表，并将页面 Top 单品整行底色同步到 Excel。"""
     frame = execution_export_frame(df)
     frame.to_excel(writer, sheet_name=EXECUTION_SHEET, index=False)
 
     workbook = writer.book
     worksheet = writer.sheets[EXECUTION_SHEET]
-    formats = {
-        color: workbook.add_format({'bg_color': color, 'pattern': 1})
-        for color in (LIGHT_BLUE_BACKGROUND, LIGHT_PINK_BACKGROUND)
-    }
-    column_color_maps = {
-        **{
-            column: METRIC_STATUS_BACKGROUND_COLORS
-            for column in METRIC_STATUS_COLUMNS
-        },
-        '可售天数状态': SELLABLE_DAYS_STATUS_BACKGROUND_COLORS,
-    }
-    for column, color_map in column_color_maps.items():
-        if column not in frame.columns:
-            continue
-        column_index = frame.columns.get_loc(column)
-        for excel_row, value in enumerate(frame[column], start=1):
-            color = color_map.get(str(value).strip())
-            if color:
-                worksheet.write(excel_row, column_index, value, formats[color])
+    highlight_format = workbook.add_format({
+        'bg_color': TOP_PRODUCT_BACKGROUND,
+        'font_color': TOP_PRODUCT_TEXT_COLOR,
+        'pattern': 1,
+    })
+    for excel_row, highlighted in enumerate(top_category_product_mask(frame), start=1):
+        if highlighted:
+            worksheet.set_row(excel_row, None, highlight_format)
 
     return frame
 

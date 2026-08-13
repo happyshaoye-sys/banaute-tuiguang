@@ -1410,11 +1410,15 @@ with tab4:
     if action_filter: active_filters.append(f"操作={action_filter}")
     st.caption(f"筛选结果: {len(filtered)} 条"
                + (f"　|　生效筛选: {'; '.join(active_filters)}" if active_filters else ""))
+    st.caption(
+        "浅黄底色：当前周期 GMV Top15 品类内，各品类 GMV Top50 单品"
+        "（仅 GMV>0）；排名基于完整执行表，不随搜索、等级或操作筛选变化。"
+    )
 
     # 显示列(按 EXPORT_COLS 固定顺序取勾选交集)
     show_cols = [c for c in all_cols if c in st.session_state["exec_cols_pref"]] or all_cols
     st.dataframe(
-        style_execution_table(filtered[show_cols]),
+        style_execution_table(filtered[show_cols], ranking_df=execution_df),
         width="stretch",
         hide_index=True,
         height=600,

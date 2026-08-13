@@ -1,4 +1,4 @@
-"""Regression tests for execution-table status background colors."""
+"""Regression tests for execution-table top-product row highlighting."""
 import io
 import unittest
 
@@ -7,11 +7,12 @@ from openpyxl import load_workbook
 
 from core.exporter import (
     EXECUTION_SHEET,
-    LIGHT_BLUE_BACKGROUND,
-    LIGHT_PINK_BACKGROUND,
+    TOP_PRODUCT_BACKGROUND,
+    TOP_PRODUCT_TEXT_COLOR,
     export_all_sheets,
     export_execution_table,
     style_execution_table,
+    top_category_product_mask,
 )
 
 
@@ -36,89 +37,108 @@ class ExecutionTableStyleTests(unittest.TestCase):
         finally:
             pd.set_option('styler.render.max_elements', original_limit)
 
-    def test_requested_statuses_receive_their_background_colors(self):
+    @staticmethod
+    def _ranking_source():
+        rows = []
+        for category_number in range(16):
+            category = f'C{category_number:02d}'
+            category_base = (16 - category_number) * 10000
+            for product_number in range(51):
+                rows.append({
+                    '宝贝ID': f'{category}-{product_number:02d}',
+                    '淘宝类目': category,
+                    'GMV': category_base + 51 - product_number,
+                    '付费': 0,
+                    '链接投产状态': '高' if product_number % 2 == 0 else '低',
+                })
+        rows.append({
+            '宝贝ID': 'zero',
+            '淘宝类目': 'C00',
+            'GMV': 0,
+            '付费': 0,
+            '链接投产状态': '高',
+        })
+        return pd.DataFrame(rows)
+
+    def test_only_top_15_categories_top_50_positive_products_are_selected(self):
+        source = self._ranking_source()
+
+        mask = top_category_product_mask(source)
+
+        self.assertEqual(int(mask.sum()), 15 * 50)
+        self.assertTrue(mask.iloc[0])
+        self.assertTrue(mask.iloc[49])
+        self.assertFalse(mask.iloc[50])
+        self.assertFalse(mask.iloc[15 * 51])
+        self.assertFalse(mask.iloc[-1])
+
+    def test_selected_products_receive_readable_full_row_style(self):
+        source = self._ranking_source()
+
+        computed = style_execution_table(source)._compute()
+
+        for column_number in range(len(source.columns)):
+            self.assertIn(
+                ('background-color', TOP_PRODUCT_BACKGROUND),
+                computed.ctx[(0, column_number)],
+            )
+            self.assertIn(
+                ('color', TOP_PRODUCT_TEXT_COLOR),
+                computed.ctx[(0, column_number)],
+            )
+        for row_number in (50, 15 * 51, len(source) - 1):
+            for column_number in range(len(source.columns)):
+                self.assertEqual(computed.ctx[(row_number, column_number)], [])
+
+    def test_filtered_display_keeps_full_table_ranking(self):
+        ranking_source = self._ranking_source()
+        filtered = ranking_source.loc[[49, 50], ['链接投产状态']]
+
+        computed = style_execution_table(filtered, ranking_df=ranking_source)._compute()
+
+        self.assertIn(
+            ('background-color', TOP_PRODUCT_BACKGROUND),
+            computed.ctx[(0, 0)],
+        )
+        self.assertEqual(computed.ctx[(1, 0)], [])
+
+    def test_status_values_are_not_colored_without_top_product_rank(self):
         source = pd.DataFrame({
-            '链接投产状态': ['高', '低', '正常'],
-            '推广加购率状态': ['低', '高', '样本不足'],
-            '商品加购率状态': ['高', '低', '正常'],
-            '商品支付转化率状态': ['低', '高', '样本不足'],
-            '可售天数状态': ['紧急', '需关注', '充足'],
+            '宝贝ID': ['1001', '1002'],
+            '链接投产状态': ['高', '低'],
+            '可售天数状态': ['紧急', '需关注'],
         })
 
         computed = style_execution_table(source)._compute()
-        expected = {
-            (0, 0): LIGHT_BLUE_BACKGROUND,
-            (1, 0): LIGHT_PINK_BACKGROUND,
-            (0, 1): LIGHT_PINK_BACKGROUND,
-            (1, 1): LIGHT_BLUE_BACKGROUND,
-            (0, 2): LIGHT_BLUE_BACKGROUND,
-            (1, 2): LIGHT_PINK_BACKGROUND,
-            (0, 3): LIGHT_PINK_BACKGROUND,
-            (1, 3): LIGHT_BLUE_BACKGROUND,
-            (0, 4): LIGHT_PINK_BACKGROUND,
-            (1, 4): LIGHT_BLUE_BACKGROUND,
-        }
 
-        for position, background_color in expected.items():
-            self.assertIn(('background-color', background_color), computed.ctx[position])
+        self.assertEqual(dict(computed.ctx), {})
 
-        for position in ((2, 0), (2, 1), (2, 2), (2, 3), (2, 4)):
-            self.assertEqual(computed.ctx[position], [])
-
-    def test_missing_status_columns_are_ignored(self):
-        source = pd.DataFrame({'宝贝ID': ['1001'], '链接投产状态': ['高']})
-
-        computed = style_execution_table(source)._compute()
-
-        self.assertEqual(computed.data.equals(source), True)
-        self.assertIn(('background-color', '#DDEBF7'), computed.ctx[(0, 1)])
-        self.assertEqual(computed.ctx[(0, 0)], [])
-
-    def test_both_excel_exports_use_the_same_status_background_colors(self):
-        source = pd.DataFrame({
-            '宝贝ID': ['1001', '1002', '1003'],
-            '链接投产状态': ['高', '低', '正常'],
-            '推广加购率状态': ['低', '高', '样本不足'],
-            '商品加购率状态': ['高', '低', '正常'],
-            '商品支付转化率状态': ['低', '高', '样本不足'],
-            '可售天数状态': ['紧急', '需关注', '充足'],
-        })
-        expected = {
-            ('链接投产状态', 2): LIGHT_BLUE_BACKGROUND,
-            ('链接投产状态', 3): LIGHT_PINK_BACKGROUND,
-            ('推广加购率状态', 2): LIGHT_PINK_BACKGROUND,
-            ('推广加购率状态', 3): LIGHT_BLUE_BACKGROUND,
-            ('商品加购率状态', 2): LIGHT_BLUE_BACKGROUND,
-            ('商品加购率状态', 3): LIGHT_PINK_BACKGROUND,
-            ('商品支付转化率状态', 2): LIGHT_PINK_BACKGROUND,
-            ('商品支付转化率状态', 3): LIGHT_BLUE_BACKGROUND,
-            ('可售天数状态', 2): LIGHT_PINK_BACKGROUND,
-            ('可售天数状态', 3): LIGHT_BLUE_BACKGROUND,
-        }
+    def test_both_excel_exports_use_the_same_top_product_row_style(self):
+        source = self._ranking_source()
 
         for export in (export_execution_table, export_all_sheets):
             with self.subTest(export=export.__name__):
                 workbook = load_workbook(io.BytesIO(export(source)))
                 worksheet = workbook[EXECUTION_SHEET]
-                columns = {
-                    cell.value: cell.column
-                    for cell in worksheet[1]
-                }
-                for (column, row), color in expected.items():
-                    cell = worksheet.cell(row=row, column=columns[column])
-                    self.assertEqual(cell.fill.fill_type, 'solid')
-                    self.assertEqual(cell.fill.fgColor.rgb[-6:], color.lstrip('#'))
+                columns = {cell.value: cell.column for cell in worksheet[1]}
 
-                for column in (
-                    '链接投产状态',
-                    '推广加购率状态',
-                    '商品加购率状态',
-                    '商品支付转化率状态',
-                    '可售天数状态',
-                ):
-                    self.assertIsNone(
-                        worksheet.cell(row=4, column=columns[column]).fill.fill_type
-                    )
+                for excel_row in (2, 51):
+                    for column in ('宝贝ID', '淘宝类目', 'GMV', '链接投产状态'):
+                        cell = worksheet.cell(row=excel_row, column=columns[column])
+                        self.assertEqual(cell.fill.fill_type, 'solid')
+                        self.assertEqual(
+                            cell.fill.fgColor.rgb[-6:],
+                            TOP_PRODUCT_BACKGROUND.lstrip('#'),
+                        )
+                        self.assertEqual(
+                            cell.font.color.rgb[-6:],
+                            TOP_PRODUCT_TEXT_COLOR.lstrip('#'),
+                        )
+
+                for excel_row in (52, 15 * 51 + 2, len(source) + 1):
+                    for column in ('宝贝ID', '链接投产状态'):
+                        cell = worksheet.cell(row=excel_row, column=columns[column])
+                        self.assertIsNone(cell.fill.fill_type)
 
 
 if __name__ == '__main__':

@@ -16,7 +16,7 @@ class VersionContractTests(unittest.TestCase):
     def test_version_json_is_the_application_identity(self):
         info = json.loads((ROOT / "VERSION.json").read_text(encoding="utf-8"))
         self.assertEqual(info["product"], "MetoX")
-        self.assertEqual(info["version"], "2.21")
+        self.assertEqual(info["version"], "2.22")
         self.assertEqual(info["release_date"], "2026-08-13")
         self.assertEqual(info["external_strategy_version"], "v9.3")
         self.assertEqual(info["rule_versions"]["refund_risk"], "2026-08-02")
@@ -45,10 +45,10 @@ class VersionContractTests(unittest.TestCase):
         self.assertEqual(info["rule_versions"]["strict_same_group_baseline"], "2026-08-07")
         self.assertEqual(info["rule_versions"]["sellable_days_status"], "2026-08-09")
         self.assertEqual(info["rule_versions"]["first_run_email_prompt"], "2026-08-09")
-        self.assertEqual(info["rule_versions"]["execution_status_colors"], "2026-08-13")
         self.assertEqual(info["rule_versions"]["execution_table_styler_capacity"], "2026-08-13")
+        self.assertEqual(info["rule_versions"]["execution_top_category_products"], "2026-08-13")
         self.assertEqual(version.VERSION_INFO, info)
-        self.assertEqual(version.DISPLAY_VERSION, "MetoX v2.21")
+        self.assertEqual(version.DISPLAY_VERSION, "MetoX v2.22")
 
     def test_app_imports_version_instead_of_assigning_one(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
@@ -71,12 +71,12 @@ class VersionContractTests(unittest.TestCase):
 
     def test_current_operator_documents_show_v2_contract(self):
         documents = {
-            "README.md": "MetoX v2.21",
-            "README_离线使用说明.txt": "MetoX v2.21",
-            "第三方使用说明_先看这个.txt": "MetoX v2.21",
-            "半自动推广工具_数据源与指标说明.md": "MetoX v2.21",
-            "MetoX2.21_使用说明与运营操作顺序.md": "MetoX v2.21",
-            "MetoX2.21_新运营培训手册.html": "MetoX2.21",
+            "README.md": "MetoX v2.22",
+            "README_离线使用说明.txt": "MetoX v2.22",
+            "第三方使用说明_先看这个.txt": "MetoX v2.22",
+            "半自动推广工具_数据源与指标说明.md": "MetoX v2.22",
+            "MetoX2.22_使用说明与运营操作顺序.md": "MetoX v2.22",
+            "MetoX2.22_新运营培训手册.html": "MetoX2.22",
         }
         for relative, marker in documents.items():
             with self.subTest(relative=relative):
@@ -90,8 +90,12 @@ class VersionContractTests(unittest.TestCase):
         self.assertIn(">80%", rule_text)
         self.assertIn(">70%", rule_text)
         self.assertIn("40%", rule_text)
-        self.assertIn("#DDEBF7", rule_text)
-        self.assertIn("#FCE4EC", rule_text)
+        self.assertIn("TOP15", rule_text)
+        self.assertIn("TOP50", rule_text)
+        self.assertIn("#FFF2CC", rule_text)
+        self.assertIn("#1F2937", rule_text)
+        self.assertNotIn("#DDEBF7", rule_text)
+        self.assertNotIn("#FCE4EC", rule_text)
         self.assertIn("状态判定", rule_text)
 
     def test_release_packager_replaces_both_versioned_manuals(self):
@@ -116,6 +120,11 @@ class VersionContractTests(unittest.TestCase):
         self.assertIn('path.name.startswith(".env.")', source)
         self.assertIn('"first_run_email_prompt": "disabled"', source)
         self.assertIn('"sellable_days_status":', source)
+        self.assertIn('"execution_top_categories": 15', source)
+        self.assertIn('"execution_top_products_per_category": 50', source)
+        self.assertIn('"execution_top_products_positive_gmv_only": True', source)
+        self.assertIn('"execution_top_product_background": "#FFF2CC"', source)
+        self.assertIn('"execution_top_product_text_color": "#1F2937"', source)
 
 
 if __name__ == "__main__":

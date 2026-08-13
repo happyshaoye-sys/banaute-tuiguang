@@ -1,0 +1,94 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MetoX2.22 半自动推广工具新运营培训手册</title>
+  <style>
+    :root { --ink:#172033; --muted:#667085; --line:#d9e0ea; --blue:#155eef; --soft:#f5f7fb; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--soft); color:var(--ink); font-family:"Microsoft YaHei","PingFang SC",Arial,sans-serif; line-height:1.7; }
+    main { max-width:1100px; margin:32px auto; background:#fff; padding:42px 50px; border-radius:16px; box-shadow:0 10px 30px rgba(16,24,40,.08); }
+    h1 { margin-top:0; font-size:34px; }
+    h2 { margin-top:34px; border-left:5px solid var(--blue); padding-left:12px; }
+    table { width:100%; border-collapse:collapse; margin:14px 0; }
+    th,td { border:1px solid var(--line); padding:10px 12px; text-align:left; vertical-align:top; }
+    th { background:#eef4ff; }
+    code { background:#eef2f7; padding:2px 6px; border-radius:5px; }
+    .note { background:#fff7e8; border:1px solid #fedf89; padding:14px 16px; border-radius:10px; }
+    .good { background:#ecfdf3; border:1px solid #abefc6; padding:14px 16px; border-radius:10px; }
+    .swatch-top { background:#FFF2CC; color:#1F2937; }
+    footer { color:var(--muted); margin-top:40px; font-size:14px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>MetoX2.22 新运营培训手册</h1>
+  <p>发布日期：2026-08-13｜外部策略算法：v9.3（本次未修改）</p>
+
+  <div class="good">v2.22 仅标注销售 TOP15 品类内、各品类 GMV TOP50 单品；使用浅黄整行底色与深色文字，取消状态单元格粉蓝底色。</div>
+
+  <h2>执行表 TOP 单品底色</h2>
+  <table>
+    <thead><tr><th>筛选层级</th><th>口径</th><th>呈现</th></tr></thead>
+    <tbody>
+      <tr><td>品类</td><td>当前周期、完整执行表按淘宝类目汇总 GMV 取 TOP15</td><td rowspan="2" class="swatch-top">整行浅黄 #FFF2CC<br>深色文字 #1F2937</td></tr>
+      <tr><td>单品</td><td>每个入选品类内，按单品 GMV 降序取 TOP50，且 GMV&gt;0</td></tr>
+    </tbody>
+  </table>
+  <p class="note">搜索、等级筛选、操作筛选或隐藏列不会改变 TOP15/TOP50 排名。所有状态单元格不再单独填色。</p>
+  <h2>延续的执行表字段顺序</h2>
+  <ul>
+    <li>缺少的<code>商品动作</code>会自动补为空白人工记录列。</li>
+    <li>清单中重复的<code>推广动作</code>只保留首次位置，避免同名表头。</li>
+    <li>原<code>操作</code>列不再展示或导出；内部字段与筛选逻辑不变。</li>
+    <li>页面、执行表Excel和全部Sheet Excel使用同一字段顺序。</li>
+  </ul>
+
+  <h2>一、规则文档在哪里</h2>
+  <ol>
+    <li>在执行表页点击“生成执行表Excel”或“生成全部Sheet Excel”。</li>
+    <li>下载并打开文件。</li>
+    <li>切换到工作表<code>指标状态规则</code>。</li>
+    <li>按状态字段、指标口径、基准或参考线、判定标准、特殊情况、运营解释逐项复核。</li>
+  </ol>
+
+  <h2>品类表格如何一键复制</h2>
+  <ol>
+    <li>进入“品类分析”，将鼠标移到“品类投放占比与ROI”表格右上角。</li>
+    <li>点击新增的“一键复制”图标；复制成功后图标会短暂显示完成反馈。</li>
+    <li>在Excel中直接粘贴，首行为表头，后续为当前表格全部行。</li>
+  </ol>
+
+  <h2>二、五项状态怎么判断</h2>
+  <table>
+    <thead><tr><th>状态字段</th><th>计算口径</th><th>判定</th></tr></thead>
+    <tbody>
+      <tr><td>链接投产状态</td><td>GMV÷付费；退款后GSV=GMV×(1-退款率)</td><td>退款后销售成本=退款后GSV÷件单价×成本价；盈亏平衡线=GMV÷可投放毛利额；高线=max(盈亏平衡线×1.2，同组28日P75)</td></tr>
+      <tr><td>商品支付转化率状态</td><td>支付买家数÷商品访客数</td><td>相对同组基准B：≥1.2B高；0.8B≤指标&lt;1.2B正常；&lt;0.8B低</td></tr>
+      <tr><td>商品加购率状态</td><td>商品加购件数÷商品访客数</td><td>同上</td></tr>
+      <tr><td>可售天数状态</td><td>在仓库存÷日销7</td><td>&lt;14紧急；14≤天数&lt;28需关注；28≤天数≤40充足；&gt;40积压</td></tr>
+      <tr><td>推广加购率状态</td><td>推广加购件数÷推广访客数</td><td>相对同组基准B：≥1.2B高；0.8B≤指标&lt;1.2B正常；&lt;0.8B低</td></tr>
+    </tbody>
+  </table>
+  <p class="note">同组必须同时满足当前所选店铺、同淘宝类目、同价格段，不跨组回退。商品或推广访客不足100时显示“样本不足”；链接状态缺退款率时也显示“样本不足”，且不使用链接实际投产过滤。</p>
+
+  <h2>三、如何判断承接与推广效率</h2>
+  <ul>
+    <li>商品加购率、商品支付转化率均高：商品承接好，可以结合库存与利润评估放量。</li>
+    <li>商品承接正常或高，但推广加购率低：推广流量质量偏低，优先检查定向、素材和渠道结构。</li>
+    <li>推广加购率高，但商品支付转化率低：流量有兴趣但成交承接弱，检查价格、详情、评价、优惠和库存。</li>
+    <li>链接投产低：先确认盈亏平衡线，再结合退款风险决定控投或优化。</li>
+    <li>可售天数紧急：优先确认补货交期，防止放量后断货。</li>
+  </ul>
+
+  <h2>四、默认数据路径</h2>
+  <p>商品映射默认优先读取：<code>\\10.1.22.253\天猫mark\mark0706啊\聚水潭</code></p>
+
+  <h2>五、版本边界</h2>
+  <p>本版仅调整执行表页面与Excel的底色标注对象；外部v9.3策略、状态判定、指标公式、字段顺序、计算结果、既有MetoX动作、渠道动作和商品-计划动作均未修改。</p>
+
+  <footer>MetoX2.22｜半自动推广工具新运营培训手册</footer>
+</main>
+</body>
+</html>

@@ -139,6 +139,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.metric_status_rule_export")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("execution_table_styler_capacity"):
         errors.append("VERSION.json must record rule_versions.execution_table_styler_capacity")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("execution_top_category_products"):
+        errors.append("VERSION.json must record rule_versions.execution_top_category_products")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()
@@ -283,6 +285,23 @@ def check_release(require_release_branch: bool = False) -> list[str]:
             errors.append(f"metric status rule export contract missing: {snippet}")
     if "CATEGORY_INVESTMENT_SHEET = '品类投放占比与ROI'" not in exporter:
         errors.append("Excel exports must include the category investment and ROI sheet")
+    for snippet in (
+        'TOP_CATEGORY_LIMIT = 15',
+        'TOP_PRODUCT_LIMIT = 50',
+        "TOP_PRODUCT_BACKGROUND = '#FFF2CC'",
+        "TOP_PRODUCT_TEXT_COLOR = '#1F2937'",
+        'def top_category_product_mask(',
+        "work['_gmv'].gt(0)",
+        'worksheet.set_row(excel_row, None, highlight_format)',
+    ):
+        if snippet not in exporter:
+            errors.append(f"execution top-category product highlight contract missing: {snippet}")
+    for removed_snippet in (
+        'METRIC_STATUS_BACKGROUND_COLORS',
+        'SELLABLE_DAYS_STATUS_BACKGROUND_COLORS',
+    ):
+        if removed_snippet in exporter:
+            errors.append(f"superseded status-cell background contract must be removed: {removed_snippet}")
 
     for relative_template, marker_template in CURRENT_DOCS.items():
         relative = relative_template.format(version=version)

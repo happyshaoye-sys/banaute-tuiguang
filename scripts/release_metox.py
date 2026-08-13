@@ -257,6 +257,11 @@ def build_release(baseline: Path, launcher_runtime: Path, output_root: Path) -> 
                 "refund_action": "scale actions downgrade to 待优化",
                 "p1_p4_low_refund": "<40% unchanged",
                 "sellable_days_status": "<14 urgent; 14-<28 attention; 28-40 sufficient; >40 overstock",
+                "execution_top_categories": 15,
+                "execution_top_products_per_category": 50,
+                "execution_top_products_positive_gmv_only": True,
+                "execution_top_product_background": "#FFF2CC",
+                "execution_top_product_text_color": "#1F2937",
             },
             "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         }
