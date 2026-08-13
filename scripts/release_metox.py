@@ -46,7 +46,24 @@ REQUIRED_PATHS = (
     "启动MetoX半自动推广工具.bat",
     "第三方使用说明_先看这个.txt",
 )
-FORBIDDEN_NAMES = {".git", ".env", ".agents", "cache", "cache_result", "__pycache__"}
+FORBIDDEN_NAMES = {
+    ".git",
+    ".env",
+    ".agents",
+    "cache",
+    "cache_result",
+    "__pycache__",
+    "secrets.toml",
+}
+FORBIDDEN_SUFFIXES = {".pyc", ".log"}
+
+
+def _is_forbidden_path(path: Path) -> bool:
+    return (
+        path.name in FORBIDDEN_NAMES
+        or path.name.startswith(".env.")
+        or path.suffix.lower() in FORBIDDEN_SUFFIXES
+    )
 
 
 def _run(command: list[str]) -> None:
@@ -70,7 +87,7 @@ def _git_commit() -> str:
 def _ignore(_directory: str, names: list[str]) -> set[str]:
     ignored = set()
     for name in names:
-        if name in FORBIDDEN_NAMES or name.endswith(".pyc"):
+        if _is_forbidden_path(Path(name)):
             ignored.add(name)
     return ignored
 
@@ -122,7 +139,7 @@ def _audit(
 
     forbidden = []
     for path in stage.rglob("*"):
-        if path.name in FORBIDDEN_NAMES or path.suffix == ".pyc":
+        if _is_forbidden_path(path):
             forbidden.append(str(path.relative_to(stage)))
     if forbidden:
         raise RuntimeError("release contains forbidden paths: " + ", ".join(forbidden[:20]))

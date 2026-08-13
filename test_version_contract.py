@@ -110,6 +110,9 @@ class VersionContractTests(unittest.TestCase):
         self.assertIn("args.output_root.absolute()", source)
         self.assertNotIn("args.launcher_runtime.resolve()", source)
         self.assertIn('".agents"', source)
+        self.assertIn('"secrets.toml"', source)
+        self.assertIn('FORBIDDEN_SUFFIXES = {".pyc", ".log"}', source)
+        self.assertIn('path.name.startswith(".env.")', source)
         self.assertIn('"first_run_email_prompt": "disabled"', source)
         self.assertIn('"sellable_days_status":', source)
 
