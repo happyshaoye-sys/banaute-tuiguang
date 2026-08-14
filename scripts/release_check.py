@@ -290,20 +290,25 @@ def check_release(require_release_branch: bool = False) -> list[str]:
     for snippet in (
         'TOP_CATEGORY_LIMIT = 15',
         'TOP_PRODUCT_LIMIT = 50',
-        "TOP_PRODUCT_BACKGROUND = '#FFF2CC'",
-        "TOP_PRODUCT_TEXT_COLOR = '#1F2937'",
         "STATUS_HIGH_BACKGROUND = '#DDEBF7'",
         "STATUS_LOW_BACKGROUND = '#FCE4EC'",
+        "STATUS_TEXT_COLOR = '#1F2937'",
         'STATUS_BACKGROUND_BY_COLUMN = {',
         'def top_category_product_mask(',
         'def _top_product_row_mask(',
         "work['_gmv'].gt(0)",
-        'worksheet.set_row(excel_row, None, highlight_format)',
         'worksheet.write(',
         'ranking_df=ranking_df',
     ):
         if snippet not in exporter:
             errors.append(f"execution top-category product highlight contract missing: {snippet}")
+    for forbidden in (
+        'TOP_PRODUCT_BACKGROUND',
+        'TOP_PRODUCT_STYLE',
+        'worksheet.set_row(excel_row, None, highlight_format)',
+    ):
+        if forbidden in exporter:
+            errors.append(f"execution non-status cells must remain unfilled: {forbidden}")
 
     for relative_template, marker_template in CURRENT_DOCS.items():
         relative = relative_template.format(version=version)

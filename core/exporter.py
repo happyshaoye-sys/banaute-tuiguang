@@ -17,14 +17,9 @@ CATEGORY_INVESTMENT_COLUMNS = [
 EXECUTION_SHEET = '商品推广执行表'
 TOP_CATEGORY_LIMIT = 15
 TOP_PRODUCT_LIMIT = 50
-TOP_PRODUCT_BACKGROUND = '#FFF2CC'
-TOP_PRODUCT_TEXT_COLOR = '#1F2937'
-TOP_PRODUCT_STYLE = (
-    f'background-color: {TOP_PRODUCT_BACKGROUND}; '
-    f'color: {TOP_PRODUCT_TEXT_COLOR}'
-)
 STATUS_HIGH_BACKGROUND = '#DDEBF7'
 STATUS_LOW_BACKGROUND = '#FCE4EC'
+STATUS_TEXT_COLOR = '#1F2937'
 STATUS_BACKGROUND_BY_COLUMN = {
     '链接投产状态': {
         '高': STATUS_HIGH_BACKGROUND,
@@ -105,7 +100,7 @@ def top_category_product_mask(
 def _style_for_background(background):
     return (
         f'background-color: {background}; '
-        f'color: {TOP_PRODUCT_TEXT_COLOR}'
+        f'color: {STATUS_TEXT_COLOR}'
     )
 
 
@@ -133,7 +128,6 @@ def _top_product_style_frame(df, ranking_df=None):
     row_mask = _top_product_row_mask(df, ranking_df=ranking_df)
     styles = pd.DataFrame('', index=df.index, columns=df.columns)
     if row_mask.any():
-        styles.loc[row_mask, :] = TOP_PRODUCT_STYLE
         highlighted_index = row_mask[row_mask].index
         for column, color_map in STATUS_BACKGROUND_BY_COLUMN.items():
             if column not in df.columns:
@@ -147,7 +141,7 @@ def _top_product_style_frame(df, ranking_df=None):
 
 
 def style_execution_table(df, ranking_df=None):
-    """仅为销售 Top15 品类内、各品类 Top50 单品添加底色。"""
+    """仅为销售 Top15 品类内、各品类 Top50 单品的目标状态格着色。"""
     _ensure_styler_capacity(df)
     styler = df.style
     styles = _top_product_style_frame(df, ranking_df=ranking_df)
@@ -157,21 +151,16 @@ def style_execution_table(df, ranking_df=None):
 
 
 def _write_execution_sheet(writer, df, ranking_df=None):
-    """写入执行表，并将页面 Top 单品底色同步到 Excel。"""
+    """写入执行表，并将页面 Top 单品状态格底色同步到 Excel。"""
     frame = execution_export_frame(df)
     frame.to_excel(writer, sheet_name=EXECUTION_SHEET, index=False)
 
     workbook = writer.book
     worksheet = writer.sheets[EXECUTION_SHEET]
-    highlight_format = workbook.add_format({
-        'bg_color': TOP_PRODUCT_BACKGROUND,
-        'font_color': TOP_PRODUCT_TEXT_COLOR,
-        'pattern': 1,
-    })
     status_formats = {
         background: workbook.add_format({
             'bg_color': background,
-            'font_color': TOP_PRODUCT_TEXT_COLOR,
+            'font_color': STATUS_TEXT_COLOR,
             'pattern': 1,
         })
         for background in {STATUS_HIGH_BACKGROUND, STATUS_LOW_BACKGROUND}
@@ -182,7 +171,6 @@ def _write_execution_sheet(writer, df, ranking_df=None):
     for row_position, highlighted in enumerate(top_product_mask):
         excel_row = row_position + 1
         if highlighted:
-            worksheet.set_row(excel_row, None, highlight_format)
             for column in STATUS_BACKGROUND_BY_COLUMN:
                 if column not in column_positions:
                     continue

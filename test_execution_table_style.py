@@ -1,4 +1,4 @@
-"""Regression tests for execution-table top-product row highlighting."""
+"""Regression tests for execution-table Top-product status-cell highlighting."""
 import io
 import unittest
 
@@ -9,8 +9,7 @@ from core.exporter import (
     EXECUTION_SHEET,
     STATUS_HIGH_BACKGROUND,
     STATUS_LOW_BACKGROUND,
-    TOP_PRODUCT_BACKGROUND,
-    TOP_PRODUCT_TEXT_COLOR,
+    STATUS_TEXT_COLOR,
     export_all_sheets,
     export_execution_table,
     style_execution_table,
@@ -90,7 +89,7 @@ class ExecutionTableStyleTests(unittest.TestCase):
         self.assertFalse(mask.iloc[15 * 51])
         self.assertFalse(mask.iloc[-1])
 
-    def test_selected_products_receive_readable_full_row_style(self):
+    def test_selected_products_do_not_receive_full_row_style(self):
         source = self._ranking_source()
 
         computed = style_execution_table(source)._compute()
@@ -98,19 +97,12 @@ class ExecutionTableStyleTests(unittest.TestCase):
         for column_number, column in enumerate(source.columns):
             if column in self.STATUS_COLUMNS:
                 continue
-            self.assertIn(
-                ('background-color', TOP_PRODUCT_BACKGROUND),
-                computed.ctx[(0, column_number)],
-            )
-            self.assertIn(
-                ('color', TOP_PRODUCT_TEXT_COLOR),
-                computed.ctx[(0, column_number)],
-            )
+            self.assertEqual(computed.ctx[(0, column_number)], [])
         for row_number in (50, 15 * 51, len(source) - 1):
             for column_number in range(len(source.columns)):
                 self.assertEqual(computed.ctx[(row_number, column_number)], [])
 
-    def test_top_product_status_cells_override_row_style_with_readable_colors(self):
+    def test_top_product_status_cells_receive_readable_colors(self):
         source = self._ranking_source()
 
         computed = style_execution_table(source)._compute()
@@ -126,7 +118,7 @@ class ExecutionTableStyleTests(unittest.TestCase):
         for column, background in expected.items():
             cell_style = computed.ctx[(0, columns[column])]
             self.assertIn(('background-color', background), cell_style)
-            self.assertIn(('color', TOP_PRODUCT_TEXT_COLOR), cell_style)
+            self.assertIn(('color', STATUS_TEXT_COLOR), cell_style)
 
         opposite_expected = {
             '链接投产状态': STATUS_LOW_BACKGROUND,
@@ -138,7 +130,7 @@ class ExecutionTableStyleTests(unittest.TestCase):
         for column, background in opposite_expected.items():
             cell_style = computed.ctx[(1, columns[column])]
             self.assertIn(('background-color', background), cell_style)
-            self.assertIn(('color', TOP_PRODUCT_TEXT_COLOR), cell_style)
+            self.assertIn(('color', STATUS_TEXT_COLOR), cell_style)
 
     def test_filtered_display_keeps_full_table_ranking(self):
         ranking_source = self._ranking_source()
@@ -151,7 +143,7 @@ class ExecutionTableStyleTests(unittest.TestCase):
             computed.ctx[(0, 0)],
         )
         self.assertIn(
-            ('color', TOP_PRODUCT_TEXT_COLOR),
+            ('color', STATUS_TEXT_COLOR),
             computed.ctx[(0, 0)],
         )
         self.assertEqual(computed.ctx[(1, 0)], [])
@@ -167,7 +159,7 @@ class ExecutionTableStyleTests(unittest.TestCase):
 
         self.assertEqual(dict(computed.ctx), {})
 
-    def test_unmapped_status_values_keep_top_product_row_style(self):
+    def test_unmapped_status_values_remain_unfilled(self):
         source = pd.DataFrame([{
             '宝贝ID': '1001',
             '淘宝类目': 'C00',
@@ -184,16 +176,9 @@ class ExecutionTableStyleTests(unittest.TestCase):
 
         for column in self.STATUS_COLUMNS:
             column_number = source.columns.get_loc(column)
-            self.assertIn(
-                ('background-color', TOP_PRODUCT_BACKGROUND),
-                computed.ctx[(0, column_number)],
-            )
-            self.assertIn(
-                ('color', TOP_PRODUCT_TEXT_COLOR),
-                computed.ctx[(0, column_number)],
-            )
+            self.assertEqual(computed.ctx[(0, column_number)], [])
 
-    def test_both_excel_exports_use_the_same_top_product_row_and_status_style(self):
+    def test_both_excel_exports_only_fill_top_product_status_cells(self):
         source = self._ranking_source()
 
         for export in (export_execution_table, export_all_sheets):
@@ -205,15 +190,7 @@ class ExecutionTableStyleTests(unittest.TestCase):
                 for excel_row in (2, 51):
                     for column in ('宝贝ID', '淘宝类目', 'GMV'):
                         cell = worksheet.cell(row=excel_row, column=columns[column])
-                        self.assertEqual(cell.fill.fill_type, 'solid')
-                        self.assertEqual(
-                            cell.fill.fgColor.rgb[-6:],
-                            TOP_PRODUCT_BACKGROUND.lstrip('#'),
-                        )
-                        self.assertEqual(
-                            cell.font.color.rgb[-6:],
-                            TOP_PRODUCT_TEXT_COLOR.lstrip('#'),
-                        )
+                        self.assertIsNone(cell.fill.fill_type)
 
                 expected_row_2_statuses = {
                     '链接投产状态': STATUS_HIGH_BACKGROUND,
@@ -241,7 +218,7 @@ class ExecutionTableStyleTests(unittest.TestCase):
                         )
                         self.assertEqual(
                             cell.font.color.rgb[-6:],
-                            TOP_PRODUCT_TEXT_COLOR.lstrip('#'),
+                            STATUS_TEXT_COLOR.lstrip('#'),
                         )
 
                 for excel_row in (52, 15 * 51 + 2, len(source) + 1):
@@ -269,7 +246,7 @@ class ExecutionTableStyleTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     selected_cell.font.color.rgb[-6:],
-                    TOP_PRODUCT_TEXT_COLOR.lstrip('#'),
+                    STATUS_TEXT_COLOR.lstrip('#'),
                 )
 
                 excluded_cell = worksheet.cell(row=3, column=columns['链接投产状态'])
