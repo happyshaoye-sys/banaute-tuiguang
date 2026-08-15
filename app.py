@@ -15,7 +15,20 @@ from core.data_validation import (
     DataValidationIssue,
     validate_paid_plan_consistency,
 )
-from core.merge import build_shared_dimensions, merge_sources
+from core.daily_cache import (
+    dataset_cache_key,
+    load_daily_fact_cache,
+    load_shared_dimension_cache,
+    save_daily_fact_cache,
+    save_shared_dimension_cache,
+    source_fingerprint,
+)
+from core.merge import (
+    build_daily_facts,
+    build_shared_dimensions,
+    merge_daily_facts,
+    merge_sources,
+)
 from core.periods import (
     aggregate_category_metrics,
     aggregate_period_frame,
@@ -123,15 +136,18 @@ def _load_day_raw_cached(fp, src_type, parsed_cache_dir=None, _mtime=None):
 
 def _read_sources_for_date(
     biz_folder, wujie_folder, product_folder, cache_dir, period_label,
-    include_product=True,
+    include_product=True, file_list=None,
 ):
     """读取一天的源文件（使用文件级缓存，不重复解析）"""
     sources = {}
     files_info = []
     copied = 0
-    file_list = _scan_target_files(biz_folder) + _scan_target_files(wujie_folder)
-    if include_product:
-        file_list += _scan_target_files(product_folder)
+    if file_list is None:
+        file_list = _scan_target_files(biz_folder) + _scan_target_files(wujie_folder)
+        if include_product:
+            file_list += _scan_target_files(product_folder)
+    else:
+        file_list = list(file_list)
 
     for fp, fn, src_type in file_list:
         local_fp, did_copy = _copy_file_to_cache(fp, cache_dir)
@@ -156,11 +172,39 @@ def _read_sources_for_date(
 
 
 def _load_shared_dimensions(product_folder, cache_root, jst_entry=None,
-                            jst_refund_entry=None):
+                            jst_refund_entry=None, extra_fingerprint_entries=None):
     """一次加载并预聚合周期内每天共用的商品资料、库存和退款率维度。"""
+    product_file_list = _scan_target_files(product_folder)
+    extra_fingerprint_entries = list(extra_fingerprint_entries or [])
+    fingerprint_entries = [
+        (fp, src_type) for fp, _fn, src_type in product_file_list
+    ] + extra_fingerprint_entries
+    extra_types = {source_type for _path, source_type in extra_fingerprint_entries}
+    cacheable = bool(fingerprint_entries)
+    if jst_entry is not None and 'jst_stock_snapshot' not in extra_types:
+        cacheable = False
+    if jst_refund_entry is not None and 'jst_refund_snapshot' not in extra_types:
+        cacheable = False
+
+    dimension_fingerprint = None
+    if cacheable:
+        try:
+            dimension_fingerprint = source_fingerprint(fingerprint_entries)
+            cached = load_shared_dimension_cache(
+                cache_root, fingerprint_entries,
+                expected_fingerprint=dimension_fingerprint,
+            )
+        except Exception:
+            cached = None
+            cacheable = False
+        if cached is not None:
+            info = [dict(item) for item in cached['files_info']]
+            return cached['dimensions'], (info, 0, cached['total_files'])
+
     sources, info, copied, total = _read_sources_for_date(
         None, None, product_folder, Path(cache_root) / '_shared_dimensions',
         '共享维度', include_product=True,
+        file_list=product_file_list,
     )
     sources = {
         src: entries for src, entries in sources.items()
@@ -192,52 +236,118 @@ def _load_shared_dimensions(product_folder, cache_root, jst_entry=None,
                      'period': '共享维度'})
         total += 1
 
-    return build_shared_dimensions(sources), (info, copied, total)
+    dimensions = build_shared_dimensions(sources)
+    if cacheable:
+        try:
+            fingerprint_after_load = source_fingerprint(fingerprint_entries)
+            if fingerprint_after_load == dimension_fingerprint:
+                save_shared_dimension_cache(
+                    cache_root, fingerprint_entries, dimensions, info, total,
+                    verified_fingerprint=dimension_fingerprint,
+                )
+            else:
+                print("[缓存] 共享维度源文件在读取期间发生变化，本次跳过缓存写入")
+        except Exception as exc:
+            print(f"[缓存] 共享维度缓存写入失败，继续使用本次计算结果：{exc}")
+    return dimensions, (info, copied, total)
 
 
 def _load_single_day(base_root, day, year, shop, product_folder, cache_root,
                      include_product, label_prefix, jst_entry=None, jst_refund_entry=None,
-                     shared_dimensions=None, shared_dimension_meta=None):
+                     shared_dimensions=None, shared_dimension_meta=None,
+                     cache_stats=None):
     """加载单日数据：扫描→读文件→合并→返回 day_df"""
     biz_folder, wujie_folder = _build_paths(base_root, day, year, shop)
     if not os.path.isdir(str(biz_folder)) and not os.path.isdir(str(wujie_folder)):
         return None, [], 0, 0, set()
 
     day_cache = cache_root / day
-    sources, info, copied, total = _read_sources_for_date(
-        biz_folder, wujie_folder, product_folder, day_cache,
-        f"{label_prefix}:{day}",
-        include_product=include_product and shared_dimensions is None,
-    )
+    period_label = f"{label_prefix}:{day}"
+    include_day_product = include_product and shared_dimensions is None
+    file_list = _scan_target_files(biz_folder) + _scan_target_files(wujie_folder)
+    if include_day_product:
+        file_list += _scan_target_files(product_folder)
+    fingerprint_entries = [(fp, src_type) for fp, _fn, src_type in file_list]
+    cacheable_facts = shared_dimensions is not None and bool(file_list)
+    fact_fingerprint = None
+    if cacheable_facts:
+        try:
+            fact_fingerprint = source_fingerprint(fingerprint_entries)
+            cached_facts = load_daily_fact_cache(
+                cache_root, day, fingerprint_entries,
+                expected_fingerprint=fact_fingerprint,
+            )
+        except Exception:
+            cached_facts = None
+            cacheable_facts = False
+    else:
+        cached_facts = None
 
-    # 聚水潭快照直连:在仓库存=款式级经营库存(多链接共享同一池)
-    if shared_dimensions is None and include_product and jst_entry is not None:
-        jst_name, jst_df = jst_entry
-        legacy_stock = sources.pop(SOURCE_STOCK, None) or []
-        kept_legacy = []
-        for leg_name, leg_df in legacy_stock:
-            leg = leg_df.copy()
-            # 快照已提供款式级在仓/在途,剥离 legacy 中同名列避免 pid 级加总覆盖
-            for drop_col in ('在仓库存', '在途'):
-                if drop_col in leg.columns:
-                    leg = leg.drop(columns=[drop_col])
-            if len(leg.columns) > 0:
-                kept_legacy.append((leg_name, leg))
-        sources[SOURCE_STOCK] = [(jst_name, jst_df)] + kept_legacy
-        info.append({'name': jst_name, 'source': SOURCE_STOCK,
-                     'rows': len(jst_df), 'cols': len(jst_df.columns),
-                     'period': f'{label_prefix}:{day}'})
+    if cached_facts is not None:
+        base_df = cached_facts['base_df']
+        day_plan_ids = set(cached_facts['plan_ids'])
+        info = [dict(item, period=period_label) for item in cached_facts['files_info']]
+        copied = 0
+        total = cached_facts['total_files']
+        sources = None
+        if cache_stats is not None:
+            cache_stats['hits'] = cache_stats.get('hits', 0) + 1
+    else:
+        if cacheable_facts and cache_stats is not None:
+            cache_stats['misses'] = cache_stats.get('misses', 0) + 1
+        sources, info, copied, total = _read_sources_for_date(
+            biz_folder, wujie_folder, product_folder, day_cache,
+            period_label,
+            include_product=include_day_product,
+            file_list=file_list,
+        )
 
-    # 聚水潭退款率直连:30日 cohort 退款率,注入商品资料源
-    if shared_dimensions is None and include_product and jst_refund_entry is not None:
-        jr_name, jr_df = jst_refund_entry
-        sources.setdefault(SOURCE_PRODUCT_INFO, []).append((jr_name, jr_df))
-        info.append({'name': jr_name, 'source': SOURCE_PRODUCT_INFO,
-                     'rows': len(jr_df), 'cols': len(jr_df.columns),
-                     'period': f'{label_prefix}:{day}'})
+        # 聚水潭快照直连:在仓库存=款式级经营库存(多链接共享同一池)
+        if shared_dimensions is None and include_product and jst_entry is not None:
+            jst_name, jst_df = jst_entry
+            legacy_stock = sources.pop(SOURCE_STOCK, None) or []
+            kept_legacy = []
+            for leg_name, leg_df in legacy_stock:
+                leg = leg_df.copy()
+                # 快照已提供款式级在仓/在途,剥离 legacy 中同名列避免 pid 级加总覆盖
+                for drop_col in ('在仓库存', '在途'):
+                    if drop_col in leg.columns:
+                        leg = leg.drop(columns=[drop_col])
+                if len(leg.columns) > 0:
+                    kept_legacy.append((leg_name, leg))
+            sources[SOURCE_STOCK] = [(jst_name, jst_df)] + kept_legacy
+            info.append({'name': jst_name, 'source': SOURCE_STOCK,
+                         'rows': len(jst_df), 'cols': len(jst_df.columns),
+                         'period': period_label})
 
-    if not sources:
-        return None, info, copied, total, set()
+        # 聚水潭退款率直连:30日 cohort 退款率,注入商品资料源
+        if shared_dimensions is None and include_product and jst_refund_entry is not None:
+            jr_name, jr_df = jst_refund_entry
+            sources.setdefault(SOURCE_PRODUCT_INFO, []).append((jr_name, jr_df))
+            info.append({'name': jr_name, 'source': SOURCE_PRODUCT_INFO,
+                         'rows': len(jr_df), 'cols': len(jr_df.columns),
+                         'period': period_label})
+
+        if not sources:
+            return None, info, copied, total, set()
+
+        if cacheable_facts:
+            base_df, day_plan_ids = build_daily_facts(sources)
+            try:
+                fingerprint_after_load = source_fingerprint(fingerprint_entries)
+                if fingerprint_after_load == fact_fingerprint:
+                    save_daily_fact_cache(
+                        cache_root, day, fingerprint_entries,
+                        base_df, day_plan_ids, info, total,
+                        verified_fingerprint=fact_fingerprint,
+                    )
+                else:
+                    print(f"[缓存] 日源文件在读取期间发生变化，本次跳过缓存写入：{day}")
+            except Exception as exc:
+                print(f"[缓存] 日事实缓存写入失败，继续使用本次计算结果：{day} | {exc}")
+        else:
+            base_df = None
+            day_plan_ids = set()
 
     if include_product and shared_dimension_meta is not None:
         shared_info, shared_copied, shared_total = shared_dimension_meta
@@ -245,7 +355,12 @@ def _load_single_day(base_root, day, year, shop, product_folder, cache_root,
         copied += shared_copied
         total += shared_total
 
-    day_df, day_plan_ids = merge_sources(sources, dimensions=shared_dimensions)
+    if shared_dimensions is not None:
+        day_df, day_plan_ids = merge_daily_facts(
+            base_df, day_plan_ids, shared_dimensions,
+        )
+    else:
+        day_df, day_plan_ids = merge_sources(sources, dimensions=shared_dimensions)
     if day_df is None or len(day_df) == 0:
         return None, info, copied, total, set(day_plan_ids)
 
@@ -341,6 +456,7 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
     # ── 0. 聚水潭快照直连(可选;取分析日快照,缺失回退最近≤7天) ──
     jst_entry = None
     jst_note = None
+    snap_path = None
     if jst_snap_dir:
         t0 = time.perf_counter()
         snap_path, snap_date = find_snapshot(jst_snap_dir, date_str)
@@ -356,6 +472,7 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
 
     jst_refund_entry = None
     jst_refund_note = None
+    refund_path = None
     if jst_refund_dir:
         t0 = time.perf_counter()
         refund_path, refund_date = find_refund_snapshot(jst_refund_dir, date_str)
@@ -370,9 +487,15 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
         else:
             jst_refund_note = f"⚠️ 聚水潭退款率目录中未找到 {date_str} 及其前7天快照,本次退款率列为空(已统一聚水潭口径,不回退生意参谋)"
 
+    dimension_fingerprint_entries = []
+    if snap_path:
+        dimension_fingerprint_entries.append((snap_path, 'jst_stock_snapshot'))
+    if refund_path:
+        dimension_fingerprint_entries.append((refund_path, 'jst_refund_snapshot'))
     shared_dimensions, shared_dimension_meta = _load_shared_dimensions(
         product_folder, cache_root, jst_entry=jst_entry,
         jst_refund_entry=jst_refund_entry,
+        extra_fingerprint_entries=dimension_fingerprint_entries,
     )
 
     periods = build_period_ranges(date_str)
@@ -402,6 +525,7 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
     day_map = {}   # {date: (day_df, info, copied, total, plan_ids)}
     first_day_sources = None  # 本期当天的 sources（用于 includes_product）
     sorted_needed_dates = sorted(all_needed_dates)
+    day_cache_stats = {'hits': 0, 'misses': 0}
     load_progress = st.progress(0, text=f"准备读取 {len(sorted_needed_dates)} 天数据...")
     for idx, day in enumerate(sorted_needed_dates, start=1):
         include_product = (day == date_str)  # 只有本期首日加载商品资料
@@ -410,6 +534,7 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
             include_product, '周期', jst_entry=jst_entry, jst_refund_entry=jst_refund_entry,
             shared_dimensions=shared_dimensions,
             shared_dimension_meta=shared_dimension_meta,
+            cache_stats=day_cache_stats,
         )
         day_map[day] = entry
         if include_product and entry[0] is not None:
@@ -419,7 +544,10 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
             text=f"读取文件中 {idx}/{len(sorted_needed_dates)}：{day}"
         )
     load_progress.empty()
-    _log_time(timings, "批量加载所有日期", t0, f"{len(day_map)} 天")
+    _log_time(
+        timings, "批量加载所有日期", t0,
+        f"{len(day_map)} 天 | 日事实缓存命中 {day_cache_stats['hits']} / 未命中 {day_cache_stats['misses']}",
+    )
 
     # ── 3. 本期当天 ──
     current_days = list(iter_dates(date_str, date_str))
@@ -684,9 +812,8 @@ def _save_column_prefs(cols):
 
 
 def _cache_key(base_root, year, shop, date_str):
-    """生成安全的缓存目录名，避免不同来源数据互相覆盖"""
-    raw = f"{base_root}|{year}|{shop}|{date_str}"
-    return hashlib.md5(raw.encode()).hexdigest()[:16]
+    """按数据集生成稳定缓存目录名，让相邻分析日复用重叠历史日期。"""
+    return dataset_cache_key(base_root, year, shop)
 
 
 def _resolve_v93_report(path, date_str):

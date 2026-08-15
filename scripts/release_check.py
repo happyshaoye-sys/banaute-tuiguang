@@ -18,6 +18,7 @@ PROTECTED_FILES = {
     "core/analysis.py",
     "core/dataframe_clipboard.py",
     "core/data_validation.py",
+    "core/daily_cache.py",
     "core/exporter.py",
     "core/field_mapping.py",
     "core/jst_refund.py",
@@ -143,6 +144,10 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.execution_top_category_products")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("execution_top_status_colors"):
         errors.append("VERSION.json must record rule_versions.execution_top_status_colors")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("daily_fact_cache"):
+        errors.append("VERSION.json must record rule_versions.daily_fact_cache")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("shared_dimension_cache"):
+        errors.append("VERSION.json must record rule_versions.shared_dimension_cache")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()
@@ -211,6 +216,7 @@ def check_release(require_release_branch: bool = False) -> list[str]:
     schema = (ROOT / "core" / "schema.py").read_text(encoding="utf-8")
     loader = (ROOT / "core" / "loader.py").read_text(encoding="utf-8")
     merge = (ROOT / "core" / "merge.py").read_text(encoding="utf-8")
+    daily_cache = (ROOT / "core" / "daily_cache.py").read_text(encoding="utf-8")
     periods = (ROOT / "core" / "periods.py").read_text(encoding="utf-8")
     if "'直接购物车数':'直购数量'" not in schema:
         errors.append("direct-purchase quantity must map from 直接购物车数")
@@ -230,6 +236,16 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("daily direct-purchase cost must be spend divided by quantity")
     if 'grouped["直购成本"] = _ratio_series(spend, grouped["直购数量"])' not in periods:
         errors.append("period direct-purchase cost must be recalculated from period totals")
+    for snippet in (
+        "metox2.25-daily-facts-v1",
+        "metox2.25-shared-dimensions-v1",
+        "os.replace(tmp_path, cache_path)",
+        "verified_fingerprint",
+        "daily fact sources changed before cache write",
+        "shared dimension sources changed before cache write",
+    ):
+        if snippet not in daily_cache:
+            errors.append(f"daily cache safety contract missing: {snippet}")
     if "result_df['商品加购率'] = _safe_div_series(add_cart, visitors)" not in merge:
         errors.append("daily product cart rate must be add-cart quantity divided by product visitors")
     if "result_df['MetoX推广加购件数'], result_df['MetoX推广访客数']" not in merge:

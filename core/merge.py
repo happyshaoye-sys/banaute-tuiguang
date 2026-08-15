@@ -542,11 +542,8 @@ def _finalize_result(base):
     return result_df
 
 
-def merge_sources(sources, dimensions=None):
-    """
-    sources: {source_type: [(filepath, df), ...]}
-    返回: 合并后的执行表 DataFrame
-    """
+def build_daily_facts(sources):
+    """Build the per-day fact frame before shared dimensions/final metrics."""
     product = _product_roi_agg(sources)
     wujie_rows = _filtered_wujie(sources)
     wujie = _wujie_agg(wujie_rows)
@@ -559,19 +556,22 @@ def merge_sources(sources, dimensions=None):
     ).dropna().drop_duplicates()
 
     if base_ids.empty:
-        result = _finalize_result(pd.DataFrame(columns=['宝贝ID']))
-        validate_paid_plan_consistency(result, '每日数据合并')
-        return result, plan_ids
+        return pd.DataFrame(columns=['宝贝ID']), plan_ids
 
     base = base_ids.merge(product, on='宝贝ID', how='left')
     base = base.merge(wujie, on='宝贝ID', how='left', suffixes=('', '_wujie'))
     base = base.merge(promotion_detail, on='宝贝ID', how='left')
+    return base, plan_ids
 
-    dims = dimensions if dimensions is not None else build_shared_dimensions(sources)
-    product_info_by_pid = dims['product_info_by_pid']
-    product_info_by_sku = dims['product_info_by_sku']
-    stock_by_pid = dims['stock_by_pid']
-    stock_by_sku = dims['stock_by_sku']
+
+def merge_daily_facts(base_df, plan_ids, dimensions):
+    """Attach shared dimensions and finalize a cached daily fact frame."""
+    base = base_df.copy(deep=True) if base_df is not None else pd.DataFrame(columns=['宝贝ID'])
+    dims = dimensions or {}
+    product_info_by_pid = dims.get('product_info_by_pid', pd.DataFrame())
+    product_info_by_sku = dims.get('product_info_by_sku', pd.DataFrame())
+    stock_by_pid = dims.get('stock_by_pid', pd.DataFrame())
+    stock_by_sku = dims.get('stock_by_sku', pd.DataFrame())
 
     base = _merge_dimension(base, product_info_by_pid, '宝贝ID', '_info_pid')
     base = _merge_dimension(base, stock_by_pid, '宝贝ID', '_stock_pid')
@@ -607,4 +607,16 @@ def merge_sources(sources, dimensions=None):
 
     result = _finalize_result(base)
     validate_paid_plan_consistency(result, '每日数据合并')
-    return result, plan_ids
+    return result, set(plan_ids or set())
+
+
+def merge_sources(sources, dimensions=None):
+    """
+    sources: {source_type: [(filepath, df), ...]}
+    返回: 合并后的执行表 DataFrame
+    """
+    base, plan_ids = build_daily_facts(sources)
+    dims = dimensions if dimensions is not None else (
+        build_shared_dimensions(sources) if not base.empty else None
+    )
+    return merge_daily_facts(base, plan_ids, dims)
