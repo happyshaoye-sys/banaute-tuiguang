@@ -80,7 +80,10 @@ def _latest_version_tag() -> tuple[str | None, tuple[int, int] | None]:
     return max(tags, key=lambda item: item[1])
 
 
-def check_release(require_release_branch: bool = False) -> list[str]:
+def check_release(
+    require_release_branch: bool = False,
+    allow_same_version_rebuild: bool = False,
+) -> list[str]:
     errors: list[str] = []
     try:
         info = json.loads(VERSION_PATH.read_text(encoding="utf-8"))
@@ -163,7 +166,12 @@ def check_release(require_release_branch: bool = False) -> list[str]:
             if line.strip()
         )
         protected_changed = sorted(changed.intersection(PROTECTED_FILES))
-        if protected_changed and VERSION_RE.fullmatch(version) and _version_tuple(version) <= latest_version:
+        if (
+            protected_changed
+            and not allow_same_version_rebuild
+            and VERSION_RE.fullmatch(version)
+            and _version_tuple(version) <= latest_version
+        ):
             errors.append(
                 f"protected business files changed since {latest_tag} but version {version} was not bumped: "
                 + ", ".join(protected_changed)
@@ -356,9 +364,17 @@ def check_release(require_release_branch: bool = False) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--release", action="store_true", help="also enforce the release branch/tag gate")
+    parser.add_argument(
+        "--allow-same-version-rebuild",
+        action="store_true",
+        help="explicitly allow a dated rebuild without changing the numeric version",
+    )
     args = parser.parse_args()
     try:
-        errors = check_release(require_release_branch=args.release)
+        errors = check_release(
+            require_release_branch=args.release,
+            allow_same_version_rebuild=args.allow_same_version_rebuild,
+        )
     except Exception as exc:
         errors = [f"release check crashed: {exc}"]
     if errors:

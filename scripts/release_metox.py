@@ -173,7 +173,12 @@ def _audit(
     return {"file_count": len(files), "total_bytes": sum(path.stat().st_size for path in files)}
 
 
-def build_release(baseline: Path, launcher_runtime: Path, output_root: Path) -> dict[str, object]:
+def build_release(
+    baseline: Path,
+    launcher_runtime: Path,
+    output_root: Path,
+    same_version_rebuild: bool = False,
+) -> dict[str, object]:
     info = json.loads((ROOT / "VERSION.json").read_text(encoding="utf-8"))
     version = str(info["version"])
     release_date = str(info["release_date"])
@@ -238,6 +243,7 @@ def build_release(baseline: Path, launcher_runtime: Path, output_root: Path) -> 
             "release_date": release_date,
             "external_strategy_version": info["external_strategy_version"],
             "source_commit": _git_commit(),
+            "same_version_rebuild": same_version_rebuild,
             "baseline_package": baseline.name,
             "launcher_runtime": launcher_runtime.name,
             "launcher_sha256": _sha256(stage / "TuiGuangTool.exe"),
@@ -317,9 +323,21 @@ def main() -> int:
     parser.add_argument("--baseline-package", required=True, type=Path)
     parser.add_argument("--launcher-runtime", required=True, type=Path)
     parser.add_argument("--output-root", required=True, type=Path)
+    parser.add_argument(
+        "--allow-same-version-rebuild",
+        action="store_true",
+        help="allow an explicitly requested dated rebuild without changing the numeric version",
+    )
     args = parser.parse_args()
     try:
-        _run([sys.executable, str(ROOT / "scripts" / "release_check.py"), "--release"])
+        release_check_command = [
+            sys.executable,
+            str(ROOT / "scripts" / "release_check.py"),
+            "--release",
+        ]
+        if args.allow_same_version_rebuild:
+            release_check_command.append("--allow-same-version-rebuild")
+        _run(release_check_command)
         _run([sys.executable, "-m", "unittest", "discover", "-p", "test_*.py"])
         _run([sys.executable, str(ROOT / "_regression_metox_algorithm.py")])
         _run([sys.executable, str(ROOT / "_regression_export_period.py")])
@@ -330,6 +348,7 @@ def main() -> int:
             args.baseline_package.absolute(),
             args.launcher_runtime.absolute(),
             args.output_root.absolute(),
+            same_version_rebuild=args.allow_same_version_rebuild,
         )
     except Exception as exc:
         print(f"release-build FAIL: {exc}", file=sys.stderr)
