@@ -41,6 +41,7 @@ class CategoryCompletePreviousGmvTests(unittest.TestCase):
         result = category_analysis(_category_frame(mapped_previous_gmv=8207.15))
 
         self.assertEqual(result["invest"][0]["7天GMV"], 8207.15)
+        self.assertEqual(result["invest"][0]["7日付费环比"], "0.0%")
 
 
 if __name__ == "__main__":

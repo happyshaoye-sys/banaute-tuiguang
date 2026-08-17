@@ -10,7 +10,7 @@ from .schema import execution_export_frame, safe_div
 CATEGORY_INVESTMENT_SHEET = '品类投放占比与ROI'
 CATEGORY_INVESTMENT_COLUMNS = [
     '品类', 'GMV', 'GMV占比', '7天GMV', '7日GMV环比',
-    '付费', '付费占比', '上周期付费', '关键词', '人群', '全站',
+    '付费', '付费占比', '上周期付费', '7日付费环比', '关键词', '人群', '全站',
     '上周期关键词', '上周期人群', '上周期全站', 'ROI',
 ]
 

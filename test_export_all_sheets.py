@@ -110,7 +110,8 @@ class ExportAllSheetsTests(unittest.TestCase):
         }
         expected_columns = [
             '品类', 'GMV', 'GMV占比', '7天GMV', '7日GMV环比',
-            '付费', '付费占比', '上周期付费', '关键词', '人群', '全站',
+            '付费', '付费占比', '上周期付费', '7日付费环比',
+            '关键词', '人群', '全站',
             '上周期关键词', '上周期人群', '上周期全站', 'ROI',
         ]
 
@@ -129,6 +130,7 @@ class ExportAllSheetsTests(unittest.TestCase):
                 self.assertEqual(category.loc[0, '7天GMV'], 800.0)
                 self.assertEqual(category.loc[0, '7日GMV环比'], '25.0%')
                 self.assertEqual(category.loc[0, '上周期付费'], 90.0)
+                self.assertEqual(category.loc[0, '7日付费环比'], '11.1%')
                 self.assertEqual(category.loc[0, '上周期关键词'], 50.0)
                 self.assertEqual(category.loc[0, '上周期人群'], 30.0)
                 self.assertEqual(category.loc[0, '上周期全站'], 10.0)

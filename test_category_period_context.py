@@ -60,6 +60,7 @@ class CategoryPeriodContextTests(unittest.TestCase):
         self.assertEqual(row["7天GMV"], 10590.25)
         self.assertEqual(row["7日GMV环比"], "-52.2%")
         self.assertEqual(row["上周期付费"], 11.0)
+        self.assertEqual(row["7日付费环比"], "-100.0%")
         self.assertEqual(row["上周期关键词"], 7.0)
         self.assertEqual(row["上周期人群"], 3.0)
         self.assertEqual(row["上周期全站"], 1.0)

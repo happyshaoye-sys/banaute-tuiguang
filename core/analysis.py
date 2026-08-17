@@ -413,7 +413,7 @@ def category_analysis(df, cat_ctx=None):
        'h7_prev_gmv': {类目: 上一7日窗GMV},
        'h7_prev_spend|keyword|crowd|omni': {类目: 上一7日窗渠道金额}}
     - 基础表新增 付费占比(=品类付费/品类GMV,用户定义口径)与 付费环比((当期-上期)/上期,基准0记0);
-    - 投放表新增 7日GMV环比(7日窗口品类GMV环比);
+    - 投放表新增 7日GMV环比与7日付费环比(固定7日窗口品类环比);
     - '7天GMV'优先使用上一7日窗口的完整品类GMV,避免只汇总本期仍存在商品的上周期金额。"""
     if '淘宝类目' not in df.columns or len(df) == 0:
         return {'basic':[], 'invest':[], 'total':{}}
@@ -462,6 +462,10 @@ def category_analysis(df, cat_ctx=None):
     basic, invest = [], []
     for _, r in cat_agg.iterrows():
         cat_key = r['淘宝类目']
+        prev_7d_spend = (
+            float(h7_prev_spend.get(cat_key, 0.0))
+            if has_complete_h7_channels else float(r['d7spend'])
+        )
         basic.append({
             '品类': cat_key or '未分类', '商品数': int(r['cnt']),
             'GMV': float(r['gmv']), 'GMV占比': f'{safe_div(r["gmv"],total_gmv)*100:.1f}%',
@@ -482,8 +486,8 @@ def category_analysis(df, cat_ctx=None):
                             float(h7_prev_gmv.get(cat_key, 0.0))),
             '付费': float(r['spend']),
             '付费占比': f'{safe_div(r["spend"],total_spend)*100:.1f}%' if total_spend else '0%',
-            '上周期付费': float(h7_prev_spend.get(cat_key, 0.0))
-                    if has_complete_h7_channels else float(r['d7spend']),
+            '上周期付费': prev_7d_spend,
+            '7日付费环比': _mom(float(r['spend']), prev_7d_spend),
             '关键词': float(r['kw']), '人群': float(r['crowd']), '全站': float(r['omni']),
             '上周期关键词': float(h7_prev_keyword.get(cat_key, 0.0))
                     if has_complete_h7_channels else float(r['d7kw']),
