@@ -4,6 +4,7 @@ from __future__ import annotations
 import os, re, time, io, json, shutil, tempfile, hashlib
 from pathlib import Path
 from datetime import datetime
+from functools import partial
 
 import pandas as pd
 import streamlit as st
@@ -1587,20 +1588,26 @@ with tab4:
                 f"推广执行表_{st.session_state.get('cur_date', '')}_{datetime.now().strftime('%Y%m%d')}.xlsx",
                 XLSX_MIME, key="dl_exec")
     with ce2:
-        if st.button("📦 生成全部 Sheet Excel", key="export_all"):
-            with st.spinner(f"生成中({len(filtered)} 行，含品类投放表)..."):
-                st.session_state["all_xlsx"] = export_all_sheets(
-                    filtered, cat_ctx=export_cat_ctx, ranking_df=execution_df
-                )
-                st.session_state["all_xlsx_meta"] = \
-                    f"{len(filtered)}行 {datetime.now().strftime('%H:%M:%S')}"
-        if st.session_state.get("all_xlsx"):
-            st.download_button(
-                f"⬇️ 下载全部分析 ({st.session_state['all_xlsx_meta']})",
-                st.session_state["all_xlsx"],
-                f"推广工具全部分析_{st.session_state.get('cur_date', '')}_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                XLSX_MIME, key="dl_all")
-    st.caption("提示:生成后下载按钮会一直保留;若改了筛选条件,重新点「生成」即可刷新内容")
+        st.session_state.pop("all_xlsx", None)
+        st.session_state.pop("all_xlsx_meta", None)
+        all_sheets_download = partial(
+            export_all_sheets,
+            filtered,
+            cat_ctx=export_cat_ctx,
+            ranking_df=execution_df,
+        )
+        st.download_button(
+            f"📦 生成并下载全部 Sheet Excel ({len(filtered)} 行)",
+            data=all_sheets_download,
+            file_name=(
+                f"推广工具全部分析_{st.session_state.get('cur_date', '')}_"
+                f"{datetime.now().strftime('%Y%m%d')}.xlsx"
+            ),
+            mime=XLSX_MIME,
+            key="dl_all_deferred",
+            on_click="ignore",
+        )
+    st.caption("提示:执行表仍为先生成后下载;全部Sheet点击后生成并直接下载")
 
 # ── Tab 5: 商品分层 ───────────────────────────────────────
 with tab5:
