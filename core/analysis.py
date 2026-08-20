@@ -40,6 +40,48 @@ KPI_MOM_KEYS = (
     'GMV', '本期花费', '本期在推广计划',
     '店铺ROI', '在推广商品数量', '加购件数',
 )
+KPI_TREND_KEYS = KPI_MOM_KEYS
+
+
+def build_daily_kpi_trends(day_map, end_date=None):
+    """从已加载的逐日内存帧构建看板趋势；缺失日保留为空，不补零。"""
+    columns = ['日期', *KPI_TREND_KEYS]
+    if not day_map:
+        return pd.DataFrame(columns=columns)
+
+    loaded_rows = {}
+    for day in sorted(day_map):
+        if end_date and day > end_date:
+            continue
+        entry = day_map.get(day)
+        if not entry or len(entry) == 0:
+            continue
+        frame = entry[0]
+        if frame is None or len(frame) == 0:
+            continue
+        plan_ids = entry[4] if len(entry) > 4 and entry[4] is not None else set()
+        daily_kpis = calc_kpis(frame, plan_ids)
+        loaded_rows[day] = {
+            '日期': day,
+            **{key: daily_kpis[key] for key in KPI_TREND_KEYS},
+        }
+
+    if not loaded_rows:
+        return pd.DataFrame(columns=columns)
+
+    start = pd.Timestamp(min(loaded_rows))
+    end = pd.Timestamp(end_date or max(loaded_rows))
+    if end < start:
+        return pd.DataFrame(columns=columns)
+
+    rows = []
+    for timestamp in pd.date_range(start, end, freq='D'):
+        day = timestamp.date().isoformat()
+        rows.append(loaded_rows.get(day, {
+            '日期': day,
+            **{key: None for key in KPI_TREND_KEYS},
+        }))
+    return pd.DataFrame(rows, columns=columns)
 
 
 def calc_kpi_mom_percent(current_kpis, previous_kpis):

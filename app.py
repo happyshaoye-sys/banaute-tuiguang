@@ -40,7 +40,7 @@ from core.periods import (
 )
 from core.segmentation import segment_products
 from core.analysis import (
-    calc_kpis, calc_kpi_mom_percent, grade_distribution, channel_summary,
+    build_daily_kpi_trends, calc_kpis, calc_kpi_mom_percent, grade_distribution, channel_summary,
     segment_summary, category_analysis, refund_risk, channel_top, inventory_actions,
     build_operating_daily_report, build_ai_task_view,
 )
@@ -68,9 +68,52 @@ GIT_PROJECT_NAME = PRODUCT_NAME
 # ── 初始化 Session State ─────────────────────────────────
 for key in ['df','prev_df','kpis','prev_kpis','kpi_mom','plan_ids','prev_plan_ids','cur_date','prev_date',
             'sources_info','traffic_bounds','value_bounds','traffic_ref','value_ref',
-            'loaded','processing_msg','timings','total_time','period_logs','cat_ctx']:
+            'loaded','processing_msg','timings','total_time','period_logs','cat_ctx','kpi_trends']:
     if key not in st.session_state:
         st.session_state[key] = None if key != 'loaded' else False
+
+
+def _render_kpi_metric_with_trend(column, label, value, delta, *, trend_key,
+                                  trend_label, scale=1.0):
+    """渲染原生指标卡与已加载的日趋势，不触发文件读取或业务重算。"""
+    with column:
+        st.metric(label, value, delta)
+        with st.popover(
+            "日趋势",
+            type="tertiary",
+            icon=":material/show_chart:",
+            width="content",
+            key=f"kpi_trend_{trend_key}",
+        ):
+            trend_data = st.session_state.get('kpi_trends')
+            if trend_data is None or trend_data.empty or trend_key not in trend_data.columns:
+                st.info("暂无日趋势数据")
+                return
+
+            chart_data = trend_data[['日期', trend_key]].copy()
+            chart_data['日期'] = pd.to_datetime(chart_data['日期'], errors='coerce')
+            chart_data[trend_label] = pd.to_numeric(
+                chart_data.pop(trend_key), errors='coerce'
+            ) / scale
+            chart_data = chart_data.dropna(subset=['日期'])
+            if chart_data.empty or chart_data[trend_label].notna().sum() == 0:
+                st.info("暂无日趋势数据")
+                return
+
+            start = chart_data['日期'].min().date().isoformat()
+            end = chart_data['日期'].max().date().isoformat()
+            missing_days = int(chart_data[trend_label].isna().sum())
+            missing_note = f" · 缺失 {missing_days} 天（折线断开）" if missing_days else ""
+            st.caption(f"{start} 至 {end} · 日维度{missing_note}")
+            st.line_chart(
+                chart_data,
+                x='日期',
+                y=trend_label,
+                x_label='日期',
+                y_label=trend_label,
+                width='stretch',
+                height=240,
+            )
 
 
 def _parse_bounds(s):
@@ -555,7 +598,7 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
     cur_result = load_period_data(current_days, day_map)
     df = cur_result['df']
     if df is None or len(df) == 0:
-        return None, None, [], set(), set(), timings, period_logs, {}
+        return None, None, [], set(), set(), timings, period_logs, {}, pd.DataFrame()
 
     files_info = first_day_sources[1] if first_day_sources else []
     plan_ids = cur_result['plan_ids']
@@ -656,8 +699,12 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
         'h7_prev_crowd': h7_previous['人群'],
         'h7_prev_omni': h7_previous['全站'],
     }
+    kpi_trends = build_daily_kpi_trends(day_map, end_date=date_str)
 
-    return df, sel_prev_frame, files_info, plan_ids, sel_prev_plan_ids, timings, period_logs, cat_ctx
+    return (
+        df, sel_prev_frame, files_info, plan_ids, sel_prev_plan_ids,
+        timings, period_logs, cat_ctx, kpi_trends,
+    )
 
 
 # ── 缓存：分层（分界点变化时重新计算）─────────────────────
@@ -1076,8 +1123,8 @@ with st.sidebar:
                 biz_folder, wujie_folder = _build_paths(root, date_str, year, shop)
 
                 # ── 4. 校验目录是否存在 ──
-                df, prev_df, files_info, plan_ids, prev_plan_ids, timings, period_logs, cat_ctx = \
-                    None, None, [], set(), set(), [], [], {}
+                df, prev_df, files_info, plan_ids, prev_plan_ids, timings, period_logs, cat_ctx, kpi_trends = \
+                    None, None, [], set(), set(), [], [], {}, pd.DataFrame()
                 errors = []
                 validation_error = None
                 if not os.path.isdir(str(biz_folder)):
@@ -1103,14 +1150,16 @@ with st.sidebar:
                     with st.spinner("读取文件中..."):
                         t_load = time.perf_counter()
                         try:
-                            df, prev_df, files_info, plan_ids, prev_plan_ids, timings, period_logs, cat_ctx = \
-                                _load_folder_cached(
-                                    root, year, shop, date_str, product_folder,
-                                    cache_dir=str(file_cache_dir),
-                                    jst_snap_dir=(jst_snap_dir or "").strip().strip('"') or None,
-                                    jst_refund_dir=(jst_refund_dir or "").strip().strip('"') or None,
-                                    period_choice=period_choice,
-                                )
+                            (
+                                df, prev_df, files_info, plan_ids, prev_plan_ids,
+                                timings, period_logs, cat_ctx, kpi_trends,
+                            ) = _load_folder_cached(
+                                root, year, shop, date_str, product_folder,
+                                cache_dir=str(file_cache_dir),
+                                jst_snap_dir=(jst_snap_dir or "").strip().strip('"') or None,
+                                jst_refund_dir=(jst_refund_dir or "").strip().strip('"') or None,
+                                period_choice=period_choice,
+                            )
                         except DataValidationError as exc:
                             validation_error = str(exc)
 
@@ -1168,6 +1217,7 @@ with st.sidebar:
                     st.session_state.prev_date = None
                     st.session_state.sources_info = files_info
                     st.session_state.cat_ctx = cat_ctx
+                    st.session_state.kpi_trends = kpi_trends
                     st.session_state.loaded = True
                     st.session_state.traffic_bounds = tb_load
                     st.session_state.value_bounds = vb_load
@@ -1203,12 +1253,30 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
 # ── Tab 1: 数据看板 ───────────────────────────────────────
 with tab1:
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("GMV", f"¥{kpis['GMV']/1e4:.2f}万", f"{kpi_mom['GMV']:.2f}% 环比")
-    c2.metric("本期花费", f"¥{kpis['本期花费']/1e4:.2f}万", f"{kpi_mom['本期花费']:.2f}% 环比")
-    c3.metric("在推广计划", kpis['本期在推广计划'], f"{kpi_mom['本期在推广计划']:.2f}% 环比")
-    c4.metric("店铺ROI", f"{kpis['店铺ROI']:.2f}", f"{kpi_mom['店铺ROI']:.2f}% 环比")
-    c5.metric("在推广商品", kpis['在推广商品数量'], f"{kpi_mom['在推广商品数量']:.2f}% 环比")
-    c6.metric("加购件数", f"{kpis['加购件数']:,}", f"{kpi_mom['加购件数']:.2f}% 环比")
+    _render_kpi_metric_with_trend(
+        c1, "GMV", f"¥{kpis['GMV']/1e4:.2f}万", f"{kpi_mom['GMV']:.2f}% 环比",
+        trend_key="GMV", trend_label="GMV（万元）", scale=1e4,
+    )
+    _render_kpi_metric_with_trend(
+        c2, "本期花费", f"¥{kpis['本期花费']/1e4:.2f}万", f"{kpi_mom['本期花费']:.2f}% 环比",
+        trend_key="本期花费", trend_label="花费（万元）", scale=1e4,
+    )
+    _render_kpi_metric_with_trend(
+        c3, "在推广计划", kpis['本期在推广计划'], f"{kpi_mom['本期在推广计划']:.2f}% 环比",
+        trend_key="本期在推广计划", trend_label="在推广计划（个）",
+    )
+    _render_kpi_metric_with_trend(
+        c4, "店铺ROI", f"{kpis['店铺ROI']:.2f}", f"{kpi_mom['店铺ROI']:.2f}% 环比",
+        trend_key="店铺ROI", trend_label="店铺ROI",
+    )
+    _render_kpi_metric_with_trend(
+        c5, "在推广商品", kpis['在推广商品数量'], f"{kpi_mom['在推广商品数量']:.2f}% 环比",
+        trend_key="在推广商品数量", trend_label="在推广商品（个）",
+    )
+    _render_kpi_metric_with_trend(
+        c6, "加购件数", f"{kpis['加购件数']:,}", f"{kpi_mom['加购件数']:.2f}% 环比",
+        trend_key="加购件数", trend_label="加购件数（件）",
+    )
 
     # 可审计的本地智能摘要：复用当前/上期内存帧，不读文件、不调用外部 AI。
     report_ctx = st.session_state.get('cat_ctx') or {}

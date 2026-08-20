@@ -2,9 +2,9 @@
 
 ## Source of truth
 - Status: Active
-- Last refreshed: 2026-08-03
+- Last refreshed: 2026-08-20
 - Primary product surfaces: Streamlit sidebar data-loading flow, main analysis tabs, AI任务视图, Excel export.
-- Evidence reviewed: `app.py`, `core/task_engine.py`, `test_ai_task_view.py`, `README.md`, `半自动推广工具_数据源与指标说明.md`, current MetoX v2.2 screenshot supplied by the user, AI任务视图V2.7字段与可信度要求。
+- Evidence reviewed: `app.py`, `core/analysis.py`, `core/task_engine.py`, `test_ai_task_view.py`, `test_dashboard_kpi_mom.py`, `README.md`, `半自动推广工具_数据源与指标说明.md`, current MetoX v2.27 dashboard screenshot supplied by the user, AI任务视图V2.7字段与可信度要求。
 
 ## Brand
 - Personality: operational, direct, trustworthy, low-friction.
@@ -12,7 +12,7 @@
 - Avoid: configuration-heavy first screens, duplicated controls, and labels that imply automation beyond the evidence.
 
 ## Product goals
-- Goals: let an operator load the normal daily dataset with minimal scanning; keep low-frequency configuration discoverable but unobtrusive; keep product identity immediately recognizable in action tables; surface a concise, reconciled operating explanation immediately below the dashboard KPIs; make the AI任务主表 answer priority, product, operating performance, strategy, action, validation, and confidence without exposing diagnostic sub-scores.
+- Goals: let an operator load the normal daily dataset with minimal scanning; keep low-frequency configuration discoverable but unobtrusive; let each dashboard KPI expose its loaded daily trajectory without changing the KPI or period-over-period calculation; keep product identity immediately recognizable in action tables; surface a concise, reconciled operating explanation immediately below the dashboard KPIs; make the AI任务主表 answer priority, product, operating performance, strategy, action, validation, and confidence without exposing diagnostic sub-scores.
 - Non-goals: redesigning the analysis tabs, changing formulas, changing MetoX or any product/channel/product-plan decision rule, or hiding data-quality evidence.
 - Success signals: the collapsed sidebar presents date, period, and load action first, followed by one compact advanced entry; loading and threshold reapplication behave unchanged. AI任务在无计划时明确显示“无计划”，不把不存在的计划解释成100%覆盖或满分可信度。
 
@@ -24,7 +24,7 @@
 ## Information architecture
 - Primary navigation: eight existing analysis tabs remain unchanged.
 - Core routes/screens: single Streamlit page with sidebar loading controls and tabbed analysis content.
-- Content hierarchy: daily inputs first; all paths, data-source directories, thresholds, diagnostics, and version controls under one `高级设置` disclosure. On the dashboard, six KPIs lead, followed by `AI经营日报`, then grade cards and the existing diagnostic sections. In `AI任务视图`, the main table follows `优先级 → 商品身份 → 经营指标 → 商品/渠道/计划动作 → 验证条件 → 综合AI可信度 → 库存提醒`.
+- Content hierarchy: daily inputs first; all paths, data-source directories, thresholds, diagnostics, and version controls under one `高级设置` disclosure. On the dashboard, six KPIs lead; each KPI has one compact `日趋势` disclosure directly below it, followed by `AI经营日报`, grade cards, and the existing diagnostic sections. In `AI任务视图`, the main table follows `优先级 → 商品身份 → 经营指标 → 商品/渠道/计划动作 → 验证条件 → 综合AI可信度 → 库存提醒`.
 
 ## Design principles
 - Principle 1: frequent actions stay visible; low-frequency settings use progressive disclosure.
@@ -41,9 +41,9 @@
 - Imagery/iconography: no new imagery; use restrained text labels.
 
 ## Components
-- Existing components to reuse: `st.sidebar`, `st.expander`, `st.text_input`, `st.selectbox`, `st.button`, `st.caption`, `st.dataframe`.
-- New/changed components: a single collapsed `高级设置`; threshold reapply button moves inside its threshold section; inventory action tables use the stable identity order `宝贝ID` → `货号` → `商品名称` on page and in Excel; `AI经营日报` is a bordered, default-expanded five-line summary generated from deterministic local metrics; the AI任务主表 is an explicit presentation projection rather than every backend column; a selected task exposes one `AI可信度说明` disclosure.
-- Variants and states: before load, threshold inputs are editable but reapply is absent; after load, references, reapply, performance details, and period completeness are available inside advanced settings. A complete comparison window shows overview, grade, category, channel, and risk lines; an incomplete window shows a completeness warning and provisional overview only. AI可信度 always renders as one five-star-plus-percentage value; the detail uses `✓` for complete evidence and `△` for partial/missing evidence without exposing product/channel/plan sub-scores. `计划总数=0`时，计划覆盖率显示`无计划`；AI可信度仅按商品和渠道证据计算并设为非五星上限，详情明确写明`当前无计划数据，计划可信度未参与计算`。
+- Existing components to reuse: `st.sidebar`, `st.expander`, `st.popover`, `st.line_chart`, `st.text_input`, `st.selectbox`, `st.button`, `st.caption`, `st.dataframe`.
+- New/changed components: every dashboard `st.metric` gets one native `日趋势` popover containing a date-aware line chart; a single collapsed `高级设置`; threshold reapply button moves inside its threshold section; inventory action tables use the stable identity order `宝贝ID` → `货号` → `商品名称` on page and in Excel; `AI经营日报` is a bordered, default-expanded five-line summary generated from deterministic local metrics; the AI任务主表 is an explicit presentation projection rather than every backend column; a selected task exposes one `AI可信度说明` disclosure.
+- Variants and states: KPI trends begin on the first successfully loaded date and end on the selected date; a missing date stays null so the line breaks instead of implying zero, and the popover states the missing-day count. Before load, threshold inputs are editable but reapply is absent; after load, references, reapply, performance details, and period completeness are available inside advanced settings. A complete comparison window shows overview, grade, category, channel, and risk lines; an incomplete window shows a completeness warning and provisional overview only. AI可信度 always renders as one five-star-plus-percentage value; the detail uses `✓` for complete evidence and `△` for partial/missing evidence without exposing product/channel/plan sub-scores. `计划总数=0`时，计划覆盖率显示`无计划`；AI可信度仅按商品和渠道证据计算并设为非五星上限，详情明确写明`当前无计划数据，计划可信度未参与计算`。
 - Token/component ownership: Streamlit native theme; no new CSS or component library.
 
 ## Accessibility
@@ -56,14 +56,14 @@
 ## Responsive behavior
 - Supported breakpoints/devices: existing desktop-first Streamlit behavior.
 - Layout adaptations: sidebar remains single column; advanced content follows the same width.
-- Touch/hover differences: native Streamlit behavior.
+- Touch/hover differences: `日趋势` uses native click/touch disclosure; exact date and value use the native chart hover interaction.
 
 ## Interaction states
 - Loading: existing spinner and success/error messages remain unchanged.
 - Empty: existing instruction to enter a date remains unchanged.
 - Error: existing date/path validation remains unchanged; incomplete comparison windows suppress driver/risk conclusions instead of presenting partial data as final.
 - Success: existing loaded session state and rerun remain unchanged; the report reconciles current and previous product universes before ranking drivers.
-- Detail disclosure: selecting a task reveals the row-specific confidence checklist and plan detail; opening it does not recalculate data or alter the task.
+- Detail disclosure: selecting a task reveals the row-specific confidence checklist and plan detail; opening it does not recalculate data or alter the task. Opening a KPI `日趋势` only reveals the already-loaded in-memory series and never reads source files.
 - Disabled: no new disabled state.
 - Offline/slow network, if applicable: local/offline application behavior remains unchanged.
 
@@ -75,9 +75,9 @@
 ## Implementation constraints
 - Framework/styling system: Streamlit/Python; preserve session-state keys and computation functions.
 - Design-token constraints: no custom CSS.
-- Performance constraints: collapsing controls must not trigger new data reads or calculations. The operating report must reuse in-memory current/previous frames, perform no file IO, and call no external AI service. AI任务中的`GMV`、`商品访客数`、`链接投产`必须从`st.session_state.df`对应同名字段原值透传，不得重算。
+- Performance constraints: collapsing controls must not trigger new data reads or business-rule calculations. KPI daily trends are summarized once from the existing `day_map` during loading and then reused from session state; opening a popover performs no file IO. The operating report must reuse in-memory current/previous frames, perform no file IO, and call no external AI service. AI任务中的`GMV`、`商品访客数`、`链接投产`必须从`st.session_state.df`对应同名字段原值透传，不得重算。
 - Compatibility constraints: packaged PyInstaller/Streamlit runtime and three launcher entries remain unchanged.
-- Test/screenshot expectations: AST/static tests for hierarchy, exact AI任务主表投影和隐藏字段；透传字段回归；可信度不改变策略回归；单元测试、发布检查和Streamlit AppTest smoke when available.
+- Test/screenshot expectations: KPI trend unit tests cover first-loaded-day trimming, missing-day null gaps, six metric formulas, and selected-date cutoff; AST/static tests require six native popovers/line charts and forbid custom components in the trend renderer. Retain the existing hierarchy, exact AI任务主表投影和隐藏字段；透传字段回归；可信度不改变策略回归；单元测试、发布检查和Streamlit AppTest smoke when available.
 
 ## Open questions
 - [ ] Whether performance timing should later move from advanced settings to a dedicated diagnostics tab; current change keeps it inside advanced to satisfy the compact-first-screen contract.
