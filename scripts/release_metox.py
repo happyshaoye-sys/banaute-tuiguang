@@ -178,7 +178,7 @@ def build_release(baseline: Path, launcher_runtime: Path, output_root: Path) -> 
     version = str(info["version"])
     release_date = str(info["release_date"])
     compact_date = release_date.replace("-", "")
-    package_name = f"MetoX半自动推广工具_v{version}_第三方版_{compact_date}"
+    package_name = f"MetoX{version}_{compact_date}"
     operator_manual_name = f"MetoX{version}_使用说明与运营操作顺序.md"
     training_manual_name = f"MetoX{version}_新运营培训手册.html"
     destination = output_root / package_name

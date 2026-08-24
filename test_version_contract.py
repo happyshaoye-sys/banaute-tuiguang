@@ -16,8 +16,8 @@ class VersionContractTests(unittest.TestCase):
     def test_version_json_is_the_application_identity(self):
         info = json.loads((ROOT / "VERSION.json").read_text(encoding="utf-8"))
         self.assertEqual(info["product"], "MetoX")
-        self.assertEqual(info["version"], "2.28")
-        self.assertEqual(info["release_date"], "2026-08-20")
+        self.assertEqual(info["version"], "2.29")
+        self.assertEqual(info["release_date"], "2026-08-24")
         self.assertEqual(info["external_strategy_version"], "v9.3")
         self.assertEqual(info["rule_versions"]["refund_risk"], "2026-08-02")
         self.assertEqual(info["rule_versions"]["startup_launcher"], "2026-08-02")
@@ -52,8 +52,9 @@ class VersionContractTests(unittest.TestCase):
         self.assertEqual(info["rule_versions"]["shared_dimension_cache"], "2026-08-15")
         self.assertEqual(info["rule_versions"]["deferred_all_sheets_download"], "2026-08-18")
         self.assertEqual(info["rule_versions"]["dashboard_kpi_daily_trend"], "2026-08-20")
+        self.assertEqual(info["rule_versions"]["category_visitor_metrics"], "2026-08-24")
         self.assertEqual(version.VERSION_INFO, info)
-        self.assertEqual(version.DISPLAY_VERSION, "MetoX v2.28")
+        self.assertEqual(version.DISPLAY_VERSION, "MetoX v2.29")
 
     def test_app_imports_version_instead_of_assigning_one(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
@@ -76,12 +77,12 @@ class VersionContractTests(unittest.TestCase):
 
     def test_current_operator_documents_show_v2_contract(self):
         documents = {
-            "README.md": "MetoX v2.28",
-            "README_离线使用说明.txt": "MetoX v2.28",
-            "第三方使用说明_先看这个.txt": "MetoX v2.28",
-            "半自动推广工具_数据源与指标说明.md": "MetoX v2.28",
-            "MetoX2.28_使用说明与运营操作顺序.md": "MetoX v2.28",
-            "MetoX2.28_新运营培训手册.html": "MetoX2.28",
+            "README.md": "MetoX v2.29",
+            "README_离线使用说明.txt": "MetoX v2.29",
+            "第三方使用说明_先看这个.txt": "MetoX v2.29",
+            "半自动推广工具_数据源与指标说明.md": "MetoX v2.29",
+            "MetoX2.29_使用说明与运营操作顺序.md": "MetoX v2.29",
+            "MetoX2.29_新运营培训手册.html": "MetoX2.29",
         }
         for relative, marker in documents.items():
             with self.subTest(relative=relative):
@@ -105,6 +106,8 @@ class VersionContractTests(unittest.TestCase):
 
     def test_release_packager_replaces_both_versioned_manuals(self):
         source = (ROOT / "scripts" / "release_metox.py").read_text(encoding="utf-8")
+        self.assertIn('package_name = f"MetoX{version}_{compact_date}"', source)
+        self.assertNotIn("MetoX半自动推广工具_v{version}_第三方版", source)
         self.assertIn(
             'operator_manual_name = f"MetoX{version}_使用说明与运营操作顺序.md"',
             source,

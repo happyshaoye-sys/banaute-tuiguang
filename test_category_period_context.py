@@ -1,9 +1,14 @@
+import ast
 import unittest
+from pathlib import Path
 
 import pandas as pd
 
 from core.analysis import category_analysis
 from core.periods import aggregate_category_metrics
+
+
+ROOT = Path(__file__).resolve().parent
 
 
 class CategoryPeriodContextTests(unittest.TestCase):
@@ -12,13 +17,13 @@ class CategoryPeriodContextTests(unittest.TestCase):
             "2026-07-25": (
                 pd.DataFrame([
                     {"淘宝类目": "羽绒服", "GMV": 100.0, "付费": 10.0},
-                    {"淘宝类目": "", "GMV": 20.0, "付费": 2.0},
+                    {"淘宝类目": "", "GMV": 20.0, "付费": 2.0, "商品访客数": 3},
                 ]),
                 [], 0, 0, set(),
             ),
             "2026-07-26": (
                 pd.DataFrame([
-                    {"淘宝类目": "羽绒服", "GMV": 50.0, "付费": 5.0},
+                    {"淘宝类目": "羽绒服", "GMV": 50.0, "付费": 5.0, "商品访客数": 7},
                 ]),
                 [], 0, 0, set(),
             ),
@@ -27,12 +32,14 @@ class CategoryPeriodContextTests(unittest.TestCase):
         result = aggregate_category_metrics(
             day_map,
             ["2026-07-25", "2026-07-26", "2026-07-27"],
-            ["GMV", "付费"],
+            ["GMV", "付费", "商品访客数"],
         )
 
         self.assertEqual(result["GMV"]["羽绒服"], 150.0)
         self.assertEqual(result["付费"]["羽绒服"], 15.0)
+        self.assertEqual(result["商品访客数"]["羽绒服"], 7.0)
         self.assertEqual(result["GMV"][""], 20.0)
+        self.assertEqual(result["商品访客数"][""], 3.0)
 
     def test_category_analysis_uses_context_when_selected_period_has_no_7d_columns(self):
         frame = pd.DataFrame([{
@@ -64,6 +71,103 @@ class CategoryPeriodContextTests(unittest.TestCase):
         self.assertEqual(row["上周期关键词"], 7.0)
         self.assertEqual(row["上周期人群"], 3.0)
         self.assertEqual(row["上周期全站"], 1.0)
+
+    def test_category_basic_adds_visitor_share_and_fixed_7d_visitor_mom(self):
+        frame = pd.DataFrame([
+            {
+                "淘宝类目": "连衣裙",
+                "宝贝ID": "current-a",
+                "GMV": 300.0,
+                "付费": 30.0,
+                "商品访客数": 30,
+                "关键词": 0.0,
+                "人群": 0.0,
+                "全站": 0.0,
+            },
+            {
+                "淘宝类目": "衬衫",
+                "宝贝ID": "current-b",
+                "GMV": 100.0,
+                "付费": 10.0,
+                "商品访客数": 70,
+                "关键词": 0.0,
+                "人群": 0.0,
+                "全站": 0.0,
+            },
+        ])
+
+        result = category_analysis(frame, cat_ctx={
+            "sel_prev_spend": {"连衣裙": 15.0, "衬衫": 5.0},
+            "h7_cur_gmv": {},
+            "h7_prev_gmv": {},
+            "h7_cur_visitors": {"连衣裙": 70.0, "衬衫": 14.0},
+            "h7_prev_visitors": {"连衣裙": 35.0, "衬衫": 7.0},
+        })
+
+        row = result["basic"][0]
+        self.assertEqual(row["品类"], "连衣裙")
+        self.assertEqual(
+            list(row.keys()),
+            [
+                "品类", "商品数", "GMV", "GMV占比", "付费占比", "付费",
+                "付费环比", "商品访客数", "访客数占比", "7日访客数环比",
+                "退款率", "SPU价值", "ROI",
+            ],
+        )
+        self.assertEqual(row["访客数占比"], "30.0%")
+        self.assertEqual(row["7日访客数环比"], "100.0%")
+
+    def test_category_basic_visitor_metrics_use_zero_denominator_rule(self):
+        frame = pd.DataFrame([{
+            "淘宝类目": "连衣裙",
+            "宝贝ID": "current-a",
+            "GMV": 300.0,
+            "付费": 30.0,
+            "商品访客数": 0,
+            "关键词": 0.0,
+            "人群": 0.0,
+            "全站": 0.0,
+        }])
+
+        result = category_analysis(frame, cat_ctx={
+            "h7_cur_visitors": {"连衣裙": 20.0},
+            "h7_prev_visitors": {"连衣裙": 0.0},
+        })
+
+        row = result["basic"][0]
+        self.assertEqual(row["访客数占比"], "0.0%")
+        self.assertEqual(row["7日访客数环比"], "0.0%")
+
+
+class CategoryVisitorContextUiContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
+        tree = ast.parse(cls.source)
+        load_function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_load_folder_cached"
+        )
+        cls.load_source = ast.get_source_segment(cls.source, load_function)
+
+    def test_fixed_7d_context_includes_current_and_previous_visitors(self):
+        self.assertIn('["GMV", "商品访客数"]', self.load_source)
+        self.assertIn(
+            '["GMV", "付费", "关键词", "人群", "全站", "商品访客数"]',
+            self.load_source,
+        )
+        self.assertIn(
+            "'h7_cur_visitors': h7_current['商品访客数']",
+            self.load_source,
+        )
+        self.assertIn(
+            "'h7_prev_visitors': h7_previous['商品访客数']",
+            self.load_source,
+        )
+
+    def test_page_explains_fixed_7d_visitor_window(self):
+        self.assertIn("7日GMV/访客数环比按 7日窗口", self.source)
 
 
 if __name__ == "__main__":

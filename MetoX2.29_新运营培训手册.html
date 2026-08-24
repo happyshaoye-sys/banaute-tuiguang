@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MetoX2.29 新运营培训手册</title>
+  <style>
+    body { margin:0; background:#f4f7fb; color:#1f2937; font-family:"Microsoft YaHei",Arial,sans-serif; line-height:1.7; }
+    main { max-width:980px; margin:32px auto; background:#fff; padding:36px 44px; border-radius:16px; box-shadow:0 10px 30px rgba(15,23,42,.08); }
+    h1 { margin-top:0; color:#0f172a; }
+    h2 { margin-top:30px; border-left:5px solid #2563eb; padding-left:12px; color:#172554; }
+    table { width:100%; border-collapse:collapse; margin:16px 0; }
+    th,td { border:1px solid #dbe3ef; padding:11px 12px; text-align:left; vertical-align:top; }
+    th { background:#eaf0f8; }
+    .blue { background:#DDEBF7; color:#1F2937; font-weight:700; }
+    .pink { background:#FCE4EC; color:#1F2937; font-weight:700; }
+    .plain { background:#fff; color:#1F2937; }
+    .notice { background:#eef6ff; border:1px solid #bfdbfe; border-radius:10px; padding:14px 16px; }
+    code { background:#eef2f7; padding:2px 5px; border-radius:4px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>MetoX2.29 新运营培训手册</h1>
+  <p>发布日期：2026-08-24｜外部策略算法：v9.3（未变更）</p>
+  <div class="notice"><strong>本版核心：</strong>“品类基础分析”新增访客数占比和固定7日访客数环比；两列随一键复制输出，不修改既有 Excel 和动作逻辑。</div>
+
+  <h2>1. 品类访客指标</h2>
+  <ul>
+    <li>“商品访客数”后依次显示“访客数占比”和“7日访客数环比”。</li>
+    <li>访客数占比按当前所选主周期计算：品类商品访客数÷全部品类商品访客数。</li>
+    <li>7日访客数环比固定比较当前7日与前7日，不随主周期切换。</li>
+    <li>总访客数或前7日访客数为0时，对应比例显示0.0%。</li>
+    <li>两列可通过表格右上角“一键复制”粘贴到 Excel，但不会新增或修改 Excel 工作表。</li>
+  </ul>
+
+  <h2>2. 看板日趋势</h2>
+  <ul>
+    <li>六项 KPI 卡片下均有“日趋势”入口，点击后显示日维度折线图。</li>
+    <li>鼠标移到折线节点上可查看具体日期和数值；GMV、花费以万元显示。</li>
+    <li>趋势从本次第一天成功加载的数据开始，到所选日期结束。</li>
+    <li>缺失日期显示为折线断点，不按0补齐；说明中会标出缺失天数。</li>
+    <li>打开趋势不重新读取共享盘，指标卡数值和原环比结果不变。</li>
+  </ul>
+
+  <h2>3. 加载速度与缓存</h2>
+  <ul>
+    <li>第一次加载需要读取完整源文件并建立缓存，耗时仍可能较长。</li>
+    <li>同一日期再次加载或切换相邻日期时，未变化的历史天直接命中缓存。</li>
+    <li>日志会显示“日事实缓存命中/未命中”；源文件变化或缓存损坏会自动重算。</li>
+    <li>库存、退款率、成本和货号始终使用当前共享维度，不会被旧缓存冻结。</li>
+    <li>真实28日验证热加载52.359秒、提速7.547倍，冷/热业务结果完全一致。</li>
+  </ul>
+
+  <h2>4. 页面应看到什么</h2>
+  <table>
+    <tr><th>范围/状态</th><th>正确显示</th><th>运营含义</th></tr>
+    <tr><td>入选 TOP 单品的高、需关注</td><td class="blue">浅蓝 #DDEBF7<br>深色字 #1F2937</td><td>机会或需要主动跟进</td></tr>
+    <tr><td>入选 TOP 单品的低、紧急</td><td class="pink">浅粉 #FCE4EC<br>深色字 #1F2937</td><td>效率或库存风险</td></tr>
+    <tr><td>普通列、未映射状态、未入选商品</td><td class="plain">无底色</td><td>不进入本次颜色提醒</td></tr>
+  </table>
+
+  <h2>5. 五个着色字段</h2>
+  <ol>
+    <li>链接投产状态</li>
+    <li>推广加购率状态</li>
+    <li>商品加购率状态</li>
+    <li>商品支付转化率状态</li>
+    <li>可售天数状态</li>
+  </ol>
+  <p>前四项：高为浅蓝、低为浅粉。可售天数：需关注为浅蓝、紧急为浅粉。正常、样本不足、充足、积压等不填色。</p>
+
+  <h2>6. 运营查看顺序</h2>
+  <ol>
+    <li>选择日期、店铺、周期并加载数据。</li>
+    <li>先看数据验收与核心 KPI，确认口径完整。</li>
+    <li>进入执行表，横向滚动到状态列，根据蓝粉提示定位重点单品。</li>
+    <li>结合等级、动作、退款与库存信息决定放量、优化、止损或补货。</li>
+    <li>导出 Excel，在<code>商品推广执行表</code>和<code>指标状态规则</code>Sheet中复核。</li>
+  </ol>
+
+  <h2>7. 验收清单</h2>
+  <ul>
+    <li>页面普通列没有整片浅黄底色。</li>
+    <li>只有符合 TOP15×TOP50 且 GMV&gt;0 的商品状态格可能着色。</li>
+    <li>浅蓝/浅粉单元格均使用深色文字，清晰可读。</li>
+    <li>搜索、等级、操作筛选不会改变原始 TOP 排名资格。</li>
+    <li>两种 Excel 导出的底色与页面一致。</li>
+  </ul>
+
+  <p>v2.29仅在“品类基础分析”页面与一键复制结果中增加两项访客指标，并延续v2.28看板日趋势、v2.27下载稳定性、v2.26“7日付费环比”、v2.25安全缓存与v2.24底色规则；既有Excel工作表、状态判定和动作逻辑均未修改。</p>
+</main>
+</body>
+</html>

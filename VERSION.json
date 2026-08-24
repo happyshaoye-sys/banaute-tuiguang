@@ -1,7 +1,7 @@
 {
   "product": "MetoX",
-  "version": "2.28",
-  "release_date": "2026-08-20",
+  "version": "2.29",
+  "release_date": "2026-08-24",
   "external_strategy_version": "v9.3",
   "rule_versions": {
     "refund_risk": "2026-08-02",
@@ -36,6 +36,7 @@
     "daily_fact_cache": "2026-08-15",
     "shared_dimension_cache": "2026-08-15",
     "deferred_all_sheets_download": "2026-08-18",
-    "dashboard_kpi_daily_trend": "2026-08-20"
+    "dashboard_kpi_daily_trend": "2026-08-20",
+    "category_visitor_metrics": "2026-08-24"
   }
 }
