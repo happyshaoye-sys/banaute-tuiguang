@@ -681,12 +681,12 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
     h7_current = aggregate_category_metrics(
         day_map,
         iter_dates(h7_period["current_start"], h7_period["current_end"]),
-        ["GMV", "商品访客数"],
+        ["GMV", "商品访客数", "商品加购件数", "支付买家数"],
     )
     h7_previous = aggregate_category_metrics(
         day_map,
         iter_dates(h7_period["prev_start"], h7_period["prev_end"]),
-        ["GMV", "付费", "关键词", "人群", "全站", "商品访客数"],
+        ["GMV", "付费", "关键词", "人群", "全站", "商品访客数", "商品加购件数", "支付买家数"],
     )
     cat_ctx = {
         'period_choice': period_choice,
@@ -696,6 +696,10 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
         'h7_prev_gmv': h7_previous['GMV'],
         'h7_cur_visitors': h7_current['商品访客数'],
         'h7_prev_visitors': h7_previous['商品访客数'],
+        'h7_cur_carts': h7_current['商品加购件数'],
+        'h7_prev_carts': h7_previous['商品加购件数'],
+        'h7_cur_buyers': h7_current['支付买家数'],
+        'h7_prev_buyers': h7_previous['支付买家数'],
         'h7_prev_spend': h7_previous['付费'],
         'h7_prev_keyword': h7_previous['关键词'],
         'h7_prev_crowd': h7_previous['人群'],
@@ -1696,7 +1700,8 @@ with tab6:
         _ctx = st.session_state.get('cat_ctx') or {}
         if _ctx.get('sel_label'):
             st.caption(f"口径: 主表={_ctx.get('period_choice','当日')} | "
-                       f"付费环比按 {_ctx['sel_label']} 窗口 | 7日GMV/访客数环比按 7日窗口")
+                       f"付费环比按 {_ctx['sel_label']} 窗口 | "
+                       "7日GMV/访客数/加购/支付转化率环比按 7日窗口")
         cat = category_analysis(df, cat_ctx=_ctx)
         if cat['basic']:
             st.subheader("品类基础分析")

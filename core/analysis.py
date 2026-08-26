@@ -454,8 +454,11 @@ def category_analysis(df, cat_ctx=None):
       {'sel_prev_spend': {类目: 上一周期付费}, 'h7_cur_gmv': {类目: 7日窗GMV},
        'h7_prev_gmv': {类目: 上一7日窗GMV},
        'h7_cur_visitors|h7_prev_visitors': {类目: 7日窗商品访客数},
+       'h7_cur_carts|h7_prev_carts': {类目: 7日窗商品加购件数},
+       'h7_cur_buyers|h7_prev_buyers': {类目: 7日窗支付买家数},
        'h7_prev_spend|keyword|crowd|omni': {类目: 上一7日窗渠道金额}}
-    - 基础表新增 付费占比(=品类付费/品类GMV,用户定义口径)、付费环比、访客数占比与7日访客数环比;
+    - 基础表含品类加购件数、品类加购率(加购件数/访客数)、品类支付转化率
+      (支付买家数/访客数)，三项环比均使用固定当前7日与前7日窗口;
     - 投放表新增 7日GMV环比与7日付费环比(固定7日窗口品类环比);
     - '7天GMV'优先使用上一7日窗口的完整品类GMV,避免只汇总本期仍存在商品的上周期金额。"""
     if '淘宝类目' not in df.columns or len(df) == 0:
@@ -466,6 +469,10 @@ def category_analysis(df, cat_ctx=None):
     h7_prev_gmv = ctx.get('h7_prev_gmv') or {}
     h7_cur_visitors = ctx.get('h7_cur_visitors') or {}
     h7_prev_visitors = ctx.get('h7_prev_visitors') or {}
+    h7_cur_carts = ctx.get('h7_cur_carts') or {}
+    h7_prev_carts = ctx.get('h7_prev_carts') or {}
+    h7_cur_buyers = ctx.get('h7_cur_buyers') or {}
+    h7_prev_buyers = ctx.get('h7_prev_buyers') or {}
     has_complete_h7_prev = ctx.get('h7_prev_gmv') is not None
     h7_prev_spend = ctx.get('h7_prev_spend') or {}
     h7_prev_keyword = ctx.get('h7_prev_keyword') or {}
@@ -491,10 +498,16 @@ def category_analysis(df, cat_ctx=None):
     for col in ('上周期金额', '上周期付费', '上周期关键词', '上周期人群', '上周期全站'):
         if col not in work.columns:
             work[col] = 0.0
+    for col in ('商品加购件数', '支付买家数'):
+        if col not in work.columns:
+            work[col] = 0.0
+        else:
+            work[col] = pd.to_numeric(work[col], errors='coerce').fillna(0.0)
 
     cat_agg = work.groupby('淘宝类目').agg(
         cnt=('宝贝ID','count'), gmv=('GMV','sum'), spend=('付费','sum'),
         refund_w=('_refund_w','sum'), visitors=('商品访客数','sum'),
+        carts=('商品加购件数','sum'), buyers=('支付买家数','sum'),
         kw=('关键词','sum'), crowd=('人群','sum'), omni=('全站','sum'),
         d7gmv=('上周期金额','sum'), d7spend=('上周期付费','sum'),
         d7kw=('上周期关键词','sum'), d7crowd=('上周期人群','sum'), d7omni=('上周期全站','sum'),
@@ -508,6 +521,16 @@ def category_analysis(df, cat_ctx=None):
     basic, invest = [], []
     for _, r in cat_agg.iterrows():
         cat_key = r['淘宝类目']
+        cur_7d_visitors = float(h7_cur_visitors.get(cat_key, 0.0))
+        prev_7d_visitors = float(h7_prev_visitors.get(cat_key, 0.0))
+        cur_7d_carts = float(h7_cur_carts.get(cat_key, 0.0))
+        prev_7d_carts = float(h7_prev_carts.get(cat_key, 0.0))
+        cur_7d_buyers = float(h7_cur_buyers.get(cat_key, 0.0))
+        prev_7d_buyers = float(h7_prev_buyers.get(cat_key, 0.0))
+        cur_7d_cart_rate = safe_div(cur_7d_carts, cur_7d_visitors)
+        prev_7d_cart_rate = safe_div(prev_7d_carts, prev_7d_visitors)
+        cur_7d_conversion = safe_div(cur_7d_buyers, cur_7d_visitors)
+        prev_7d_conversion = safe_div(prev_7d_buyers, prev_7d_visitors)
         prev_7d_spend = (
             float(h7_prev_spend.get(cat_key, 0.0))
             if has_complete_h7_channels else float(r['d7spend'])
@@ -520,8 +543,13 @@ def category_analysis(df, cat_ctx=None):
             '付费环比': _mom(float(r['spend']), float(sel_prev_spend.get(cat_key, 0.0))),
             '商品访客数': int(r['visitors']),
             '访客数占比': f'{safe_div(r["visitors"],total_visitors)*100:.1f}%',
-            '7日访客数环比': _mom(float(h7_cur_visitors.get(cat_key, 0.0)),
-                              float(h7_prev_visitors.get(cat_key, 0.0))),
+            '7日访客数环比': _mom(cur_7d_visitors, prev_7d_visitors),
+            '品类加购件数': int(r['carts']),
+            '7日加购件数环比': _mom(cur_7d_carts, prev_7d_carts),
+            '品类加购率': f'{safe_div(r["carts"],r["visitors"])*100:.1f}%',
+            '7日加购率环比': _mom(cur_7d_cart_rate, prev_7d_cart_rate),
+            '品类支付转化率': f'{safe_div(r["buyers"],r["visitors"])*100:.1f}%',
+            '7日支付转化率环比': _mom(cur_7d_conversion, prev_7d_conversion),
             '退款率': f'{safe_div(r["refund_w"],r["gmv"])*100:.1f}%',
             'SPU价值': float(safe_div(r['gmv'],r['cnt'])),
             'ROI': f'{safe_div(r["gmv"],r["spend"]):.2f}',
