@@ -49,6 +49,14 @@ from core.v93_signal import parse_v93_report
 from core.metox_algorithm import apply_metox_algorithm
 from core.metric_labels import apply_metric_labels
 from core.task_engine import AI_TASK_MAIN_COLUMNS, parse_plan_execution_details
+from core.llm_advisor import (
+    LLMAdvisorError,
+    PROVIDER_SPECS,
+    build_task_payload,
+    call_advisor,
+    provider_key_available,
+)
+from core.feedback_store import FeedbackStore, FeedbackValidationError
 from core.jst_stock import find_snapshot, load_snapshot_as_stock
 from core.jst_refund import find_refund_snapshot, load_refund_rates
 from core.exporter import export_execution_table, export_all_sheets, style_execution_table
@@ -70,9 +78,15 @@ GIT_PROJECT_NAME = PRODUCT_NAME
 for key in ['df','prev_df','kpis','prev_kpis','kpi_mom','plan_ids','prev_plan_ids','cur_date','prev_date',
             'sources_info','traffic_bounds','value_bounds','traffic_ref','value_ref',
             'loaded','processing_msg','timings','total_time','period_logs','cat_ctx','kpi_trends',
-            'new_product_ctx','new_product_load_state','new_product_history','new_product_progress']:
+            'new_product_ctx','new_product_load_state','new_product_history','new_product_progress',
+            'llm_recommendations','llm_feedback_status']:
     if key not in st.session_state:
-        st.session_state[key] = None if key != 'loaded' else False
+        if key == 'loaded':
+            st.session_state[key] = False
+        elif key in ('llm_recommendations', 'llm_feedback_status'):
+            st.session_state[key] = {}
+        else:
+            st.session_state[key] = None
 
 
 def _render_kpi_metric_with_trend(column, label, value, delta, *, trend_key,
@@ -3183,6 +3197,232 @@ with tab3:
                 width="stretch",
                 hide_index=True,
                 height=min(420, 72 + 36 * len(selected_plan_details)),
+            )
+
+        st.markdown("#### 大模型复核与人工反馈")
+        st.caption(
+            "可选能力：把当前任务的最小必要字段发送给所选模型，结合相同类目、相同任务类型的历史反馈复核建议。"
+            "模型不读取商品名称、密钥或操作人信息，不会自动执行预算调整。"
+        )
+        provider_keys = list(PROVIDER_SPECS)
+        llm_col1, llm_col2 = st.columns(2)
+        with llm_col1:
+            llm_provider = st.selectbox(
+                "模型服务",
+                provider_keys,
+                format_func=lambda value: PROVIDER_SPECS[value].label,
+                key="llm_advisor_provider",
+            )
+        provider_spec = PROVIDER_SPECS[llm_provider]
+        with llm_col2:
+            llm_model = st.selectbox(
+                "模型",
+                provider_spec.models,
+                index=provider_spec.models.index(provider_spec.default_model),
+                key=f"llm_advisor_model_{llm_provider}",
+            )
+
+        llm_context = {
+            "店铺": shop,
+            "周期": (st.session_state.get('cat_ctx') or {}).get('period_choice', period_choice),
+            "数据日期": st.session_state.get('cur_date'),
+            "版本": APP_VERSION,
+        }
+        llm_task_payload = build_task_payload(selected_task.to_dict(), context=llm_context)
+        llm_store = FeedbackStore()
+        llm_learning_context = llm_store.build_learning_context(llm_task_payload)
+        st.caption(
+            f"历史反馈匹配：{llm_learning_context['matched_count']} 条｜"
+            f"本地反馈目录：{llm_store.root}｜密钥仅从环境变量 {provider_spec.api_key_env} 读取"
+        )
+
+        llm_config_error = ""
+        try:
+            llm_key_ready = provider_key_available(llm_provider)
+        except LLMAdvisorError as exc:
+            llm_key_ready = False
+            llm_config_error = str(exc)
+        if llm_config_error:
+            st.error(llm_config_error)
+        elif not llm_key_ready:
+            st.info(f"尚未配置 {provider_spec.api_key_env}，配置后即可调用；现有MetoX规则任务不受影响。")
+
+        llm_cache_key = f"{llm_task_payload['task_key']}|{llm_provider}|{llm_model}"
+        if st.button(
+            "生成 / 刷新大模型建议",
+            type="primary",
+            disabled=not llm_key_ready,
+            key=f"llm_generate_{llm_task_payload['task_key']}",
+        ):
+            try:
+                with st.spinner("正在复核当前任务……"):
+                    llm_recommendation = call_advisor(
+                        provider=llm_provider,
+                        model=llm_model,
+                        task=selected_task.to_dict(),
+                        context=llm_context,
+                        feedback_context=llm_learning_context,
+                    )
+                    llm_store.record_recommendation(
+                        llm_recommendation,
+                        llm_recommendation["task_payload"],
+                    )
+                st.session_state["llm_recommendations"][llm_cache_key] = llm_recommendation
+                st.success("建议已生成并保存到本地反馈记录；尚未执行任何推广动作。")
+            except (LLMAdvisorError, FeedbackValidationError, OSError) as exc:
+                st.error(f"大模型建议生成失败：{exc}")
+
+        llm_recommendation = st.session_state["llm_recommendations"].get(llm_cache_key)
+        if llm_recommendation:
+            advice_col1, advice_col2, advice_col3 = st.columns(3)
+            advice_col1.metric("模型建议", llm_recommendation["recommendation"])
+            advice_col2.metric(
+                "预算动作",
+                llm_recommendation["budget_action"],
+                f"{llm_recommendation['budget_change_percent']:+.1f}%",
+            )
+            advice_col3.metric("可信度", llm_recommendation["confidence"])
+            st.write(f"**理由：** {llm_recommendation['reason']}")
+            st.write("**证据：** " + "；".join(llm_recommendation["evidence"]))
+            if llm_recommendation["risks"]:
+                st.write("**风险：** " + "；".join(llm_recommendation["risks"]))
+            st.write(
+                f"**观察期：** {llm_recommendation['observation_days']} 天｜"
+                f"**成功标准：** {llm_recommendation['success_criteria']}｜"
+                f"**停止条件：** {llm_recommendation['stop_conditions']}"
+            )
+            if llm_recommendation["needs_manual_review"]:
+                st.warning("该建议必须人工复核。" + "；".join(llm_recommendation["guardrail_notes"]))
+
+            with st.expander("一键反馈给MetoX", expanded=True):
+                st.caption("直接点击“采纳/驳回/暂缓”即可；只有修改后采纳时建议补充实际动作和预算。")
+                feedback_action = st.text_input(
+                    "实际执行动作（可选）",
+                    value="",
+                    key=f"llm_actual_action_{llm_recommendation['recommendation_id']}",
+                )
+                feedback_budget_cols = st.columns(2)
+                with feedback_budget_cols[0]:
+                    feedback_budget_before = st.text_input(
+                        "调整前预算（可选）",
+                        value="",
+                        key=f"llm_budget_before_{llm_recommendation['recommendation_id']}",
+                    )
+                with feedback_budget_cols[1]:
+                    feedback_budget_after = st.text_input(
+                        "调整后预算（可选）",
+                        value="",
+                        key=f"llm_budget_after_{llm_recommendation['recommendation_id']}",
+                    )
+                feedback_reason = st.text_area(
+                    "修改或驳回原因（对应情形建议填写）",
+                    value="",
+                    height=80,
+                    key=f"llm_feedback_reason_{llm_recommendation['recommendation_id']}",
+                )
+                feedback_buttons = st.columns(4)
+                feedback_decision = None
+                for button_col, decision in zip(feedback_buttons, ("采纳", "修改后采纳", "驳回", "暂缓")):
+                    if button_col.button(
+                        decision,
+                        width="stretch",
+                        key=f"llm_feedback_{decision}_{llm_recommendation['recommendation_id']}",
+                    ):
+                        feedback_decision = decision
+                if feedback_decision:
+                    if feedback_decision in ("修改后采纳", "驳回") and not feedback_reason.strip():
+                        st.warning("为便于后续学习，修改后采纳或驳回时请填写原因。")
+                    else:
+                        try:
+                            feedback_record = llm_store.record_feedback(
+                                llm_recommendation,
+                                llm_recommendation["task_payload"],
+                                decision=feedback_decision,
+                                actual_action=feedback_action,
+                                budget_before=feedback_budget_before,
+                                budget_after=feedback_budget_after,
+                                reason=feedback_reason,
+                            )
+                            st.session_state["llm_feedback_status"][
+                                llm_recommendation["recommendation_id"]
+                            ] = feedback_record
+                            st.success(
+                                f"已反馈：{feedback_decision}｜反馈ID：{feedback_record['feedback_id']}"
+                            )
+                        except (FeedbackValidationError, OSError) as exc:
+                            st.error(f"反馈保存失败：{exc}")
+
+            saved_feedback = st.session_state["llm_feedback_status"].get(
+                llm_recommendation["recommendation_id"]
+            )
+            if saved_feedback:
+                with st.expander("回填后续结果（可选）", expanded=False):
+                    outcome_days = st.number_input(
+                        "观察天数",
+                        min_value=1,
+                        max_value=90,
+                        value=int(llm_recommendation["observation_days"]),
+                        step=1,
+                        key=f"llm_outcome_days_{saved_feedback['feedback_id']}",
+                    )
+                    outcome_cols = st.columns(3)
+                    with outcome_cols[0]:
+                        outcome_gmv = st.text_input(
+                            "观察期GMV（可选）",
+                            key=f"llm_outcome_gmv_{saved_feedback['feedback_id']}",
+                        )
+                    with outcome_cols[1]:
+                        outcome_spend = st.text_input(
+                            "观察期花费（可选）",
+                            key=f"llm_outcome_spend_{saved_feedback['feedback_id']}",
+                        )
+                    with outcome_cols[2]:
+                        outcome_roi = st.text_input(
+                            "观察期投产（可选）",
+                            key=f"llm_outcome_roi_{saved_feedback['feedback_id']}",
+                        )
+                    outcome_note = st.text_input(
+                        "结果备注（可选）",
+                        key=f"llm_outcome_note_{saved_feedback['feedback_id']}",
+                    )
+                    if st.button(
+                        "保存后续结果",
+                        key=f"llm_outcome_save_{saved_feedback['feedback_id']}",
+                    ):
+                        try:
+                            raw_metrics = {
+                                "gmv": outcome_gmv.strip(),
+                                "spend": outcome_spend.strip(),
+                                "roi": outcome_roi.strip(),
+                            }
+                            outcome_metrics = {
+                                key: float(value)
+                                for key, value in raw_metrics.items()
+                                if value
+                            }
+                            if not outcome_metrics:
+                                st.warning("至少填写一个后续结果指标。")
+                            else:
+                                outcome_record = llm_store.record_outcome(
+                                    feedback_id=saved_feedback["feedback_id"],
+                                    recommendation_id=llm_recommendation["recommendation_id"],
+                                    horizon_days=int(outcome_days),
+                                    metrics=outcome_metrics,
+                                    note=outcome_note,
+                                )
+                                st.success(f"后续结果已保存：{outcome_record['outcome_id']}")
+                        except (ValueError, FeedbackValidationError, OSError) as exc:
+                            st.error(f"后续结果保存失败：{exc}")
+
+        feedback_records = llm_store.list_feedback()
+        if feedback_records:
+            feedback_export = pd.DataFrame(feedback_records).to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                "导出全部人工反馈 CSV",
+                data=feedback_export,
+                file_name=f"MetoX人工反馈_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                key="llm_feedback_download",
             )
 
 # ── Tab 4: 执行表 ────────────────────────────────────────

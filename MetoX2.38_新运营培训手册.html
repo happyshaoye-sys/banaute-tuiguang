@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MetoX2.37 新运营培训手册</title>
+  <title>MetoX2.38 新运营培训手册</title>
   <style>
     body {
       margin: 0;
@@ -64,29 +64,28 @@
 <body>
   <main>
     <header>
-      <h1>MetoX2.37 新运营培训手册</h1>
-      <div class="meta">版本：MetoX v2.37 ｜ 发布日期：2026-09-02 ｜ 外部策略算法：v9.3（本次未变更）</div>
+      <h1>MetoX2.38 新运营培训手册</h1>
+      <div class="meta">版本：MetoX v2.38 ｜ 发布日期：2026-09-02 ｜ 外部策略算法：v9.3（本次未变更）</div>
     </header>
 
     <section>
       <h2>一、先看本版变化</h2>
-      <p>v2.37 修复“新品视图”的流量验证口径：流量验证只根据 D1 至当前判定节点累计商品访客数判断；有效数据天数继续独立决定样本是否充分。既有九个Tab、执行表动作、Excel旧工作表、MetoX算法、状态判定和外部 v9.3 策略保持不变。</p>
-      <div class="note">主流程不主动读取新品历史；进入“新品视图”后点击“加载新品历史”，已加载后可点“刷新新品历史”。</div>
+      <p>v2.38 在“AI任务视图”新增可选的大模型复核，支持 OpenAI 与 DeepSeek。模型只对MetoX已经生成的当前任务做结构化复核，不会自动修改预算、执行表或推广平台。</p>
+      <div class="note">先看MetoX规则，再看模型复核；规则冲突、低可信或无计划数据会强制提示人工复核。</div>
     </section>
 
     <section>
-      <h2>二、判定顺序</h2>
+      <h2>二、反馈操作</h2>
       <table>
         <thead>
-          <tr><th>顺序</th><th>检查项</th><th>结果</th></tr>
+          <tr><th>顺序</th><th>操作</th><th>结果</th></tr>
         </thead>
         <tbody>
-          <tr><td>1</td><td>D1 至当前判定节点内支付买家、支付件数或 GMV 任一大于 0</td><td>继续观察，标记动销保护</td></tr>
-          <tr><td>2</td><td>D1 至当前判定节点累计商品访客数不足 300</td><td>继续观察，标记流量验证不足</td></tr>
-          <tr><td>3</td><td>当前判定窗口有效数据天数少于 12</td><td>继续观察，标记数据不足</td></tr>
-          <tr><td>4</td><td>同店铺、同淘宝类目、同价格段有效样本少于 20</td><td>继续观察，标记同层不足</td></tr>
-          <tr><td>5</td><td>累计无成交、累计访客达标，商品加购率低于同层基准 B 的 80%，且加购件数证据弱</td><td>下架候选</td></tr>
-          <tr><td>6</td><td>有成交、流量不足、数据不足、同层不足或加购承接尚可</td><td>继续观察</td></tr>
+          <tr><td>1</td><td>在Windows环境变量配置 OPENAI_API_KEY 或 DEEPSEEK_API_KEY</td><td>页面识别模型服务，不在页面保存密钥</td></tr>
+          <tr><td>2</td><td>选择商品、供应商和模型，生成建议</td><td>得到建议、证据、风险、观察期和停止条件</td></tr>
+          <tr><td>3</td><td>对照MetoX规则人工决定</td><td>点击采纳、修改后采纳、驳回或暂缓</td></tr>
+          <tr><td>4</td><td>如调整预算，填写调整前后预算</td><td>MetoX自动计算实际调整额和比例</td></tr>
+          <tr><td>5</td><td>观察期结束后回填GMV、花费或投产</td><td>作为同类目、同任务类型后续建议的参考</td></tr>
         </tbody>
       </table>
     </section>
@@ -108,7 +107,7 @@
       <h2>五、日常操作</h2>
       <ol>
         <li>输入分析日期和时间周期，点击“加载并处理数据”。</li>
-        <li>确认页面显示 <code>MetoX v2.37</code>，先看数据验收和主执行表。</li>
+        <li>确认页面显示 <code>MetoX v2.38</code>，先看数据验收和主执行表。</li>
         <li>进入“新品视图”，点击“加载新品历史”；需要重读时点击“刷新新品历史”。</li>
         <li>先看动销保护和累计访客门槛，再处理无成交且加购承接弱的下架候选。</li>
         <li>需要交接时导出Excel，旧工作表字段和业务口径保持原样。</li>
