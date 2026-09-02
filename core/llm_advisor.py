@@ -324,26 +324,29 @@ def build_request_payload(
     task_payload: Mapping[str, Any],
     feedback_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    get_provider_spec(provider)
+    provider_key = get_provider_spec(provider).key
     dynamic_input = {
         "current_task": _json_safe(task_payload),
         "matching_historical_feedback": _json_safe(feedback_context or {"matched_count": 0}),
     }
+    response_format = {
+        "type": "json_schema",
+        "name": "metox_advice",
+        "schema": ADVICE_SCHEMA,
+    }
+    # DeepSeek Responses API supports json_schema, but does not accept the
+    # OpenAI-only `strict` member in text.format.
+    if provider_key == "openai":
+        response_format["strict"] = True
+
     body = {
         "model": model,
         "instructions": SYSTEM_INSTRUCTIONS,
         "input": json.dumps(dynamic_input, ensure_ascii=False, separators=(",", ":")),
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "metox_advice",
-                "strict": True,
-                "schema": ADVICE_SCHEMA,
-            }
-        },
+        "text": {"format": response_format},
         "max_output_tokens": 1400,
     }
-    if str(provider).lower() == "openai":
+    if provider_key == "openai":
         body["store"] = False
         body["reasoning"] = {"effort": "low"}
     return body
@@ -513,7 +516,20 @@ def _post_json(
         with urlopen(request, timeout=timeout) as response:
             raw = response.read().decode("utf-8")
     except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:1000]
+        raw_detail = exc.read().decode("utf-8", errors="replace").strip()
+        detail = raw_detail[:1000]
+        if raw_detail:
+            try:
+                error_payload = json.loads(raw_detail)
+                error = error_payload.get("error") if isinstance(error_payload, Mapping) else None
+                message = error.get("message") if isinstance(error, Mapping) else None
+                if message:
+                    detail = str(message).strip()[:1000]
+            except json.JSONDecodeError:
+                pass
+        if not detail:
+            reason = str(getattr(exc, "reason", "") or "").strip()
+            detail = reason or "服务未返回详细错误信息"
         raise LLMTransportError(f"大模型服务返回HTTP {exc.code}：{detail}") from exc
     except (URLError, TimeoutError, OSError) as exc:
         raise LLMTransportError(f"无法连接大模型服务：{exc}") from exc

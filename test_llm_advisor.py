@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from io import BytesIO
 import unittest
+from unittest.mock import patch
+from urllib.error import HTTPError
 
 from core.llm_advisor import (
     LLMConfigurationError,
     LLMResponseError,
+    LLMTransportError,
+    _post_json,
     build_request_payload,
     build_task_payload,
     call_advisor,
@@ -104,6 +109,7 @@ class TaskPayloadTests(unittest.TestCase):
 
         self.assertFalse(request["store"])
         self.assertEqual(request["text"]["format"]["type"], "json_schema")
+        self.assertTrue(request["text"]["format"]["strict"])
         self.assertFalse(request["text"]["format"]["schema"]["properties"]["needs_manual_review"].get("default", False))
         self.assertIn("不得直接执行", request["instructions"])
 
@@ -114,6 +120,33 @@ class TaskPayloadTests(unittest.TestCase):
         self.assertNotIn("store", request)
         self.assertNotIn("reasoning", request)
         self.assertEqual(request["text"]["format"]["type"], "json_schema")
+        self.assertNotIn("strict", request["text"]["format"])
+
+    def test_http_error_surfaces_service_message(self):
+        error = HTTPError(
+            "https://api.deepseek.com/responses",
+            400,
+            "Bad Request",
+            {},
+            BytesIO(b'{"error":{"message":"Unknown parameter: strict"}}'),
+        )
+        self.addCleanup(error.close)
+        with patch("core.llm_advisor.urlopen", side_effect=error):
+            with self.assertRaisesRegex(LLMTransportError, "Unknown parameter: strict"):
+                _post_json("https://api.deepseek.com/responses", {}, {}, 1)
+
+    def test_http_error_without_body_has_nonempty_reason(self):
+        error = HTTPError(
+            "https://api.deepseek.com/responses",
+            400,
+            "Bad Request",
+            {},
+            BytesIO(b""),
+        )
+        self.addCleanup(error.close)
+        with patch("core.llm_advisor.urlopen", side_effect=error):
+            with self.assertRaisesRegex(LLMTransportError, "Bad Request"):
+                _post_json("https://api.deepseek.com/responses", {}, {}, 1)
 
 
 class RecommendationValidationTests(unittest.TestCase):
