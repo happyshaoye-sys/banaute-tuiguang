@@ -285,7 +285,15 @@ def _ratio_series(num, den):
 
 
 def _numeric_series(values):
-    return pd.Series(values).map(to_num).astype(float)
+    series = pd.Series(values)
+    if pd.api.types.is_numeric_dtype(series):
+        return pd.to_numeric(series, errors='coerce').fillna(0.0).astype(float)
+    cleaned = (
+        series.astype(str)
+        .str.strip()
+        .str.replace(r'[,\s¥￥$%]', '', regex=True)
+    )
+    return pd.to_numeric(cleaned, errors='coerce').fillna(0.0).astype(float)
 
 
 def _first_non_empty(values):

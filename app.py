@@ -1,7 +1,7 @@
 """MetoX 半自动推广工具 — Streamlit 版。"""
 from __future__ import annotations
 
-import os, re, time, io, json, shutil, tempfile, hashlib
+import os, re, time, io, json, shutil, tempfile, hashlib, importlib, inspect
 from pathlib import Path
 from datetime import datetime
 from functools import partial
@@ -57,7 +57,8 @@ from core.version_control import find_repository, get_status, next_version_name,
 from core.version import APP_VERSION, DISPLAY_VERSION, PRODUCT_NAME
 from core.schema import (
     ALLOWED_SOURCE_TYPES, SOURCE_PRODUCT_INFO, SOURCE_PRODUCT_ROI, SOURCE_STOCK,
-    SOURCE_WUJIE_SUBJECT, classify_file, EXPORT_COLS, ACTION_RULES, compute_bounds,
+    SOURCE_WUJIE_SUBJECT, SOURCE_PRODUCT_OVERALL, SOURCE_WUJIE_CREATIVE,
+    classify_file, EXPORT_COLS, ACTION_RULES, compute_bounds,
     ensure_export_columns,
 )
 
@@ -68,7 +69,8 @@ GIT_PROJECT_NAME = PRODUCT_NAME
 # ── 初始化 Session State ─────────────────────────────────
 for key in ['df','prev_df','kpis','prev_kpis','kpi_mom','plan_ids','prev_plan_ids','cur_date','prev_date',
             'sources_info','traffic_bounds','value_bounds','traffic_ref','value_ref',
-            'loaded','processing_msg','timings','total_time','period_logs','cat_ctx','kpi_trends']:
+            'loaded','processing_msg','timings','total_time','period_logs','cat_ctx','kpi_trends',
+            'new_product_ctx','new_product_load_state','new_product_history','new_product_progress']:
     if key not in st.session_state:
         st.session_state[key] = None if key != 'loaded' else False
 
@@ -135,8 +137,9 @@ def _log_time(timings, label, start, extra=""):
     timings.append((label, f"{elapsed:.2f} 秒", extra))
     return elapsed
 
-def _scan_target_files(path):
+def _scan_target_files(path, source_types=None):
     files = []
+    allowed = PRIMARY_LOAD_SOURCE_TYPES if source_types is None else set(source_types)
     if not path or not os.path.isdir(str(path)):
         return files
     for fn in sorted(os.listdir(str(path))):
@@ -147,7 +150,7 @@ def _scan_target_files(path):
         if ext not in ('.xlsx', '.xls', '.csv'):
             continue
         src_type = classify_file(fn)
-        if src_type in ALLOWED_SOURCE_TYPES:
+        if src_type in allowed:
             files.append((fp, fn, src_type))
     return files
 
@@ -168,6 +171,431 @@ def _copy_file_to_cache(fp, cache_dir):
         return str(cache_path), True
     except Exception:
         return fp, False
+
+
+PRIMARY_LOAD_SOURCE_TYPES = {
+    SOURCE_PRODUCT_ROI,
+    SOURCE_WUJIE_SUBJECT,
+    SOURCE_STOCK,
+    SOURCE_PRODUCT_INFO,
+}
+NEW_PRODUCT_SOURCE_TYPES = [SOURCE_PRODUCT_OVERALL, SOURCE_WUJIE_CREATIVE]
+NEW_PRODUCT_HISTORY_DAYS = 90
+NEW_PRODUCT_CREATIVE_HISTORY_DAYS = 45
+NEW_PRODUCT_BUSINESS_HISTORY_DAYS = 45
+NEW_PRODUCT_LIFECYCLE_COLUMNS = [
+    '款式主图', '货号', '关联宝贝ID', '淘宝类目', 'ERP建档时间',
+    '首次在线发现日', '新品年龄', '判定轮次', 'D15结果', 'D30结果', '当前结果',
+    '动作可执行', '库存提示', '保护状态', '保护证据', '流量验证', '本轮成交',
+    '判定原因', '下架阻断原因', '样本充分性',
+    '保护因素', '风险因素', '预测日期',
+]
+NEW_PRODUCT_OFFICIAL_RESULTS = {'下架', '继续观察'}
+NEW_PRODUCT_LIFECYCLE_HIDDEN_COLUMNS = {
+    '商品名称', '判定结果',
+    'D14原因', 'D21原因', 'D28原因',
+    'D15原因', 'D30原因',
+    'D14样本充分性', 'D21样本充分性', 'D28样本充分性',
+    'D15样本充分性', 'D30样本充分性',
+    'D14保护状态', 'D21保护状态', 'D28保护状态',
+    'D15保护状态', 'D30保护状态',
+    'D14流量验证', 'D21流量验证', 'D28流量验证',
+    'D15流量验证', 'D30流量验证',
+    'D14本轮成交', 'D21本轮成交', 'D28本轮成交',
+    'D15本轮成交', 'D30本轮成交',
+    'D14保护因素', 'D21保护因素', 'D28保护因素',
+    'D15保护因素', 'D30保护因素',
+    'D14风险因素', 'D21风险因素', 'D28风险因素',
+    'D15风险因素', 'D30风险因素',
+    'D14动作可执行', 'D21动作可执行', 'D28动作可执行',
+    'D15动作可执行', 'D30动作可执行',
+    'D14库存提示', 'D21库存提示', 'D28库存提示',
+    'D15库存提示', 'D30库存提示',
+    'D14保护证据', 'D21保护证据', 'D28保护证据',
+    'D15保护证据', 'D30保护证据',
+    'D14下架阻断原因', 'D21下架阻断原因', 'D28下架阻断原因',
+    'D15下架阻断原因', 'D30下架阻断原因',
+    'D14结果', 'D21结果', 'D28结果',
+}
+NEW_PRODUCT_MATERIAL_COLUMNS = [
+    '宝贝ID', '货号', '淘宝类目', '主图整体点击率', '主图CTR是否有效',
+    '计划ID', '计划名称', '主体ID', '主体名称', '主体类型',
+    '创意ID', '创意名称', '创意首次发现日', '创意年龄', '创意展现量', '创意点击量',
+    '无界创意CTR', '上一7天CTR', 'CTR环比', '创意展现占比', '是否主投创意',
+]
+NEW_PRODUCT_MATERIAL_HIDDEN_COLUMNS = {'商品名称'}
+NEW_PRODUCT_BACKTEST_COLUMNS = [
+    '判定节点', '规则版本', '样本数', '下架建议数', '下架命中率', '误杀率',
+    '召回率', '下架覆盖率', '机会损失GMV', '机会损失预估利润',
+    '不可验证样本数', 'CTR增益', 'MetoX保护有效率', '分组',
+]
+
+
+def _new_product_methodology_frame(status_note=''):
+    rows = [
+        ('生命周期起点', '首次在线发现日', '同一货号下所有宝贝ID首次在商品-整体日报中当前在线的日期作为D1。'),
+        ('判定窗口', 'D15 / D30', 'D15汇总D1-D15并在15-29天展示；D30使用D16-D30并从30天起作为当前结果；官方判定结果只输出下架或继续观察。'),
+        ('动销保护', 'D1至当前判定点累计成交', '到达D15/D30后先看历史累计成交；支付买家数、支付件数、GMV任一大于0即继续观察并标记动销保护。'),
+        ('链接/库存现状', '仅作运营信息', '链接状态展示为动作可执行，库存展示为库存提示；两者不参与下架判定，库存问题由运营另行处理。'),
+        ('流量门槛', '累计访客数>=300', '从D1至当前周期末累计访客数达到300后才进入下架判定；未达到时只展示为流量验证不足。'),
+        ('无成交评估', '累计流量达标后看加购承接', 'D1至当前判定点累计无成交且累计访客数>=300时，才继续用加购件数和加购率判断承接能力。'),
+        ('比率公式', '累计分子÷累计分母', '商品加购率、无界创意CTR等展示指标按窗口累计分子除以累计分母重算。'),
+        ('主图整体点击率', '平台原值', '当前源没有主图点击量/曝光量，MVP只展示，不聚合、不参与A-D判定；待获得点击量/曝光量后再纳入验证。'),
+        ('MetoX', '影子验证', '正向标签作为保护候选；负向标签只作旁证，不能单独触发下架。'),
+    ]
+    if status_note:
+        rows.insert(0, ('状态', '新品上下文', status_note))
+    return pd.DataFrame(rows, columns=['主题', '口径', '说明'])
+
+
+def _normalize_new_product_result(value):
+    text = '' if value is None or pd.isna(value) else str(value).strip()
+    return text if text in NEW_PRODUCT_OFFICIAL_RESULTS else '继续观察'
+
+
+def _normalize_new_product_result_series(series, index):
+    if series is None:
+        series = pd.Series('', index=index, dtype=object)
+    return series.reindex(index).map(_normalize_new_product_result)
+
+
+def _normalize_new_product_protection_status(value):
+    text = '' if value is None or pd.isna(value) else str(value).strip()
+    return '动销保护' if text == '动销保护' else '无保护'
+
+
+def _new_product_lifecycle_display_frame(frame):
+    if not isinstance(frame, pd.DataFrame):
+        frame = pd.DataFrame(frame)
+    obsolete_period_cols = [
+        col for col in frame.columns
+        if str(col).startswith(('D1_D14_', 'D15_D28_', 'D1_D28_'))
+    ]
+    out = frame.drop(
+        columns=list(NEW_PRODUCT_LIFECYCLE_HIDDEN_COLUMNS) + obsolete_period_cols,
+        errors='ignore',
+    ).copy()
+    if '当前结果' not in out.columns and '判定结果' in frame.columns:
+        out['当前结果'] = frame['判定结果']
+    for column in ('D15结果', 'D30结果', '当前结果'):
+        if column in out.columns:
+            out[column] = out[column].map(_normalize_new_product_result)
+    if '保护状态' not in out.columns:
+        factors = out.get('保护因素', pd.Series('', index=out.index, dtype=object))
+        out['保护状态'] = factors.fillna('').astype(str).str.strip().map(
+            lambda text: '动销保护' if text else '无保护'
+        )
+    else:
+        out['保护状态'] = out['保护状态'].map(_normalize_new_product_protection_status)
+    preferred = [col for col in NEW_PRODUCT_LIFECYCLE_COLUMNS if col in out.columns]
+    remaining = [
+        col for col in out.columns
+        if col not in preferred and col not in NEW_PRODUCT_LIFECYCLE_HIDDEN_COLUMNS
+    ]
+    return out[preferred + remaining]
+
+
+def _new_product_material_display_frame(frame):
+    if not isinstance(frame, pd.DataFrame):
+        frame = pd.DataFrame(frame)
+    out = frame.drop(columns=list(NEW_PRODUCT_MATERIAL_HIDDEN_COLUMNS), errors='ignore').copy()
+    preferred = [col for col in NEW_PRODUCT_MATERIAL_COLUMNS if col in out.columns]
+    remaining = [
+        col for col in out.columns
+        if col not in preferred
+        and col not in NEW_PRODUCT_MATERIAL_HIDDEN_COLUMNS
+        and not str(col).startswith('_')
+    ]
+    return out[preferred + remaining]
+
+
+def _empty_new_product_context(message='新品生命周期模块未生成结果', status='unavailable'):
+    return {
+        'status': status,
+        'message': message,
+        'lifecycle': pd.DataFrame(columns=NEW_PRODUCT_LIFECYCLE_COLUMNS),
+        'materials': pd.DataFrame(columns=NEW_PRODUCT_MATERIAL_COLUMNS),
+        'backtest': pd.DataFrame(columns=NEW_PRODUCT_BACKTEST_COLUMNS),
+        'methodology': _new_product_methodology_frame(message),
+        'source_status': pd.DataFrame(columns=['数据源', '状态', '文件数']),
+        'coverage': pd.DataFrame(columns=['数据源', '状态', '文件数']),
+    }
+
+
+NEW_PRODUCT_UNLOADED_MESSAGE = '新品数据尚未加载，不影响推广执行表和其他分析。'
+
+
+def _new_product_unloaded_context():
+    return _empty_new_product_context(NEW_PRODUCT_UNLOADED_MESSAGE, status='unloaded')
+
+
+def _new_product_progress(progress_callback, value, text):
+    if not callable(progress_callback):
+        return
+    try:
+        progress_value = max(0.0, min(1.0, float(value)))
+    except Exception:
+        progress_value = 0.0
+    progress_callback(progress_value, text)
+
+
+def _build_new_product_load_state(
+    *,
+    base_root,
+    year,
+    shop,
+    date_str,
+    cache_root,
+    product_folder,
+    files_info,
+    cat_ctx,
+    sources,
+    day_map,
+    shared_dimensions,
+):
+    return {
+        'base_root': str(base_root or ''),
+        'year': str(year or ''),
+        'shop': str(shop or ''),
+        'date_str': str(date_str or ''),
+        'cache_root': str(cache_root or ''),
+        'product_folder': str(product_folder) if product_folder is not None else None,
+        'files_info': list(files_info or []),
+        'cat_ctx': dict(cat_ctx or {}),
+        'sources': dict(sources or {}),
+        'day_map': dict(day_map or {}),
+        'shared_dimensions': shared_dimensions,
+    }
+
+
+def _load_new_product_context_from_state(df, load_state, progress_callback=None):
+    if not isinstance(load_state, dict):
+        return None, _empty_new_product_context('请先加载推广数据，再加载新品历史。', status='error')
+
+    base_root = load_state.get('base_root') or ''
+    year = load_state.get('year') or ''
+    shop = load_state.get('shop') or ''
+    date_str = load_state.get('date_str') or ''
+    cache_root = load_state.get('cache_root') or ''
+    if not (base_root and year and shop and date_str and cache_root):
+        return None, _empty_new_product_context('新品历史加载参数不完整，请重新加载推广数据。', status='error')
+
+    _new_product_progress(progress_callback, 0.02, '准备加载新品历史...')
+    day_map = load_state.get('day_map') or {}
+    history = _load_new_product_history(
+        base_root,
+        year,
+        shop,
+        date_str,
+        Path(cache_root),
+        history_days=NEW_PRODUCT_HISTORY_DAYS,
+        product_folder=load_state.get('product_folder'),
+        shared_dimensions=load_state.get('shared_dimensions'),
+        existing_day_map=day_map,
+        progress_callback=progress_callback,
+    )
+    _new_product_progress(progress_callback, 0.94, '正在生成新品生命周期上下文...')
+    context = _build_new_product_context(
+        df,
+        day_map,
+        date_str,
+        files_info=load_state.get('files_info') or [],
+        base_root=base_root,
+        year=year,
+        shop=shop,
+        product_folder=load_state.get('product_folder'),
+        cache_root=Path(cache_root),
+        cat_ctx=load_state.get('cat_ctx') or {},
+        sources=load_state.get('sources') or {},
+        new_product_history=history,
+    )
+    _new_product_progress(progress_callback, 1.0, '新品历史加载完成')
+    return history, context
+
+
+def _call_with_supported_kwargs(func, **kwargs):
+    signature = inspect.signature(func)
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values()):
+        return func(**kwargs)
+    supported = {name: value for name, value in kwargs.items() if name in signature.parameters}
+    return func(**supported)
+
+
+def _coerce_new_product_context(result, default_message='新品生命周期模块未返回结果'):
+    if result is None:
+        return _empty_new_product_context(default_message)
+    if isinstance(result, pd.DataFrame):
+        ctx = _empty_new_product_context('', status='partial')
+        ctx['lifecycle'] = _new_product_lifecycle_display_frame(result)
+        return ctx
+    if isinstance(result, (list, tuple)):
+        ctx = _empty_new_product_context('', status='partial')
+        if len(result) > 0: ctx['lifecycle'] = _new_product_lifecycle_display_frame(result[0])
+        if len(result) > 1: ctx['materials'] = _new_product_material_display_frame(result[1])
+        if len(result) > 2: ctx['backtest'] = result[2]
+        return ctx
+    if isinstance(result, dict):
+        ctx = dict(result)
+        ctx.setdefault('status', 'complete')
+        ctx.setdefault('message', '')
+        ctx.setdefault('lifecycle', pd.DataFrame(columns=NEW_PRODUCT_LIFECYCLE_COLUMNS))
+        ctx.setdefault('materials', pd.DataFrame(columns=NEW_PRODUCT_MATERIAL_COLUMNS))
+        ctx.setdefault('backtest', pd.DataFrame(columns=NEW_PRODUCT_BACKTEST_COLUMNS))
+        ctx.setdefault('methodology', _new_product_methodology_frame(ctx.get('message', '')))
+        ctx['lifecycle'] = _new_product_lifecycle_display_frame(ctx.get('lifecycle'))
+        ctx['materials'] = _new_product_material_display_frame(ctx.get('materials'))
+        return ctx
+    return _empty_new_product_context(default_message)
+
+
+def _build_new_product_context(df, day_map, date_str, *, files_info=None, base_root=None,
+                               year=None, shop=None, product_folder=None, cache_root=None,
+                               cat_ctx=None, sources=None, new_product_history=None):
+    builders = [
+        ('core.new_product_lifecycle', [
+            'build_new_product_view_context',
+            'build_new_product_context',
+            'build_new_product_view',
+            'build_new_product_mvp',
+        ]),
+    ]
+    kwargs = {
+        'df': df,
+        'current_df': df,
+        'day_map': day_map,
+        'date_str': date_str,
+        'analysis_date': date_str,
+        'files_info': files_info or [],
+        'base_root': base_root,
+        'year': year,
+        'shop': shop,
+        'product_folder': product_folder,
+        'cache_root': cache_root,
+        'cat_ctx': cat_ctx or {},
+        'sources': sources or {},
+        'current_sources': sources or {},
+        'new_product_history': new_product_history or {},
+        'product_overall_daily': (new_product_history or {}).get('product_overall_daily', {}),
+        'creative_daily': (new_product_history or {}).get('creative_daily', {}),
+        'business_daily_facts': day_map,
+    }
+    for module_name, function_names in builders:
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+        for function_name in function_names:
+            builder = getattr(module, function_name, None)
+            if builder is None:
+                continue
+            try:
+                return _coerce_new_product_context(
+                    _call_with_supported_kwargs(builder, **kwargs)
+                )
+            except Exception as exc:
+                return _empty_new_product_context(
+                    f'新品视图生成失败：{str(exc)[:160]}',
+                    status='error',
+                )
+    if new_product_history is not None:
+        try:
+            return _build_new_product_context_from_sources(
+                df, day_map, date_str, new_product_history
+            )
+        except Exception as exc:
+            return _empty_new_product_context(
+                f'新品视图本地适配失败：{str(exc)[:160]}',
+                status='error',
+            )
+    return _empty_new_product_context('新品生命周期模块未接入；当前仅显示口径说明和空导出模板。')
+
+
+def _new_product_context_frame(context, keys, columns):
+    if not isinstance(context, dict):
+        return pd.DataFrame(columns=columns)
+    for key in keys:
+        value = context.get(key)
+        if value is None:
+            continue
+        frame = value.copy() if isinstance(value, pd.DataFrame) else pd.DataFrame(value)
+        if columns == NEW_PRODUCT_LIFECYCLE_COLUMNS:
+            frame = _new_product_lifecycle_display_frame(frame)
+        elif columns == NEW_PRODUCT_MATERIAL_COLUMNS:
+            frame = _new_product_material_display_frame(frame)
+        preferred = [column for column in columns if column in frame.columns]
+        hidden = set(NEW_PRODUCT_LIFECYCLE_HIDDEN_COLUMNS)
+        if columns == NEW_PRODUCT_MATERIAL_COLUMNS:
+            hidden |= NEW_PRODUCT_MATERIAL_HIDDEN_COLUMNS
+        remaining = [
+            column for column in frame.columns
+            if column not in preferred and column not in hidden
+        ]
+        return frame[preferred + remaining]
+    return pd.DataFrame(columns=columns)
+
+
+def _frame_to_csv_bytes(frame):
+    return frame.to_csv(index=False).encode('utf-8-sig')
+
+
+def _filter_new_product_context(context, execution_frame):
+    if not isinstance(context, dict) or execution_frame is None or execution_frame.empty:
+        return context
+    sku_set = set()
+    pid_set = set()
+    splitter = re.compile(r'[,，、;；|\s/]+')
+
+    def _clean_sku(value):
+        text = str(value).strip() if value is not None and not pd.isna(value) else ''
+        return '' if text in ('', 'nan', 'None') else text
+
+    def _split_pid_list(value):
+        text = str(value or '').strip()
+        if not text:
+            return set()
+        return {
+            _id_key(part) for part in splitter.split(text)
+            if _id_key(part)
+        }
+
+    if '货号' in execution_frame.columns:
+        sku_set = {
+            _clean_sku(value) for value in execution_frame['货号'].dropna()
+            if _clean_sku(value)
+        }
+    if '宝贝ID' in execution_frame.columns:
+        pid_set = {
+            _id_key(value) for value in execution_frame['宝贝ID'].dropna()
+            if _id_key(value)
+        }
+
+    def _filtered(frame):
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            return frame
+        mask = pd.Series(False, index=frame.index)
+        has_filter = False
+        if sku_set and '货号' in frame.columns:
+            mask |= frame['货号'].map(_clean_sku).isin(sku_set)
+            has_filter = True
+        if pid_set and '宝贝ID' in frame.columns:
+            mask |= frame['宝贝ID'].map(_id_key).isin(pid_set)
+            has_filter = True
+        if pid_set and '关联宝贝ID' in frame.columns:
+            mask |= frame['关联宝贝ID'].apply(
+                lambda value: bool(_split_pid_list(value) & pid_set)
+            )
+            has_filter = True
+        return frame[mask].copy() if has_filter else frame
+
+    filtered = dict(context)
+    for key in ('lifecycle', 'decision', 'decisions', 'materials', 'material', 'creative'):
+        if isinstance(filtered.get(key), pd.DataFrame):
+            filtered[key] = _filtered(filtered[key])
+            if key in ('lifecycle', 'decision', 'decisions'):
+                filtered[key] = _new_product_lifecycle_display_frame(filtered[key])
+            elif key in ('materials', 'material', 'creative'):
+                filtered[key] = _new_product_material_display_frame(filtered[key])
+    return filtered
 
 
 # ── 日级文件读取缓存（重复读取同一文件时直接复用）──
@@ -215,10 +643,1013 @@ def _read_sources_for_date(
     return sources, files_info, copied, len(file_list)
 
 
+def _new_product_history_dates(date_str, history_days=NEW_PRODUCT_HISTORY_DAYS):
+    end = pd.to_datetime(date_str, errors='coerce')
+    if pd.isna(end):
+        return []
+    start = end - pd.Timedelta(days=max(int(history_days), 1) - 1)
+    return [
+        day.date().isoformat()
+        for day in pd.date_range(start.normalize(), end.normalize(), freq='D')
+    ]
+
+
+def _scan_new_product_source_files(biz_folder, wujie_folder, include_creative=True):
+    files = _scan_target_files(biz_folder, source_types={SOURCE_PRODUCT_OVERALL})
+    if include_creative:
+        files += _scan_target_files(wujie_folder, source_types={SOURCE_WUJIE_CREATIVE})
+    return files
+
+
+def _append_daily_frame(target, day, frame):
+    frame = frame.copy()
+    frame['_数据日期'] = day
+    if '统计日期' not in frame.columns:
+        frame['统计日期'] = day
+    if day in target:
+        target[day] = pd.concat([target[day], frame], ignore_index=True)
+    else:
+        target[day] = frame
+
+
+def _build_new_product_source_status(product_daily, creative_daily, files_info, errors, dates):
+    expected_days = max(len(dates), 1)
+    rows = []
+    error_by_source = {}
+    for error in errors:
+        error_by_source.setdefault(error.get('source', ''), []).append(error.get('message', ''))
+    for source, daily in (
+        (SOURCE_PRODUCT_OVERALL, product_daily),
+        (SOURCE_WUJIE_CREATIVE, creative_daily),
+    ):
+        file_count = sum(1 for item in files_info if item.get('source') == source)
+        covered_days = len(daily)
+        source_errors = error_by_source.get(source, [])
+        if file_count <= 0:
+            status = '未提供'
+        elif source_errors:
+            status = '部分可用'
+        else:
+            status = '已提供'
+        rows.append({
+            '数据源': source,
+            '状态': status,
+            '文件数': file_count,
+            '覆盖天数': covered_days,
+            '期望天数': expected_days,
+            '覆盖率': f'{covered_days}/{expected_days}',
+            '备注': '；'.join(source_errors[:3]),
+        })
+    return pd.DataFrame(rows)
+
+
+def _load_new_product_business_history(
+    base_root, year, shop, product_folder, date_str, cache_root,
+    history_days=NEW_PRODUCT_BUSINESS_HISTORY_DAYS, shared_dimensions=None,
+    existing_day_map=None, progress_callback=None,
+):
+    if product_folder is None:
+        return {}, [], []
+    dates = _new_product_history_dates(date_str, history_days=history_days)
+    day_map = {}
+    files_info = []
+    errors = []
+    cache_stats = {'hits': 0, 'misses': 0}
+    total_days = max(len(dates), 1)
+    for idx, day in enumerate(dates, start=1):
+        reused = False
+        try:
+            entry = (existing_day_map or {}).get(day)
+            if entry is None:
+                entry = _load_single_day(
+                    base_root, day, year, shop, product_folder, cache_root,
+                    False, '新品经营历史',
+                    shared_dimensions=shared_dimensions,
+                    cache_stats=cache_stats,
+                )
+            else:
+                reused = True
+        except Exception as exc:
+            errors.append({'date': day, 'source': '经营日事实', 'message': str(exc)[:160]})
+            _new_product_progress(
+                progress_callback,
+                idx / total_days,
+                f"经营日事实读取失败 {idx}/{len(dates)} 天：{day}",
+            )
+            continue
+        action = '复用已加载经营日事实' if reused else '补读经营日事实'
+        _new_product_progress(
+            progress_callback,
+            idx / total_days,
+            f"正在{action} {idx}/{len(dates)} 天：{day}",
+        )
+        if entry is None or len(entry) == 0 or entry[0] is None:
+            continue
+        day_map[day] = entry
+        files_info.extend(entry[1] if len(entry) > 1 and entry[1] else [])
+    return day_map, files_info, errors
+
+
+def _load_new_product_history(base_root, year, shop, date_str, cache_root,
+                              history_days=NEW_PRODUCT_HISTORY_DAYS,
+                              product_folder=None, shared_dimensions=None,
+                              existing_day_map=None, progress_callback=None):
+    dates = _new_product_history_dates(date_str, history_days=history_days)
+    creative_dates = set(_new_product_history_dates(
+        date_str, history_days=NEW_PRODUCT_CREATIVE_HISTORY_DAYS
+    ))
+    product_daily = {}
+    creative_daily = {}
+    files_info = []
+    errors = []
+    cache_dir = Path(cache_root) / '_new_product_sources'
+    parsed_cache_dir = cache_dir / '_parsed'
+
+    total_days = max(len(dates), 1)
+    for idx, day in enumerate(dates, start=1):
+        if day in creative_dates:
+            progress_text = f"正在读取首次发现与创意历史 {idx}/{len(dates)} 天：{day}"
+        else:
+            progress_text = f"正在读取首次发现历史 {idx}/{len(dates)} 天：{day}"
+        _new_product_progress(
+            progress_callback,
+            0.05 + 0.65 * ((idx - 1) / total_days),
+            progress_text,
+        )
+        biz_folder, wujie_folder = _build_paths(base_root, day, year, shop)
+        for fp, fn, src_type in _scan_new_product_source_files(
+            biz_folder, wujie_folder, include_creative=day in creative_dates
+        ):
+            try:
+                local_fp, _did_copy = _copy_file_to_cache(fp, cache_dir / day)
+                frame = _load_day_raw_cached(
+                    local_fp,
+                    src_type,
+                    str(parsed_cache_dir),
+                    _mtime=os.path.getmtime(local_fp),
+                )
+                if src_type == SOURCE_PRODUCT_OVERALL:
+                    _append_daily_frame(product_daily, day, frame)
+                elif src_type == SOURCE_WUJIE_CREATIVE:
+                    _append_daily_frame(creative_daily, day, frame)
+                files_info.append({
+                    'name': fn,
+                    'source': src_type,
+                    'rows': len(frame),
+                    'cols': len(frame.columns),
+                    'period': f'新品历史:{day}',
+                })
+            except Exception as exc:
+                errors.append({
+                    'date': day,
+                    'source': src_type,
+                    'file': fn,
+                    'message': str(exc)[:160],
+                })
+
+    _new_product_progress(progress_callback, 0.72, '正在整理新品源覆盖...')
+
+    def business_progress(value, text):
+        _new_product_progress(progress_callback, 0.75 + 0.15 * value, text)
+
+    business_day_map, business_files_info, business_errors = _load_new_product_business_history(
+        base_root, year, shop, product_folder, date_str, cache_root,
+        history_days=NEW_PRODUCT_BUSINESS_HISTORY_DAYS,
+        shared_dimensions=shared_dimensions,
+        existing_day_map=existing_day_map,
+        progress_callback=business_progress,
+    )
+    _new_product_progress(progress_callback, 0.91, '正在生成新品源覆盖摘要...')
+    source_status = _build_new_product_source_status(
+        product_daily, creative_daily, files_info, errors, dates
+    )
+    missing_sources = source_status[source_status['文件数'].eq(0)]['数据源'].tolist()
+    status = 'complete'
+    if missing_sources:
+        status = 'missing'
+    elif errors:
+        status = 'partial'
+    message = ''
+    if missing_sources:
+        message = f"缺少新品源：{', '.join(missing_sources)}。新品Tab仅显示可用部分，旧9个Tab不受影响。"
+    elif errors:
+        message = f"新品源有 {len(errors)} 个文件读取失败，已隔离到新品Tab。"
+    if not business_day_map:
+        note = '新品经营日历史未覆盖，生命周期判定和回放可能不完整。'
+        message = (message + '；' if message else '') + note
+    elif business_errors:
+        note = f"新品经营日历史有 {len(business_errors)} 天读取失败。"
+        message = (message + '；' if message else '') + note
+    actual_history_start = min(product_daily.keys()) if product_daily else ''
+    requested_history_start = dates[0] if dates else ''
+    return {
+        'status': status,
+        'message': message,
+        'history_start_date': actual_history_start,
+        'requested_history_start_date': requested_history_start,
+        'history_end_date': dates[-1] if dates else date_str,
+        'first_seen_index_path': str(_first_seen_index_path(cache_root, year, shop)),
+        'product_overall_daily': product_daily,
+        'creative_daily': creative_daily,
+        'business_day_map': business_day_map,
+        'business_files_info': business_files_info,
+        'business_errors': business_errors,
+        'files_info': files_info,
+        'errors': errors,
+        'source_status': source_status,
+        'coverage': source_status,
+    }
+
+
+def _safe_cache_token(value):
+    text = str(value or '').strip()
+    text = re.sub(r'[^\w\u4e00-\u9fff.-]+', '_', text)
+    return text or 'default'
+
+
+def _first_seen_index_path(cache_root, year, shop):
+    cache_base = Path(cache_root)
+    return cache_base / f"new_product_first_seen_{_safe_cache_token(year)}_{_safe_cache_token(shop)}.pkl"
+
+
+def _load_first_seen_index(path):
+    if not path:
+        return None
+    try:
+        path = Path(path)
+        if not path.exists():
+            return None
+        return pd.read_pickle(path)
+    except Exception:
+        return None
+
+
+def _save_first_seen_index(frame, path):
+    if frame is None or not path:
+        return ''
+    try:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + '.tmp')
+        frame.to_pickle(tmp)
+        os.replace(tmp, path)
+        return ''
+    except Exception as exc:
+        return f'首次发现索引持久化失败：{str(exc)[:120]}'
+
+
+def _id_key(value):
+    text = '' if value is None or pd.isna(value) else str(value).strip()
+    if text.endswith('.0') and text[:-2].isdigit():
+        text = text[:-2]
+    return '' if text.lower() in ('nan', 'none', 'null') else text
+
+
+def _build_product_dimension_lookup(df, day_map):
+    frames = []
+    dimension_cols = [
+        '宝贝ID', '货号', '商品名称', '淘宝类目', '店铺', '款式主图', '创建时间',
+        '在仓库存', '件单价', '成本价（含税）', '价格段',
+    ]
+    for source in [df] + [
+        entry[0] for entry in (day_map or {}).values()
+        if entry is not None and len(entry) > 0 and isinstance(entry[0], pd.DataFrame)
+    ]:
+        if source is None or source.empty or '宝贝ID' not in source.columns:
+            continue
+        cols = [col for col in dimension_cols if col in source.columns]
+        part = source[cols].copy()
+        part['_pid_key'] = part['宝贝ID'].map(_id_key)
+        part = part[part['_pid_key'] != '']
+        if not part.empty:
+            frames.append(part)
+    if not frames:
+        return pd.DataFrame(columns=['_pid_key'])
+    lookup = pd.concat(frames, ignore_index=True)
+    return lookup.drop_duplicates('_pid_key', keep='last')
+
+
+def _merge_pid_dimensions(frame, dimensions):
+    if frame is None or frame.empty or '宝贝ID' not in frame.columns or dimensions is None or dimensions.empty:
+        return frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame()
+    work = frame.copy()
+    work['_pid_key'] = work['宝贝ID'].map(_id_key)
+    dim_cols = [col for col in dimensions.columns if col not in work.columns or col == '_pid_key']
+    merged = work.merge(dimensions[dim_cols], on='_pid_key', how='left')
+    return merged.drop(columns=['_pid_key'], errors='ignore')
+
+
+def _enrich_product_overall_daily(product_daily, dimensions):
+    enriched = {}
+    for day, frame in (product_daily or {}).items():
+        enriched[day] = _merge_pid_dimensions(frame, dimensions)
+        if '_数据日期' not in enriched[day].columns:
+            enriched[day]['_数据日期'] = day
+    return enriched
+
+
+def _daily_business_facts_with_new_product_status(day_map, product_daily):
+    frames = []
+    status_cols = ['宝贝ID', '商品状态', '主图整体点击率']
+    for day, entry in (day_map or {}).items():
+        if entry is None or len(entry) == 0 or not isinstance(entry[0], pd.DataFrame):
+            continue
+        frame = entry[0]
+        if frame is None or frame.empty:
+            continue
+        work = frame.copy()
+        work['_数据日期'] = day
+        status = product_daily.get(day)
+        if status is not None and not status.empty and '宝贝ID' in status.columns:
+            keep = [col for col in status_cols if col in status.columns]
+            status_frame = status[keep].copy()
+            status_frame['_pid_key'] = status_frame['宝贝ID'].map(_id_key)
+            status_frame = status_frame.drop_duplicates('_pid_key', keep='last')
+            work['_pid_key'] = work['宝贝ID'].map(_id_key) if '宝贝ID' in work.columns else ''
+            work = work.merge(
+                status_frame.drop(columns=['宝贝ID'], errors='ignore'),
+                on='_pid_key',
+                how='left',
+                suffixes=('', '_overall'),
+            ).drop(columns=['_pid_key'], errors='ignore')
+        frames.append(work)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def _replace_day_map_frame(entry, frame):
+    if isinstance(entry, tuple):
+        return (frame,) + tuple(entry[1:])
+    if isinstance(entry, list):
+        return [frame] + list(entry[1:])
+    return (frame, [], 0, 0, set(), {})
+
+
+def _with_checkpoint_visible_metox_labels(day_map):
+    if not day_map:
+        return day_map
+    labeled_map = {}
+    for day in sorted(day_map):
+        entry = day_map.get(day)
+        if entry is None or len(entry) == 0 or not isinstance(entry[0], pd.DataFrame):
+            labeled_map[day] = entry
+            continue
+        frame = entry[0]
+        if frame is None or frame.empty or 'MetoX算法命中' in frame.columns:
+            labeled_map[day] = entry
+            continue
+        visible_map = dict(labeled_map)
+        visible_map[day] = entry
+        try:
+            labeled = apply_metox_algorithm(frame.copy(), visible_map, day)
+        except Exception:
+            labeled = frame.copy()
+            labeled['MetoX算法命中'] = ''
+        labeled_map[day] = _replace_day_map_frame(entry, labeled)
+    return labeled_map
+
+
+def _numeric_metric_series(values, index=None):
+    """Convert metric values to floats while preserving thousands separators."""
+    if values is None:
+        return pd.Series(0.0, index=index, dtype=float)
+    series = values.copy() if isinstance(values, pd.Series) else pd.Series(values, index=index)
+    if pd.api.types.is_numeric_dtype(series):
+        return pd.to_numeric(series, errors='coerce').fillna(0.0).astype(float)
+    cleaned = (
+        series.astype(str)
+        .str.strip()
+        .str.replace(r'[,\s¥￥$%]', '', regex=True)
+    )
+    return pd.to_numeric(cleaned, errors='coerce').fillna(0.0).astype(float)
+
+
+def _creative_metrics_by_style_age(creative_daily, first_seen, product_style_map=None):
+    from core.new_product_backtest import BacktestColumns as C
+    from core.new_product_first_seen import (
+        FIRST_SEEN_DATE,
+        FIRST_SEEN_PRODUCT_ID,
+        STYLE_KEY,
+        build_style_key_series,
+        normalize_identifier,
+    )
+
+    if not creative_daily or first_seen is None or first_seen.empty:
+        return pd.DataFrame(columns=[C.style_key, C.age_day, C.creative_impressions, C.creative_clicks])
+
+    first_seen_keep = [STYLE_KEY, FIRST_SEEN_DATE]
+    first_seen_dates = first_seen[first_seen_keep].drop_duplicates(STYLE_KEY).copy()
+    pid_map = {}
+    if FIRST_SEEN_PRODUCT_ID in first_seen.columns:
+        pid_map = first_seen.set_index(FIRST_SEEN_PRODUCT_ID)[STYLE_KEY].to_dict()
+    for product_id, style_key in (product_style_map or {}).items():
+        normalized_product_id = normalize_identifier(product_id)
+        normalized_style_key = normalize_identifier(style_key)
+        if normalized_product_id and normalized_style_key:
+            pid_map[normalized_product_id] = normalized_style_key
+    frames = []
+    for day, frame in (creative_daily or {}).items():
+        if frame is None or frame.empty:
+            continue
+        part = frame.copy()
+        if '_数据日期' not in part.columns:
+            part['_数据日期'] = day
+        keys = build_style_key_series(part)
+        part[STYLE_KEY] = keys[STYLE_KEY]
+        if '宝贝ID' in part.columns and pid_map:
+            mapped = part['宝贝ID'].map(normalize_identifier).map(pid_map).fillna('')
+            part[STYLE_KEY] = part[STYLE_KEY].where(mapped == '', mapped)
+        part = part.merge(first_seen_dates, on=STYLE_KEY, how='inner')
+        if part.empty:
+            continue
+        data_date = pd.to_datetime(part['_数据日期'], errors='coerce')
+        first_seen_date = pd.to_datetime(part[FIRST_SEEN_DATE], errors='coerce')
+        part[C.age_day] = (data_date - first_seen_date).dt.days + 1
+        part = part[part[C.age_day].between(1, 45, inclusive='both')].copy()
+        if part.empty:
+            continue
+        impressions_col = '展现' if '展现' in part.columns else '展现量'
+        clicks_col = '点击' if '点击' in part.columns else '点击量'
+        part[C.creative_impressions] = _numeric_metric_series(
+            part.get(impressions_col), index=part.index
+        )
+        part[C.creative_clicks] = _numeric_metric_series(
+            part.get(clicks_col), index=part.index
+        )
+        frames.append(part[[STYLE_KEY, C.age_day, C.creative_impressions, C.creative_clicks]])
+    if not frames:
+        return pd.DataFrame(columns=[C.style_key, C.age_day, C.creative_impressions, C.creative_clicks])
+    work = pd.concat(frames, ignore_index=True)
+    work = work.rename(columns={STYLE_KEY: C.style_key})
+    return work.groupby([C.style_key, C.age_day], as_index=False, sort=False).agg({
+        C.creative_impressions: 'sum',
+        C.creative_clicks: 'sum',
+    })
+
+
+def _merge_backtest_label_values(values):
+    labels = []
+    for value in values:
+        if value is None:
+            continue
+        try:
+            if pd.isna(value):
+                continue
+        except TypeError:
+            pass
+        for part in re.split(r'[\s,，;；、/|]+', str(value)):
+            label = part.strip()
+            if label and label not in labels:
+                labels.append(label)
+    return ' '.join(labels)
+
+
+def _last_backtest_value(values, default=''):
+    for value in reversed(list(values)):
+        if value is None:
+            continue
+        try:
+            if pd.isna(value):
+                continue
+        except TypeError:
+            pass
+        if str(value).strip():
+            return value
+    return default
+
+
+def _collapse_backtest_rows_by_style_age(rows):
+    if rows is None or rows.empty:
+        return rows
+    from core.new_product_backtest import BacktestColumns as C
+
+    collapsed = []
+    numeric_cols = [C.visitors, C.carts, C.buyers, C.units, C.gmv, C.profit]
+    for (style_key, age_day), part in rows.groupby([C.style_key, C.age_day], sort=False, dropna=False):
+        row = {C.style_key: style_key, C.age_day: age_day}
+        row[C.store] = _last_backtest_value(part.get(C.store, []), '')
+        row[C.category] = _last_backtest_value(part.get(C.category, []), '')
+        row[C.price_band] = _last_backtest_value(part.get(C.price_band, []), '')
+        for column in numeric_cols:
+            row[column] = pd.to_numeric(part.get(column, pd.Series(dtype=float)), errors='coerce').fillna(0.0).sum()
+        row[C.valid_data_day] = bool(part.get(C.valid_data_day, pd.Series(False, index=part.index)).fillna(False).astype(bool).any())
+        row[C.is_online] = bool(part.get(C.is_online, pd.Series(True, index=part.index)).fillna(False).astype(bool).any())
+        row[C.stock_ok] = bool(part.get(C.stock_ok, pd.Series(True, index=part.index)).fillna(False).astype(bool).any())
+        row[C.manual_removed] = not row[C.is_online]
+        row[C.data_missing] = bool(part.get(C.data_missing, pd.Series(False, index=part.index)).fillna(False).astype(bool).any())
+        row[C.historical_truncated] = bool(part.get(C.historical_truncated, pd.Series(False, index=part.index)).fillna(False).astype(bool).any())
+        row[C.main_ctr] = _last_backtest_value(part.get(C.main_ctr, []), float('nan'))
+        row[C.creative_impressions] = pd.to_numeric(
+            part.get(C.creative_impressions, pd.Series(dtype=float)),
+            errors='coerce',
+        ).fillna(0.0).sum()
+        row[C.creative_clicks] = pd.to_numeric(
+            part.get(C.creative_clicks, pd.Series(dtype=float)),
+            errors='coerce',
+        ).fillna(0.0).sum()
+        row[C.metox_labels] = _merge_backtest_label_values(part.get(C.metox_labels, []))
+        collapsed.append(row)
+    return pd.DataFrame(collapsed)
+
+
+def _format_new_product_lifecycle_view(lifecycle, first_seen, d15=None, d30=None, date_str=''):
+    if lifecycle is None or lifecycle.empty:
+        return pd.DataFrame(columns=NEW_PRODUCT_LIFECYCLE_COLUMNS)
+    from core.new_product_first_seen import FIRST_SEEN_DATE, STYLE_KEY
+
+    view = lifecycle.copy()
+    age_filter = pd.to_numeric(view.get('新品年龄'), errors='coerce')
+    view = view[age_filter.between(1, 45, inclusive='both')].copy()
+    if view.empty:
+        return pd.DataFrame(columns=NEW_PRODUCT_LIFECYCLE_COLUMNS)
+    if first_seen is not None and not first_seen.empty:
+        keep = [col for col in first_seen.columns if col not in view.columns or col == STYLE_KEY]
+        view = view.merge(first_seen[keep], on=STYLE_KEY, how='left')
+
+    decision_cols = [
+        '判定结果', '判定原因', '样本充分性',
+        '动作可执行', '库存提示', '保护状态', '保护证据', '流量验证', '本轮成交',
+        '下架阻断原因', '保护因素', '风险因素',
+    ]
+    decision_info_cols = [
+        '动作可执行', '库存提示', '保护状态', '保护证据', '流量验证', '本轮成交',
+        '下架阻断原因', '保护因素', '风险因素',
+    ]
+    for source, prefix in ((d15, 'D15'), (d30, 'D30')):
+        if source is None or source.empty or STYLE_KEY not in source.columns:
+            view[f'{prefix}结果'] = '继续观察'
+            view[f'{prefix}原因'] = ''
+            view[f'{prefix}样本充分性'] = ''
+            for column in decision_info_cols:
+                view[f'{prefix}{column}'] = ''
+            continue
+        cols = [STYLE_KEY] + decision_cols
+        part = source[[col for col in cols if col in source.columns]].copy()
+        rename = {
+            '判定结果': f'{prefix}结果',
+            '判定原因': f'{prefix}原因',
+            '样本充分性': f'{prefix}样本充分性',
+            '动作可执行': f'{prefix}动作可执行',
+            '库存提示': f'{prefix}库存提示',
+            '保护状态': f'{prefix}保护状态',
+            '保护证据': f'{prefix}保护证据',
+            '流量验证': f'{prefix}流量验证',
+            '本轮成交': f'{prefix}本轮成交',
+            '下架阻断原因': f'{prefix}下架阻断原因',
+            '保护因素': f'{prefix}保护因素',
+            '风险因素': f'{prefix}风险因素',
+        }
+        view = view.merge(part.rename(columns=rename), on=STYLE_KEY, how='left')
+    view['D15结果'] = _normalize_new_product_result_series(view.get('D15结果'), view.index)
+    view['D30结果'] = _normalize_new_product_result_series(view.get('D30结果'), view.index)
+    age = pd.to_numeric(view.get('新品年龄'), errors='coerce').fillna(0).astype(int)
+    view['判定轮次'] = '未到D15'
+    d15_mask = (age >= 15) & (age < 30)
+    d30_mask = age >= 30
+    view.loc[d15_mask, '判定轮次'] = 'D15'
+    view.loc[d30_mask, '判定轮次'] = 'D30'
+    view['当前结果'] = '继续观察'
+    view.loc[d15_mask, '当前结果'] = view.loc[d15_mask, 'D15结果']
+    view.loc[d30_mask, '当前结果'] = view.loc[d30_mask, 'D30结果']
+    view['当前结果'] = _normalize_new_product_result_series(view['当前结果'], view.index)
+    view['判定原因'] = '未到第一轮判定日'
+    view.loc[d15_mask, '判定原因'] = view.loc[d15_mask, 'D15原因'].fillna('')
+    view.loc[d30_mask, '判定原因'] = view.loc[d30_mask, 'D30原因'].fillna('')
+
+    for target in (
+        '动作可执行', '库存提示', '样本充分性', '保护证据', '流量验证',
+        '本轮成交', '下架阻断原因', '保护因素', '风险因素',
+    ):
+        default = view.get(target, pd.Series('', index=view.index, dtype=object))
+        view[target] = default.fillna('').astype(str)
+        for mask, prefix in ((d15_mask, 'D15'), (d30_mask, 'D30')):
+            source_col = f'{prefix}{target}'
+            if source_col in view.columns:
+                view.loc[mask, target] = view.loc[mask, source_col].fillna('').astype(str)
+
+    default_protection = view.get('保护状态', pd.Series('无保护', index=view.index, dtype=object))
+    view['保护状态'] = default_protection.fillna('无保护').map(_normalize_new_product_protection_status)
+    for mask, prefix in ((d15_mask, 'D15'), (d30_mask, 'D30')):
+        source_col = f'{prefix}保护状态'
+        factor_col = f'{prefix}保护因素'
+        if source_col in view.columns:
+            view.loc[mask, '保护状态'] = view.loc[mask, source_col].map(_normalize_new_product_protection_status)
+        elif factor_col in view.columns:
+            view.loc[mask, '保护状态'] = view.loc[mask, factor_col].fillna('').astype(str).str.strip().map(
+                lambda text: '动销保护' if text else '无保护'
+            )
+    view.loc[view['保护状态'].astype(str).str.strip().eq(''), '保护状态'] = '无保护'
+    blank_protection_evidence = (
+        view['保护证据'].astype(str).str.strip().eq('')
+        & view['保护状态'].astype(str).str.strip().eq('动销保护')
+    )
+    view.loc[blank_protection_evidence, '保护证据'] = view.loc[blank_protection_evidence, '本轮成交']
+    blank_block_reason = (
+        view['下架阻断原因'].astype(str).str.strip().eq('')
+        & view['当前结果'].astype(str).str.strip().ne('下架')
+    )
+    view.loc[blank_block_reason, '下架阻断原因'] = view.loc[blank_block_reason, '判定原因']
+    view.loc[view['风险因素'].astype(str).str.strip().eq(''), '风险因素'] = view['判定原因']
+    view['预测日期'] = date_str
+    if FIRST_SEEN_DATE in view.columns and '首次在线发现日' not in view.columns:
+        view['首次在线发现日'] = view[FIRST_SEEN_DATE]
+    return _new_product_lifecycle_display_frame(view)
+
+
+def _safe_ratio_scalar(numerator, denominator):
+    try:
+        numerator = float(numerator)
+        denominator = float(denominator)
+    except (TypeError, ValueError):
+        return float('nan')
+    return numerator / denominator if denominator > 0 else float('nan')
+
+
+def _latest_product_overall_by_pid(product_daily, date_str):
+    frames = []
+    as_of = pd.to_datetime(date_str, errors='coerce')
+    for day, frame in (product_daily or {}).items():
+        if frame is None or frame.empty or '宝贝ID' not in frame.columns:
+            continue
+        part = frame.copy()
+        part['_date'] = pd.to_datetime(part.get('_数据日期', day), errors='coerce')
+        if pd.notna(as_of):
+            part = part[part['_date'] <= as_of]
+        frames.append(part)
+    if not frames:
+        return pd.DataFrame()
+    work = pd.concat(frames, ignore_index=True).sort_values('_date')
+    work['_pid_key'] = work['宝贝ID'].map(_id_key)
+    return work.drop_duplicates('_pid_key', keep='last')
+
+
+def _eligible_new_product_overall(product_daily, first_seen, date_str):
+    from core.new_product_first_seen import (
+        FIRST_SEEN_DATE,
+        IS_HISTORY_TRUNCATED,
+        STYLE_KEY,
+        build_style_key_series,
+    )
+
+    if first_seen is None or first_seen.empty:
+        return pd.DataFrame()
+    as_of = pd.to_datetime(date_str, errors='coerce')
+    eligible = first_seen.copy()
+    first_seen_dates = pd.to_datetime(eligible.get(FIRST_SEEN_DATE), errors='coerce')
+    age = (as_of.normalize() - first_seen_dates).dt.days + 1 if pd.notna(as_of) else pd.Series([], dtype=float)
+    truncated = eligible.get(IS_HISTORY_TRUNCATED, pd.Series(False, index=eligible.index)).fillna(False).astype(bool)
+    eligible_styles = set(eligible.loc[age.between(1, 45, inclusive='both') & ~truncated, STYLE_KEY].astype(str))
+    latest = _latest_product_overall_by_pid(product_daily, date_str)
+    if latest.empty or not eligible_styles:
+        return pd.DataFrame()
+    keys = build_style_key_series(latest)
+    latest[STYLE_KEY] = keys[STYLE_KEY]
+    latest = latest[latest[STYLE_KEY].astype(str).isin(eligible_styles)].copy()
+    latest['_pid_key'] = latest['宝贝ID'].map(_id_key) if '宝贝ID' in latest.columns else ''
+    return latest[latest['_pid_key'] != '']
+
+
+def _main_ctr_only_material_rows(latest_overall):
+    if latest_overall is None or latest_overall.empty:
+        return pd.DataFrame(columns=NEW_PRODUCT_MATERIAL_COLUMNS)
+    out = pd.DataFrame()
+    for column in ['宝贝ID', '货号', '淘宝类目', '主图整体点击率']:
+        out[column] = latest_overall[column] if column in latest_overall.columns else ''
+    out['主图CTR是否有效'] = out['主图整体点击率'].astype(str).str.strip().ne('')
+    out['计划ID'] = ''
+    out['计划名称'] = ''
+    out['主体ID'] = ''
+    out['主体名称'] = ''
+    out['主体类型'] = ''
+    out['创意ID'] = ''
+    out['创意名称'] = ''
+    out['创意首次发现日'] = ''
+    out['创意年龄'] = pd.NA
+    out['创意展现量'] = 0
+    out['创意点击量'] = 0
+    out['无界创意CTR'] = pd.NA
+    out['上一7天CTR'] = pd.NA
+    out['CTR环比'] = pd.NA
+    out['创意展现占比'] = 0.0
+    out['是否主投创意'] = False
+    return _new_product_material_display_frame(out)
+
+
+def _build_material_view(creative_daily, product_daily, dimensions, first_seen, date_str):
+    latest_overall = _eligible_new_product_overall(product_daily, first_seen, date_str)
+    eligible_pids = set(latest_overall['_pid_key']) if not latest_overall.empty and '_pid_key' in latest_overall.columns else set()
+    frames = []
+    for day, frame in (creative_daily or {}).items():
+        if frame is None or frame.empty:
+            continue
+        part = _merge_pid_dimensions(frame, dimensions)
+        part['_数据日期'] = day
+        frames.append(part)
+    if not frames:
+        return _main_ctr_only_material_rows(latest_overall)
+    creative = pd.concat(frames, ignore_index=True)
+    if '宝贝ID' not in creative.columns or '创意ID' not in creative.columns:
+        return _main_ctr_only_material_rows(latest_overall)
+    creative['_date'] = pd.to_datetime(creative['_数据日期'], errors='coerce')
+    creative['_pid_key'] = creative['宝贝ID'].map(_id_key)
+    for column in ['计划ID', '计划名字', '主体ID', '主体名称', '主体类型']:
+        if column not in creative.columns:
+            creative[column] = ''
+    creative['_plan_key'] = creative['计划ID'].map(_id_key)
+    creative['_creative_key'] = creative['创意ID'].map(_id_key)
+    creative = creative[(creative['_pid_key'] != '') & (creative['_creative_key'] != '')]
+    if eligible_pids:
+        creative = creative[creative['_pid_key'].isin(eligible_pids)].copy()
+    as_of = pd.to_datetime(date_str, errors='coerce')
+    if pd.isna(as_of):
+        as_of = creative['_date'].max()
+    cur_start = as_of - pd.Timedelta(days=6)
+    prev_start = as_of - pd.Timedelta(days=13)
+    prev_end = as_of - pd.Timedelta(days=7)
+    current = creative[(creative['_date'] >= cur_start) & (creative['_date'] <= as_of)].copy()
+    previous = creative[(creative['_date'] >= prev_start) & (creative['_date'] <= prev_end)].copy()
+    if current.empty:
+        return _main_ctr_only_material_rows(latest_overall)
+
+    for col in ['展现', '点击']:
+        current[col] = _numeric_metric_series(current.get(col), index=current.index)
+        previous[col] = (
+            _numeric_metric_series(previous.get(col), index=previous.index)
+            if col in previous.columns else 0.0
+        )
+    group_cols = ['_pid_key', '_plan_key', '_creative_key']
+    current_agg = current.groupby(group_cols, sort=False).agg(
+        宝贝ID=('宝贝ID', 'last'),
+        货号=('货号', 'last') if '货号' in current.columns else ('宝贝ID', 'last'),
+        淘宝类目=('淘宝类目', 'last') if '淘宝类目' in current.columns else ('宝贝ID', 'last'),
+        计划ID=('计划ID', 'last'),
+        计划名称=('计划名字', 'last'),
+        主体ID=('主体ID', 'last'),
+        主体名称=('主体名称', 'last'),
+        主体类型=('主体类型', 'last'),
+        创意ID=('创意ID', 'last'),
+        创意名称=('创意名字', 'last') if '创意名字' in current.columns else ('创意ID', 'last'),
+        创意展现量=('展现', 'sum'),
+        创意点击量=('点击', 'sum'),
+    ).reset_index()
+    previous_agg = previous.groupby(group_cols, sort=False).agg(
+        上一7天展现=('展现', 'sum'),
+        上一7天点击=('点击', 'sum'),
+    ).reset_index() if not previous.empty else pd.DataFrame(columns=group_cols + ['上一7天展现', '上一7天点击'])
+    out = current_agg.merge(previous_agg, on=group_cols, how='left')
+    out['无界创意CTR'] = out.apply(lambda row: _safe_ratio_scalar(row['创意点击量'], row['创意展现量']), axis=1)
+    out['上一7天CTR'] = out.apply(lambda row: _safe_ratio_scalar(row.get('上一7天点击', 0), row.get('上一7天展现', 0)), axis=1)
+    out['CTR环比'] = (out['无界创意CTR'] - out['上一7天CTR']) / out['上一7天CTR'].where(out['上一7天CTR'] > 0)
+    first_dates = creative.groupby(group_cols)['_date'].min().reset_index().rename(columns={'_date': '创意首次发现日'})
+    out = out.merge(first_dates, on=group_cols, how='left')
+    out['创意年龄'] = (as_of.normalize() - out['创意首次发现日']).dt.days + 1
+    out['创意首次发现日'] = out['创意首次发现日'].dt.date.astype(str)
+    product_totals = out.groupby('_pid_key')['创意展现量'].transform('sum')
+    out['创意展现占比'] = out['创意展现量'] / product_totals.where(product_totals > 0)
+    max_impression = out.groupby('_pid_key')['创意展现量'].transform('max')
+    out['是否主投创意'] = out['创意展现量'].eq(max_impression)
+    if not latest_overall.empty and '主图整体点击率' in latest_overall.columns:
+        out = out.merge(
+            latest_overall[['_pid_key', '主图整体点击率']],
+            on='_pid_key',
+            how='left',
+        )
+    else:
+        out['主图整体点击率'] = ''
+    out['主图CTR是否有效'] = out['主图整体点击率'].astype(str).str.strip().ne('')
+    if not latest_overall.empty:
+        missing_main = latest_overall[~latest_overall['_pid_key'].isin(set(out['_pid_key']))].copy()
+        if not missing_main.empty:
+            out = pd.concat([out, _main_ctr_only_material_rows(missing_main)], ignore_index=True, sort=False)
+    return _new_product_material_display_frame(out)
+
+
+def _build_backtest_status_frame(lifecycle_view, history_sources):
+    note = history_sources.get('message') or '当前MVP未生成完整D15/D30验证窗口；回测样本暂列为不可验证。'
+    sample_count = int(len(lifecycle_view)) if lifecycle_view is not None else 0
+    return pd.DataFrame([{
+        '判定节点': 'D15/D30',
+        '规则版本': 'A-D',
+        '样本数': sample_count,
+        '下架建议数': int((lifecycle_view.get('当前结果') == '下架').sum()) if sample_count else 0,
+        '下架命中率': pd.NA,
+        '误杀率': pd.NA,
+        '召回率': pd.NA,
+        '下架覆盖率': pd.NA,
+        '机会损失GMV': pd.NA,
+        '机会损失预估利润': pd.NA,
+        '不可验证样本数': sample_count,
+        'CTR增益': pd.NA,
+        'MetoX保护有效率': pd.NA,
+        '分组': note,
+    }], columns=NEW_PRODUCT_BACKTEST_COLUMNS)
+
+
+def _build_backtest_rows_from_facts(facts, first_seen, creative_daily=None):
+    if facts is None or facts.empty or first_seen is None or first_seen.empty:
+        return pd.DataFrame()
+    from core.new_product_backtest import BacktestColumns as C
+    from core.new_product_first_seen import (
+        FIRST_SEEN_DATE,
+        FIRST_SEEN_PRODUCT_ID,
+        IS_HISTORY_TRUNCATED,
+        STYLE_KEY,
+        build_style_key_series,
+        normalize_identifier,
+    )
+
+    work = facts.copy()
+    keys = build_style_key_series(work)
+    work[STYLE_KEY] = keys[STYLE_KEY]
+    if '宝贝ID' in work.columns and FIRST_SEEN_PRODUCT_ID in first_seen.columns:
+        pid_map = first_seen.set_index(FIRST_SEEN_PRODUCT_ID)[STYLE_KEY].to_dict()
+        mapped = work['宝贝ID'].map(normalize_identifier).map(pid_map).fillna('')
+        work[STYLE_KEY] = work[STYLE_KEY].where(mapped == '', mapped)
+    keep = [STYLE_KEY, FIRST_SEEN_DATE, IS_HISTORY_TRUNCATED]
+    work = work.merge(first_seen[[col for col in keep if col in first_seen.columns]], on=STYLE_KEY, how='inner')
+    if work.empty:
+        return pd.DataFrame()
+    data_date = pd.to_datetime(work.get('_数据日期'), errors='coerce')
+    first_seen_date = pd.to_datetime(work.get(FIRST_SEEN_DATE), errors='coerce')
+    work[C.age_day] = (data_date - first_seen_date).dt.days + 1
+    work = work[work[C.age_day].between(1, 45, inclusive='both')].copy()
+    if work.empty:
+        return pd.DataFrame()
+
+    rows = pd.DataFrame()
+    rows[C.style_key] = work[STYLE_KEY]
+    rows[C.age_day] = work[C.age_day]
+    rows[C.store] = work['店铺'] if '店铺' in work.columns else ''
+    rows[C.category] = work['淘宝类目'] if '淘宝类目' in work.columns else ''
+    rows[C.price_band] = work['价格段'] if '价格段' in work.columns else ''
+    rows[C.visitors] = pd.to_numeric(work.get('商品访客数'), errors='coerce').fillna(0.0)
+    rows[C.carts] = pd.to_numeric(work.get('商品加购件数'), errors='coerce').fillna(0.0)
+    rows[C.buyers] = pd.to_numeric(work.get('支付买家数'), errors='coerce').fillna(0.0)
+    rows[C.units] = pd.to_numeric(work.get('支付件数'), errors='coerce').fillna(0.0) if '支付件数' in work.columns else 0.0
+    rows[C.gmv] = pd.to_numeric(work.get('GMV'), errors='coerce').fillna(0.0)
+    rows[C.profit] = pd.to_numeric(work.get('预估利润'), errors='coerce').fillna(0.0) if '预估利润' in work.columns else 0.0
+    rows[C.valid_data_day] = True
+    rows[C.is_online] = work.get('商品状态', '当前在线').astype(str).eq('当前在线') if '商品状态' in work.columns else True
+    rows[C.stock_ok] = pd.to_numeric(work.get('在仓库存'), errors='coerce').fillna(1.0).gt(0) if '在仓库存' in work.columns else True
+    rows[C.manual_removed] = rows[C.is_online].eq(False)
+    rows[C.data_missing] = False
+    rows[C.historical_truncated] = work.get(IS_HISTORY_TRUNCATED, False).fillna(False).astype(bool) if IS_HISTORY_TRUNCATED in work.columns else False
+    rows[C.main_ctr] = float('nan')
+    rows[C.creative_impressions] = 0.0
+    rows[C.creative_clicks] = 0.0
+    metox_label_col = 'MetoX' + '\u7b97\u6cd5\u547d\u4e2d'
+    rows[C.metox_labels] = work.get(metox_label_col, '') if metox_label_col in work.columns else ''
+    rows = _collapse_backtest_rows_by_style_age(rows)
+
+    product_style_map = {}
+    if '宝贝ID' in work.columns:
+        mapping = work[['宝贝ID', STYLE_KEY]].copy()
+        mapping['宝贝ID'] = mapping['宝贝ID'].map(normalize_identifier)
+        mapping[STYLE_KEY] = mapping[STYLE_KEY].astype(str).str.strip()
+        mapping = mapping[(mapping['宝贝ID'] != '') & (mapping[STYLE_KEY] != '')]
+        product_style_map = (
+            mapping.drop_duplicates('宝贝ID', keep='last')
+            .set_index('宝贝ID')[STYLE_KEY]
+            .to_dict()
+        )
+    creative_metrics = _creative_metrics_by_style_age(
+        creative_daily,
+        first_seen,
+        product_style_map=product_style_map,
+    )
+    if not creative_metrics.empty:
+        rows = rows.merge(
+            creative_metrics,
+            on=[C.style_key, C.age_day],
+            how='left',
+            suffixes=('', '_creative'),
+        )
+        for column in (C.creative_impressions, C.creative_clicks):
+            merged_col = f'{column}_creative'
+            if merged_col in rows.columns:
+                rows[column] = pd.to_numeric(rows[merged_col], errors='coerce').fillna(rows[column])
+                rows = rows.drop(columns=[merged_col])
+    baseline_cols = [
+        C.baseline_cart_rate,
+        C.baseline_pay_cvr,
+        C.baseline_uv_value,
+        C.baseline_cumulative_cart_rate,
+        C.baseline_cumulative_pay_cvr,
+        C.baseline_cumulative_uv_value,
+        C.baseline_main_ctr,
+        C.baseline_creative_ctr,
+    ]
+    for column in baseline_cols:
+        rows[column] = float('nan')
+    rows[C.ctr_positive_signal] = False
+    return rows
+
+
+def _format_backtest_summary(summary):
+    if summary is None or summary.empty:
+        return pd.DataFrame(columns=NEW_PRODUCT_BACKTEST_COLUMNS)
+    out = pd.DataFrame()
+    out['判定节点'] = summary['checkpoint'].map(lambda value: f"D{int(value)}") if 'checkpoint' in summary.columns else 'D15/D30'
+    out['规则版本'] = summary['rule'].map(lambda value: f"{value}-影子规则") if 'rule' in summary.columns else ''
+    out['样本数'] = summary.get('total', 0)
+    out['下架建议数'] = summary.get('predicted_down', 0)
+    out['下架命中率'] = summary.get('down_hit_rate', pd.NA)
+    out['误杀率'] = summary.get('false_kill_rate', pd.NA)
+    out['召回率'] = summary.get('recall', pd.NA)
+    out['下架覆盖率'] = summary.get('down_coverage_rate', pd.NA)
+    out['机会损失GMV'] = summary.get('opportunity_loss_gmv', pd.NA)
+    out['机会损失预估利润'] = summary.get('opportunity_loss_profit', pd.NA)
+    out['不可验证样本数'] = summary.get('unverifiable', pd.NA)
+    out['CTR增益'] = summary.get('ctr_gain_false_kill_rate', pd.NA)
+    out['MetoX保护有效率'] = summary.get('metox_protection_effectiveness', pd.NA)
+    out['分组'] = '当前可用经营日事实'
+    return out[NEW_PRODUCT_BACKTEST_COLUMNS]
+
+
+def _build_backtest_view(facts, first_seen, lifecycle_view, history_sources, creative_daily=None):
+    rows = _build_backtest_rows_from_facts(facts, first_seen, creative_daily=creative_daily)
+    if rows.empty:
+        return _build_backtest_status_frame(lifecycle_view, history_sources)
+    try:
+        from core.new_product_backtest import BacktestColumns as C, run_backtest
+        result = run_backtest(rows, group_cols=[C.checkpoint])
+        summary = _format_backtest_summary(result.summary)
+        return summary if not summary.empty else _build_backtest_status_frame(lifecycle_view, history_sources)
+    except Exception as exc:
+        fallback = _build_backtest_status_frame(lifecycle_view, history_sources)
+        fallback.loc[0, '分组'] = f"回测生成失败：{str(exc)[:120]}"
+        return fallback
+
+
+def _build_new_product_context_from_sources(df, day_map, date_str, history_sources):
+    from core.new_product_first_seen import build_first_seen_index
+    from core import new_product_lifecycle as lifecycle_core
+
+    product_daily_raw = history_sources.get('product_overall_daily') or {}
+    creative_daily = history_sources.get('creative_daily') or {}
+    if not product_daily_raw:
+        ctx = _empty_new_product_context(
+            history_sources.get('message') or '缺少商品-整体历史源，无法确认首次在线发现日。',
+            status=history_sources.get('status', 'missing'),
+        )
+        ctx['source_status'] = history_sources.get('source_status', ctx['source_status'])
+        ctx['coverage'] = history_sources.get('coverage', ctx['coverage'])
+        return ctx
+
+    business_day_map = history_sources.get('business_day_map') or day_map
+    labeled_business_day_map = _with_checkpoint_visible_metox_labels(business_day_map)
+    dimensions = _build_product_dimension_lookup(df, labeled_business_day_map)
+    product_daily = _enrich_product_overall_daily(product_daily_raw, dimensions)
+    index_path = history_sources.get('first_seen_index_path')
+    existing_index = _load_first_seen_index(index_path)
+    first_seen = build_first_seen_index(
+        product_daily,
+        existing_index=existing_index,
+        history_start_date=history_sources.get('history_start_date') or '',
+    )
+    persist_warning = _save_first_seen_index(first_seen, index_path)
+    facts = _daily_business_facts_with_new_product_status(labeled_business_day_map, product_daily)
+    lifecycle = lifecycle_core.aggregate_lifecycle_windows(facts, first_seen, as_of_date=date_str)
+    d15_checkpoint = getattr(lifecycle_core, 'CHECKPOINT_D15', None)
+    d15 = (
+        lifecycle_core.apply_lifecycle_decisions(lifecycle, d15_checkpoint, peer_frame=lifecycle)
+        if d15_checkpoint else pd.DataFrame()
+    )
+    d30_checkpoint = getattr(lifecycle_core, 'CHECKPOINT_D30', None)
+    d30 = (
+        lifecycle_core.apply_lifecycle_decisions(lifecycle, d30_checkpoint, peer_frame=lifecycle)
+        if d30_checkpoint else pd.DataFrame()
+    )
+    lifecycle_view = _format_new_product_lifecycle_view(
+        lifecycle, first_seen, d15, d30, date_str=date_str
+    )
+    materials = _build_material_view(creative_daily, product_daily, dimensions, first_seen, date_str)
+    backtest = _build_backtest_view(
+        facts, first_seen, lifecycle_view, history_sources, creative_daily=creative_daily
+    )
+    message = history_sources.get('message') or ''
+    if persist_warning:
+        message = (message + '；' if message else '') + persist_warning
+    if len(facts) == 0:
+        message = (message + '；' if message else '') + '当前仅加载到新品源，缺少可聚合的经营日事实。'
+    return {
+        'status': history_sources.get('status', 'complete'),
+        'message': message,
+        'lifecycle': lifecycle_view,
+        'materials': materials,
+        'backtest': backtest,
+        'methodology': _new_product_methodology_frame(message),
+        'source_status': history_sources.get('source_status', pd.DataFrame()),
+        'coverage': history_sources.get('coverage', pd.DataFrame()),
+        'first_seen_index': first_seen,
+    }
+
+
 def _load_shared_dimensions(product_folder, cache_root, jst_entry=None,
                             jst_refund_entry=None, extra_fingerprint_entries=None):
     """一次加载并预聚合周期内每天共用的商品资料、库存和退款率维度。"""
-    product_file_list = _scan_target_files(product_folder)
+    product_file_list = _scan_target_files(
+        product_folder, source_types={SOURCE_PRODUCT_INFO, SOURCE_STOCK}
+    )
     extra_fingerprint_entries = list(extra_fingerprint_entries or [])
     fingerprint_entries = [
         (fp, src_type) for fp, _fn, src_type in product_file_list
@@ -303,14 +1734,18 @@ def _load_single_day(base_root, day, year, shop, product_folder, cache_root,
     """加载单日数据：扫描→读文件→合并→返回 day_df"""
     biz_folder, wujie_folder = _build_paths(base_root, day, year, shop)
     if not os.path.isdir(str(biz_folder)) and not os.path.isdir(str(wujie_folder)):
-        return None, [], 0, 0, set()
+        return None, [], 0, 0, set(), {}
 
     day_cache = cache_root / day
     period_label = f"{label_prefix}:{day}"
     include_day_product = include_product and shared_dimensions is None
-    file_list = _scan_target_files(biz_folder) + _scan_target_files(wujie_folder)
+    legacy_file_list = _scan_target_files(biz_folder) + _scan_target_files(wujie_folder)
     if include_day_product:
-        file_list += _scan_target_files(product_folder)
+        legacy_file_list += _scan_target_files(product_folder)
+    file_list = [
+        item for item in legacy_file_list
+        if item[2] not in set(NEW_PRODUCT_SOURCE_TYPES)
+    ]
     fingerprint_entries = [(fp, src_type) for fp, _fn, src_type in file_list]
     cacheable_facts = shared_dimensions is not None and bool(file_list)
     fact_fingerprint = None
@@ -373,7 +1808,7 @@ def _load_single_day(base_root, day, year, shop, product_folder, cache_root,
                          'period': period_label})
 
         if not sources:
-            return None, info, copied, total, set()
+            return None, info, copied, total, set(), sources or {}
 
         if cacheable_facts:
             base_df, day_plan_ids = build_daily_facts(sources)
@@ -406,11 +1841,11 @@ def _load_single_day(base_root, day, year, shop, product_folder, cache_root,
     else:
         day_df, day_plan_ids = merge_sources(sources, dimensions=shared_dimensions)
     if day_df is None or len(day_df) == 0:
-        return None, info, copied, total, set(day_plan_ids)
+        return None, info, copied, total, set(day_plan_ids), sources or {}
 
     day_df = day_df.copy()
     day_df['_数据日期'] = day
-    return day_df, info, copied, total, day_plan_ids
+    return day_df, info, copied, total, day_plan_ids, sources or {}
 
 
 def load_period_data(days, day_map):
@@ -424,7 +1859,7 @@ def load_period_data(days, day_map):
         if entry is None:
             missing_dates.append(day)
             continue
-        day_df, info, copied, total, pids = entry
+        day_df, info, copied, total, pids = entry[:5]
         files_info.extend(info)
         copied_files += copied
         total_files += total
@@ -598,7 +2033,10 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
     cur_result = load_period_data(current_days, day_map)
     df = cur_result['df']
     if df is None or len(df) == 0:
-        return None, None, [], set(), set(), timings, period_logs, {}, pd.DataFrame()
+        return (
+            None, None, [], set(), set(), timings, period_logs, {}, pd.DataFrame(),
+            _empty_new_product_context('未找到本期商品数据，无法生成新品视图。'), {},
+        )
 
     files_info = first_day_sources[1] if first_day_sources else []
     plan_ids = cur_result['plan_ids']
@@ -706,10 +2144,25 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
         'h7_prev_omni': h7_previous['全站'],
     }
     kpi_trends = build_daily_kpi_trends(day_map, end_date=date_str)
+    current_sources = first_day_sources[5] if first_day_sources and len(first_day_sources) > 5 else {}
+    new_product_load_state = _build_new_product_load_state(
+        base_root=base_root,
+        year=year,
+        shop=shop,
+        date_str=date_str,
+        cache_root=cache_root,
+        product_folder=product_folder,
+        files_info=files_info,
+        cat_ctx=cat_ctx,
+        sources=current_sources,
+        day_map=day_map,
+        shared_dimensions=shared_dimensions,
+    )
 
     return (
         df, sel_prev_frame, files_info, plan_ids, sel_prev_plan_ids,
         timings, period_logs, cat_ctx, kpi_trends,
+        _new_product_unloaded_context(), new_product_load_state,
     )
 
 
@@ -802,6 +2255,206 @@ def _normalize_display_columns(obj):
     if isinstance(obj, list):
         return [DISPLAY_RENAME_MAP.get(c, c) for c in obj]
     return obj
+
+
+def _render_new_product_view(new_product_ctx):
+    ctx = new_product_ctx if isinstance(new_product_ctx, dict) else _empty_new_product_context()
+    status = str(ctx.get('status', 'unavailable'))
+    message = str(ctx.get('message') or '').strip()
+
+    header_left, header_right = st.columns([5, 1])
+    with header_left:
+        st.subheader("新品视图")
+    load_state = st.session_state.get('new_product_load_state')
+    can_load_history = isinstance(load_state, dict) and bool(load_state.get('date_str'))
+    history_loaded = st.session_state.get('new_product_history') is not None \
+        or status not in ('unloaded', 'unavailable')
+    button_label = '刷新新品历史' if history_loaded else '加载新品历史'
+    with header_right:
+        load_clicked = st.button(
+            button_label,
+            key='load_new_product_history_button',
+            disabled=not can_load_history,
+            width='stretch',
+        )
+
+    progress_placeholder = st.empty()
+    if load_clicked:
+        progress_bar = st.progress(0.0, text='准备加载新品历史...')
+
+        def update_progress(value, text):
+            st.session_state.new_product_progress = text
+            progress_bar.progress(value, text=text)
+            progress_placeholder.caption(text)
+
+        try:
+            history, loaded_ctx = _load_new_product_context_from_state(
+                st.session_state.get('df'),
+                load_state,
+                progress_callback=update_progress,
+            )
+            st.session_state.new_product_history = history
+            st.session_state.new_product_ctx = loaded_ctx
+            ctx = loaded_ctx if isinstance(loaded_ctx, dict) else _empty_new_product_context()
+        except Exception as exc:
+            ctx = _empty_new_product_context(
+                f'新品历史加载失败：{str(exc)[:160]}',
+                status='error',
+            )
+            st.session_state.new_product_history = None
+            st.session_state.new_product_ctx = ctx
+            update_progress(1.0, '新品历史加载失败')
+        status = str(ctx.get('status', 'unavailable'))
+        message = str(ctx.get('message') or '').strip()
+
+    st.caption(
+        "只读MVP：按首次在线发现日计算新品年龄，15-29天使用D15结果，30-45天使用D30当前结果；"
+        "累计访客>=300是判定资格门槛，D1至当前判定点有任意成交即动销保护，无成交样本再按加购件数和加购率评估。"
+    )
+    if message:
+        if status in ('complete', 'unloaded'):
+            st.info(message)
+        elif status == 'error':
+            st.error(message)
+        else:
+            st.warning(message)
+
+    source_status = ctx.get('source_status')
+    if source_status is None or (isinstance(source_status, pd.DataFrame) and source_status.empty):
+        coverage = ctx.get('coverage')
+        source_status = coverage.copy() if isinstance(coverage, pd.DataFrame) else pd.DataFrame(coverage or [])
+    if isinstance(source_status, pd.DataFrame) and not source_status.empty:
+        st.markdown("#### 新品源覆盖")
+        st.dataframe(source_status, width="stretch", hide_index=True)
+
+    lifecycle = _new_product_context_frame(
+        ctx, ('lifecycle', 'decision', 'decisions', '新品判定'), NEW_PRODUCT_LIFECYCLE_COLUMNS
+    )
+    materials = _new_product_context_frame(
+        ctx, ('materials', 'material', 'creative', '素材表现'), NEW_PRODUCT_MATERIAL_COLUMNS
+    )
+    backtest = _new_product_context_frame(
+        ctx, ('backtest', 'validation', '回测验证'), NEW_PRODUCT_BACKTEST_COLUMNS
+    )
+    methodology = _new_product_context_frame(
+        ctx, ('methodology', '口径说明'), ['主题', '口径', '说明']
+    )
+
+    view_tab1, view_tab2, view_tab3 = st.tabs(["生命周期判定", "素材表现", "历史回放"])
+
+    with view_tab1:
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("有效新品数", len(lifecycle))
+        c2.metric("D15数量", int((lifecycle.get('判定轮次') == 'D15').sum()) if not lifecycle.empty else 0)
+        c3.metric("D30数量", int((lifecycle.get('判定轮次') == 'D30').sum()) if not lifecycle.empty else 0)
+        c4.metric("下架建议", int((lifecycle.get('当前结果') == '下架').sum()) if not lifecycle.empty else 0)
+        c5.metric("继续观察", int((lifecycle.get('当前结果') == '继续观察').sum()) if not lifecycle.empty else 0)
+        c6.metric(
+            "样本不足",
+            int(lifecycle.get('样本充分性', pd.Series(dtype=object)).astype(str).str.contains('不足', na=False).sum())
+            if not lifecycle.empty else 0,
+        )
+        if lifecycle.empty:
+            if status == 'unloaded':
+                st.info(NEW_PRODUCT_UNLOADED_MESSAGE)
+            else:
+                st.info("暂无可判定新品。请确认商品-整体历史源、货号映射和经营日事实覆盖。")
+        else:
+            f1, f2, f3, f4 = st.columns(4)
+            filtered_lifecycle = lifecycle.copy()
+            with f1:
+                result_filter = st.multiselect(
+                    "判定结果",
+                    sorted(filtered_lifecycle['当前结果'].dropna().astype(str).unique()),
+                    key='new_product_result_filter',
+                ) if '当前结果' in filtered_lifecycle.columns else []
+            with f2:
+                checkpoint_filter = st.multiselect(
+                    "判定轮次",
+                    sorted(filtered_lifecycle['判定轮次'].dropna().astype(str).unique()),
+                    key='new_product_checkpoint_filter',
+                ) if '判定轮次' in filtered_lifecycle.columns else []
+            with f3:
+                reason_filter = st.multiselect(
+                    "判定原因",
+                    sorted(filtered_lifecycle['判定原因'].dropna().astype(str).unique()),
+                    key='new_product_reason_filter',
+                ) if '判定原因' in filtered_lifecycle.columns else []
+            with f4:
+                category_filter = st.multiselect(
+                    "淘宝类目",
+                    sorted(filtered_lifecycle['淘宝类目'].dropna().astype(str).unique()),
+                    key='new_product_category_filter',
+                ) if '淘宝类目' in filtered_lifecycle.columns else []
+            for selected, column in (
+                (result_filter, '当前结果'),
+                (checkpoint_filter, '判定轮次'),
+                (reason_filter, '判定原因'),
+                (category_filter, '淘宝类目'),
+            ):
+                if selected and column in filtered_lifecycle.columns:
+                    filtered_lifecycle = filtered_lifecycle[
+                        filtered_lifecycle[column].astype(str).isin(selected)
+                    ]
+            st.caption(f"筛选结果：{len(filtered_lifecycle)} / {len(lifecycle)} 个款式")
+            st.dataframe(
+                filtered_lifecycle,
+                width="stretch",
+                hide_index=True,
+                height=620,
+                column_config={
+                    '款式主图': st.column_config.LinkColumn('款式主图链接'),
+                    'W2_商品加购率': st.column_config.NumberColumn('W2加购率', format="percent"),
+                    'W4_商品加购率': st.column_config.NumberColumn('W4加购率', format="percent"),
+                },
+            )
+            st.download_button(
+                "下载新品判定CSV",
+                data=_frame_to_csv_bytes(filtered_lifecycle),
+                file_name=f"新品判定_{st.session_state.get('cur_date', '')}.csv",
+                mime="text/csv",
+                key="download_new_product_lifecycle_csv",
+            )
+
+    with view_tab2:
+        if materials.empty:
+            st.info("暂无素材表现。请确认无界-创意历史源及15天转化周期数据。")
+        else:
+            st.dataframe(
+                materials,
+                width="stretch",
+                hide_index=True,
+                height=620,
+                column_config={
+                    '无界创意CTR': st.column_config.NumberColumn('无界创意CTR', format="percent"),
+                    '上一7天CTR': st.column_config.NumberColumn('上一7天CTR', format="percent"),
+                    'CTR环比': st.column_config.NumberColumn('CTR环比', format="percent"),
+                    '创意展现占比': st.column_config.NumberColumn('创意展现占比', format="percent"),
+                },
+            )
+            st.download_button(
+                "下载素材表现CSV",
+                data=_frame_to_csv_bytes(materials),
+                file_name=f"素材表现_{st.session_state.get('cur_date', '')}.csv",
+                mime="text/csv",
+                key="download_new_product_materials_csv",
+            )
+
+    with view_tab3:
+        if backtest.empty:
+            st.info("暂无回测验证结果。")
+        else:
+            st.dataframe(backtest, width="stretch", hide_index=True)
+            st.download_button(
+                "下载回测验证CSV",
+                data=_frame_to_csv_bytes(backtest),
+                file_name=f"回测验证_{st.session_state.get('cur_date', '')}.csv",
+                mime="text/csv",
+                key="download_new_product_backtest_csv",
+            )
+        if not methodology.empty:
+            with st.expander("新品口径说明", expanded=False):
+                st.dataframe(methodology, width="stretch", hide_index=True)
 
 
 def _first_existing_dir(*candidates):
@@ -1129,8 +2782,8 @@ with st.sidebar:
                 biz_folder, wujie_folder = _build_paths(root, date_str, year, shop)
 
                 # ── 4. 校验目录是否存在 ──
-                df, prev_df, files_info, plan_ids, prev_plan_ids, timings, period_logs, cat_ctx, kpi_trends = \
-                    None, None, [], set(), set(), [], [], {}, pd.DataFrame()
+                df, prev_df, files_info, plan_ids, prev_plan_ids, timings, period_logs, cat_ctx, kpi_trends, new_product_ctx, new_product_load_state = \
+                    None, None, [], set(), set(), [], [], {}, pd.DataFrame(), _new_product_unloaded_context(), {}
                 errors = []
                 validation_error = None
                 if not os.path.isdir(str(biz_folder)):
@@ -1159,6 +2812,7 @@ with st.sidebar:
                             (
                                 df, prev_df, files_info, plan_ids, prev_plan_ids,
                                 timings, period_logs, cat_ctx, kpi_trends,
+                                new_product_ctx, new_product_load_state,
                             ) = _load_folder_cached(
                                 root, year, shop, date_str, product_folder,
                                 cache_dir=str(file_cache_dir),
@@ -1224,6 +2878,10 @@ with st.sidebar:
                     st.session_state.sources_info = files_info
                     st.session_state.cat_ctx = cat_ctx
                     st.session_state.kpi_trends = kpi_trends
+                    st.session_state.new_product_ctx = new_product_ctx
+                    st.session_state.new_product_load_state = new_product_load_state
+                    st.session_state.new_product_history = None
+                    st.session_state.new_product_progress = ''
                     st.session_state.loaded = True
                     st.session_state.traffic_bounds = tb_load
                     st.session_state.value_bounds = vb_load
@@ -1251,9 +2909,10 @@ ai_task_df = build_ai_task_view(st.session_state.df)
 kpis = st.session_state.kpis
 kpi_mom = st.session_state.kpi_mom or calc_kpi_mom_percent(kpis, {})
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
     "📈 数据看板", "📋 数据验收", "🤖 AI任务视图", "📊 执行表",
-    "🎯 商品分层", "📂 品类分析", "⚠ 退款风险", "🔑 渠道分析", "📦 库存动作"
+    "🎯 商品分层", "📂 品类分析", "⚠ 退款风险", "🔑 渠道分析", "📦 库存动作",
+    "🆕 新品视图"
 ])
 
 # ── Tab 1: 数据看板 ───────────────────────────────────────
@@ -1669,6 +3328,9 @@ with tab4:
             filtered,
             cat_ctx=export_cat_ctx,
             ranking_df=execution_df,
+            new_product_ctx=_filter_new_product_context(
+                st.session_state.get('new_product_ctx'), filtered
+            ),
         )
         st.download_button(
             f"📦 生成并下载全部 Sheet Excel ({len(filtered)} 行)",
@@ -1773,3 +3435,10 @@ with tab9:
         if inv.get('no_stock'): st.dataframe(pd.DataFrame(inv['no_stock']), width="stretch", hide_index=True)
     except Exception as e:
         st.warning(f"库存动作加载失败: {e}")
+
+# ── Tab 10: 新品视图 ──────────────────────────────────────
+with tab10:
+    try:
+        _render_new_product_view(st.session_state.get('new_product_ctx'))
+    except Exception as e:
+        st.warning(f"新品视图加载失败: {e}")

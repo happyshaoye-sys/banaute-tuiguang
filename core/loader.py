@@ -12,7 +12,7 @@ from openpyxl import load_workbook
 from .schema import (
     ALLOWED_SOURCE_TYPES, FIELD_ALIASES, SOURCE_WUJIE_SUBJECT,
     WUJIE_REMAP, classify_file, SOURCE_PRODUCT_ROI, SOURCE_STOCK,
-    SOURCE_PRODUCT_INFO,
+    SOURCE_PRODUCT_INFO, SOURCE_PRODUCT_OVERALL, SOURCE_WUJIE_CREATIVE,
 )
 from .data_validation import (
     SOURCE_REQUIRED_FIELDS,
@@ -24,7 +24,7 @@ XLSX_NS = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
 RELS_NS = '{http://schemas.openxmlformats.org/package/2006/relationships}'
 OFFICE_RELS_NS = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
 COL_REF_RE = re.compile(r'([A-Z]+)')
-PARSED_CACHE_VERSION = 'v10'  # v10: 原始字段契约与有付费无PlanID校验
+PARSED_CACHE_VERSION = 'v11'  # v11: 新品商品整体/无界创意源字段契约
 
 
 SOURCE_ALLOWED_FIELDS = {
@@ -43,6 +43,14 @@ SOURCE_ALLOWED_FIELDS = {
         '直接购物车数', '场景名字', '转化周期',
         '展现', '点击', '点击率', '转化率', '商品加购件数',
         '主体类型',  # P0-1: 供 merge 剔除"店铺"主体假商品(店铺首页混入商品池)
+    },
+    SOURCE_PRODUCT_OVERALL: {
+        '统计日期', '店铺', '商品ID', '宝贝ID', '商品名称', '淘宝类目',
+        '商品状态', '主图整体点击率',
+    },
+    SOURCE_WUJIE_CREATIVE: {
+        '统计日期', '店铺', '转化周期', '计划ID', '计划名字', '创意ID', '创意名字',
+        '主体ID', '主体名称', '宝贝ID', '主体类型', '场景名字', '展现', '点击', '点击率',
     },
     SOURCE_STOCK: {
         '宝贝ID', '货号', '在仓库存', '在途', '成本价（含税）', '日销7',
@@ -87,6 +95,12 @@ def _coalesce_duplicate_columns(df):
         clean = part.replace(r'^\s*$', pd.NA, regex=True)
         out[col] = clean.bfill(axis=1).iloc[:, 0].fillna('')
     return out
+
+
+def _is_15_day_period(value):
+    text = str(value)
+    digits = ''.join(ch for ch in text if ch.isdigit())
+    return digits == '15'
 
 
 def _xlsx_col_to_index(cell_ref):
@@ -208,7 +222,10 @@ def _find_header_row(df):
     """自动查找表头行"""
     for i in range(min(len(df), 15)):
         row_str = '|'.join(df.iloc[i].dropna().astype(str).values)
-        if any(kw in row_str for kw in ['宝贝ID','商品ID','主体ID','GMV','花费','日期','货号','库存','计划ID','款式编码','款式主图']):
+        if any(kw in row_str for kw in [
+            '宝贝ID','商品ID','主体ID','GMV','花费','日期','货号','库存',
+            '计划ID','创意ID','商品状态','主图整体点击率','款式编码','款式主图',
+        ]):
             return i
     return 0
 
@@ -221,7 +238,10 @@ def _find_excel_header_row(filepath):
         for idx, row in enumerate(ws.iter_rows(min_row=1, max_row=15, values_only=True)):
             rows.append(list(row))
             row_str = '|'.join(str(v) for v in row if v is not None)
-            if any(kw in row_str for kw in ['宝贝ID','商品ID','主体ID','GMV','花费','日期','货号','库存','计划ID','款式编码','款式主图']):
+            if any(kw in row_str for kw in [
+                '宝贝ID','商品ID','主体ID','GMV','花费','日期','货号','库存',
+                '计划ID','创意ID','商品状态','主图整体点击率','款式编码','款式主图',
+            ]):
                 return idx
         return _find_header_row(pd.DataFrame(rows))
     finally:
@@ -310,17 +330,49 @@ def normalize_columns(df):
 
 def prepare_source(df, source_type):
     """对特定数据源做额外处理"""
+    df = df.copy()
+    preserved_product_id = None
+    if source_type == SOURCE_PRODUCT_OVERALL and '商品ID' in df.columns:
+        preserved_product_id = df['商品ID'].copy()
+        df = df.rename(columns={'商品ID': '__商品ID__'})
+        if '宝贝ID' not in df.columns:
+            df['宝贝ID'] = preserved_product_id
+
+    preserved_subject_id = None
+    if source_type == SOURCE_WUJIE_CREATIVE and '主体ID' in df.columns:
+        preserved_subject_id = df['主体ID'].copy()
+        df = df.rename(columns={'主体ID': '__主体ID__'})
+        if '宝贝ID' not in df.columns:
+            df['宝贝ID'] = preserved_subject_id
+
     df = normalize_columns(df)
+
+    if source_type == SOURCE_PRODUCT_OVERALL and preserved_product_id is not None:
+        df['商品ID'] = preserved_product_id.astype(str).str.replace(r'\.0$','', regex=True).str.strip()
+        df['商品ID'] = df['商品ID'].replace('nan','').replace('None','')
+        df['宝贝ID'] = df['商品ID']
+        if '__商品ID__' in df.columns:
+            df = df.drop(columns=['__商品ID__'])
+
+    if source_type == SOURCE_WUJIE_CREATIVE and preserved_subject_id is not None:
+        df['主体ID'] = preserved_subject_id.astype(str).str.replace(r'\.0$','', regex=True).str.strip()
+        df['主体ID'] = df['主体ID'].replace('nan','').replace('None','')
+        df['宝贝ID'] = df['主体ID']
+        if '__主体ID__' in df.columns:
+            df = df.drop(columns=['__主体ID__'])
 
     if source_type == SOURCE_WUJIE_SUBJECT:
         remap = {k: v for k, v in WUJIE_REMAP.items() if k in df.columns}
         df = df.rename(columns=remap)
 
     # 标准化ID列
-    for c in ['宝贝ID','货号','计划ID']:
+    for c in ['宝贝ID','商品ID','货号','计划ID','创意ID','主体ID']:
         if c in df.columns:
             df[c] = df[c].astype(str).str.replace(r'\.0$','', regex=True).str.strip()
             df[c] = df[c].replace('nan','').replace('None','')
+
+    if source_type == SOURCE_WUJIE_CREATIVE and '转化周期' in df.columns:
+        df = df[df['转化周期'].map(_is_15_day_period)].reset_index(drop=True)
 
     return df
 

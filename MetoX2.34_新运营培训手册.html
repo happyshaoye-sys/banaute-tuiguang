@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MetoX2.34 新运营培训手册</title>
+  <style>
+    body { margin:0; background:#f4f7fb; color:#1f2937; font-family:"Microsoft YaHei",Arial,sans-serif; line-height:1.7; }
+    main { max-width:980px; margin:32px auto; background:#fff; padding:36px 44px; border-radius:12px; box-shadow:0 10px 30px rgba(15,23,42,.08); }
+    h1 { margin-top:0; color:#0f172a; }
+    h2 { margin-top:28px; border-left:5px solid #2563eb; padding-left:12px; color:#172554; }
+    table { width:100%; border-collapse:collapse; margin:16px 0; }
+    th,td { border:1px solid #dbe3ef; padding:10px 12px; text-align:left; vertical-align:top; }
+    th { background:#eaf0f8; }
+    .notice { background:#eef6ff; border:1px solid #bfdbfe; border-radius:8px; padding:14px 16px; }
+    code { background:#eef2f7; padding:2px 5px; border-radius:4px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>MetoX2.34 新运营培训手册</h1>
+  <p>发布日期：2026-08-28 ｜ 外部策略算法：v9.3（未变更）</p>
+  <div class="notice"><strong>本版核心：</strong>新品生命周期判定改为动销保护优先；下架判定与链接/库存现状拆开，素材表现表同步取消商品名称。</div>
+
+  <h2>1. 新品判定调整</h2>
+  <ul>
+    <li>达到D14/D21判定节点后，先执行动销保护；本判定周期内有支付买家、支付件数或GMV时直接继续观察。</li>
+    <li>有成交的新品不再被链接状态、库存、有效天数、流量或同层指标提前拦截为下架。</li>
+    <li>下架候选必须无成交、无保护、访客达到300、同层样本有效，且商品加购率弱于同层基准并未较上一轮改善。</li>
+    <li>当前商品状态、在线状态和库存只作为链接/库存现状提示，不参与下架判定。</li>
+  </ul>
+
+  <h2>2. 新品历史窗口</h2>
+  <table>
+    <tr><th>数据</th><th>窗口</th><th>用途</th></tr>
+    <tr><td>商品-整体</td><td>90天</td><td>建立新品首次在线发现索引，仍以首次发现“当前在线”的日期作为D1。</td></tr>
+    <tr><td>无界-创意</td><td>45天</td><td>计算素材创意点击率和近7天环比。</td></tr>
+    <tr><td>商品-整体退款分布</td><td>隔离</td><td>严格日期戳分类会阻止该文件误入“商品-整体”新品源校验。</td></tr>
+  </table>
+
+  <h2>3. 当前业务边界</h2>
+  <ul>
+    <li>D14/D21新品判定继续只输出“下架”或“继续观察”；旧D28不作为页面当前判定节点。</li>
+    <li>商品支付转化率和UV价值仅作诊断，不作为新品下架门槛。</li>
+    <li>新品判定页面、判定导出和素材表现表均不显示商品名称。</li>
+    <li>既有九个Tab、执行表动作、Excel旧工作表、MetoX算法和外部v9.3策略不变。</li>
+  </ul>
+</main>
+</body>
+</html>

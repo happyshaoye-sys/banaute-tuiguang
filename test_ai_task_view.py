@@ -482,7 +482,12 @@ class AITaskViewUIContractTests(unittest.TestCase):
         cls.source = (ROOT / 'app.py').read_text(encoding='utf-8-sig')
 
     def test_tab_order_places_ai_task_view_between_acceptance_and_execution(self):
-        tabs = self.source[self.source.index('st.tabs(['):self.source.index('])', self.source.index('st.tabs(['))]
+        # The new-product view contains its own nested tabs, so anchor this
+        # contract to the top-level navigation assignment instead of the first
+        # st.tabs call in the module.
+        main_tabs = 'tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(['
+        start = self.source.index(main_tabs)
+        tabs = self.source[start:self.source.index('])', start)]
         self.assertLess(tabs.index('数据验收'), tabs.index('AI任务视图'))
         self.assertLess(tabs.index('AI任务视图'), tabs.index('执行表'))
 

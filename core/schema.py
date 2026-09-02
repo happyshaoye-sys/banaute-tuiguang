@@ -5,6 +5,8 @@ import numpy as np
 # ── 文件分类规则 ──────────────────────────────────────────
 SOURCE_PRODUCT_ROI = '商品-经营投产比'
 SOURCE_WUJIE_SUBJECT = '无界-商品主体'
+SOURCE_PRODUCT_OVERALL = '商品-整体'
+SOURCE_WUJIE_CREATIVE = '无界-创意'
 SOURCE_STOCK = '库存'
 SOURCE_PRODUCT_INFO = '商品资料'
 
@@ -15,9 +17,18 @@ FILE_CLASSIFIERS = [
     (['店铺商品资料', '商品资料'], SOURCE_PRODUCT_INFO),
 ]
 
+# 新品源必须是按日导出的原始表。不能用“包含关键字”匹配，否则
+# `商品-整体退款分布-YYYY-MM-DD.xlsx` 会被误读为主图整体数据源并触发无效校验。
+NEW_PRODUCT_DAILY_FILE_CLASSIFIERS = [
+    (re.compile(r'(?:商品[-_]?整体|商品整体)[-_]?\d{4}-\d{2}-\d{2}$', re.IGNORECASE), SOURCE_PRODUCT_OVERALL),
+    (re.compile(r'(?:无界[-_]?创意|无界创意)[-_]?\d{4}-\d{2}-\d{2}$', re.IGNORECASE), SOURCE_WUJIE_CREATIVE),
+]
+
 ALLOWED_SOURCE_TYPES = {
     SOURCE_PRODUCT_ROI,
     SOURCE_WUJIE_SUBJECT,
+    SOURCE_PRODUCT_OVERALL,
+    SOURCE_WUJIE_CREATIVE,
     SOURCE_STOCK,
     SOURCE_PRODUCT_INFO,
 }
@@ -26,10 +37,12 @@ ALLOWED_SOURCE_TYPES = {
 FIELD_ALIASES = {
     '宝贝ID': ['宝贝ID','商品ID','主体ID','item_id','Item ID','商品id','宝贝id','主体id','平台款式编码','平台店铺款式编码'],
     '商品名称': ['商品名称','商品标题','标题','产品名称'],
+    '店铺': ['店铺','店铺名称','店铺名'],
     '款式主图': ['款式主图'],
     'GMV': ['GMV','销售额','成交金额','支付金额','总成交金额'],
     '付费': ['付费','广告费','消耗','花费'],
     '计划ID': ['计划ID','计划编号','计划id','campaign_id','Campaign ID'],
+    '计划名字': ['计划名字','计划名称','计划名','campaign_name','Campaign Name'],
     '商品访客数': ['商品访客数','访客数','流量','UV','引导访问量'],
     '统计日期': ['统计日期','日期','周期'],
     '淘宝类目': ['淘宝类目','类目','品类','商品类目','叶子类目','叶子类目名称'],
@@ -45,6 +58,8 @@ FIELD_ALIASES = {
     '支付买家数': ['支付买家数','支付人数','买家数','成交用户数','成交人数'],
     '支付件数': ['支付件数','成交件数','销量'],
     '商品加购件数': ['商品加购件数','加购件数','总购物车数','总收藏加购数'],
+    '商品状态': ['商品状态','宝贝状态','当前状态'],
+    '主图整体点击率': ['主图整体点击率','主图点击率','商品主图点击率'],
     '推广加购数': ['推广加购数','推广加购件数','广告加购数','总购物车数'],
     '推广消耗金额': ['推广消耗金额'],
     '推广引导总成交金额': ['推广引导总成交金额'],
@@ -64,6 +79,9 @@ FIELD_ALIASES = {
     '直接购物车数': ['直接购物车数','直购数量','直接购物车数量'],
     '场景名字': ['场景名字','营销场景','场景','渠道','投放场景'],
     '转化周期': ['转化周期','周期类型','归因周期','转化窗口'],
+    '创意ID': ['创意ID','创意id','creative_id','Creative ID'],
+    '创意名字': ['创意名字','创意名称','创意名','创意标题'],
+    '主体名称': ['主体名称','主体名字','主体名'],
     '展现': ['展现','展现量','曝光','展示'],
     '点击': ['点击','点击量','点击数'],
     '点击率': ['点击率','CTR'],
@@ -190,6 +208,10 @@ def to_num(v):
 
 def classify_file(fn):
     name = fn.lower()
+    stem = re.sub(r'\.(?:xlsx|xls|csv)$', '', name, flags=re.IGNORECASE)
+    for pattern, src in NEW_PRODUCT_DAILY_FILE_CLASSIFIERS:
+        if pattern.fullmatch(stem):
+            return src
     for keywords, src in FILE_CLASSIFIERS:
         if any(kw.lower() in name for kw in keywords):
             return src

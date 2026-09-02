@@ -54,7 +54,7 @@ function Wait-MetoXUrl {
         if (Test-Path -LiteralPath $StdoutPath) {
             $content = Get-Content -LiteralPath $StdoutPath -Raw -ErrorAction SilentlyContinue
             if ($content -match "METOX_URL=http://127\.0\.0\.1:(\d+)") {
-                return [int]$Matches[1]
+                return [int]($Matches[1])
             }
         }
         if ($Process.HasExited) {

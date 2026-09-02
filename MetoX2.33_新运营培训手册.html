@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MetoX2.33 新运营培训手册</title>
+  <style>
+    body { margin:0; background:#f4f7fb; color:#1f2937; font-family:"Microsoft YaHei",Arial,sans-serif; line-height:1.7; }
+    main { max-width:980px; margin:32px auto; background:#fff; padding:36px 44px; border-radius:12px; box-shadow:0 10px 30px rgba(15,23,42,.08); }
+    h1 { margin-top:0; color:#0f172a; }
+    h2 { margin-top:28px; border-left:5px solid #2563eb; padding-left:12px; color:#172554; }
+    table { width:100%; border-collapse:collapse; margin:16px 0; }
+    th,td { border:1px solid #dbe3ef; padding:10px 12px; text-align:left; vertical-align:top; }
+    th { background:#eaf0f8; }
+    .notice { background:#eef6ff; border:1px solid #bfdbfe; border-radius:8px; padding:14px 16px; }
+    code { background:#eef2f7; padding:2px 5px; border-radius:4px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>MetoX2.33 新运营培训手册</h1>
+  <p>发布日期：2026-08-28 ｜ 外部策略算法：v9.3（未变更）</p>
+  <div class="notice"><strong>本版核心：</strong>28日热加载改用向量化数字处理，真实复测热缓存14.179秒；新品历史读取复用主流程日事实，并保持新品判定口径不变。</div>
+
+  <h2>1. 加载加速</h2>
+  <ul>
+    <li>28日热加载的数字清洗与累计处理改为向量化处理，减少逐行转换开销。</li>
+    <li>真实28日验证：强制冷读352.067秒，热缓存14.179秒，提速24.831倍。</li>
+    <li>新品经营历史优先复用主流程已加载的逐日事实，避免重复读取重叠日期。</li>
+  </ul>
+
+  <h2>2. 新品历史窗口</h2>
+  <table>
+    <tr><th>数据</th><th>窗口</th><th>用途</th></tr>
+    <tr><td>商品-整体</td><td>90天</td><td>建立新品首次在线发现索引，仍以首次发现“当前在线”的日期作为D1。</td></tr>
+    <tr><td>无界-创意</td><td>45天</td><td>计算素材创意点击率和近7天环比。</td></tr>
+    <tr><td>商品-整体退款分布</td><td>隔离</td><td>严格日期戳分类会阻止该文件误入“商品-整体”新品源校验。</td></tr>
+  </table>
+
+  <h2>3. 延续的业务边界</h2>
+  <ul>
+    <li>D14/D21新品判定继续只输出“下架”或“继续观察”；旧D28不作为页面当前判定节点。</li>
+    <li>无成交、无保护且累计访客达到300后，才用商品加购率弱势证据判断下架。</li>
+    <li>商品支付转化率和UV价值仅作诊断，不作为新品下架门槛。</li>
+    <li>业务口径、字段、执行表动作、Excel旧工作表、MetoX算法和外部v9.3策略不变。</li>
+  </ul>
+</main>
+</body>
+</html>

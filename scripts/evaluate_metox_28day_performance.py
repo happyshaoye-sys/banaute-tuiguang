@@ -33,6 +33,7 @@ try:
     from core.loader import read_prepared_source, scan_folder
     from core.merge import build_daily_facts, build_shared_dimensions, merge_daily_facts
     from core.periods import aggregate_period_frame
+    from core.schema import SOURCE_PRODUCT_OVERALL, SOURCE_WUJIE_CREATIVE
 except Exception as exc:  # pragma: no cover - exercised by the evaluator shell contract.
     print(json.dumps({
         "status": "BLOCKED",
@@ -82,7 +83,13 @@ def _scan_entries(*folders: Path) -> list[dict]:
     for folder in folders:
         if folder and folder.is_dir():
             entries.extend(scan_folder(folder))
-    return entries
+    # The production main-table path isolates optional new-product sources.
+    # Keep this benchmark aligned with that path so an invalid optional source
+    # cannot turn a main-table cache benchmark into a false failure.
+    return [
+        entry for entry in entries
+        if entry["source"] not in {SOURCE_PRODUCT_OVERALL, SOURCE_WUJIE_CREATIVE}
+    ]
 
 
 def _read_sources(entries: list[dict], parsed_cache_dir: Path) -> dict[str, list[tuple[str, pd.DataFrame]]]:

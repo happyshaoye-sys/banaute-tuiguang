@@ -98,7 +98,15 @@ def _clean_id_series(values):
 
 
 def _numeric_series(values):
-    return pd.Series(values).map(to_num).astype(float)
+    series = pd.Series(values)
+    if pd.api.types.is_numeric_dtype(series):
+        return pd.to_numeric(series, errors='coerce').fillna(0.0).astype(float)
+    cleaned = (
+        series.astype(str)
+        .str.strip()
+        .str.replace(r'[,\s¥￥$%]', '', regex=True)
+    )
+    return pd.to_numeric(cleaned, errors='coerce').fillna(0.0).astype(float)
 
 
 def _safe_div_series(num, den):
@@ -437,6 +445,49 @@ def _merge_dimension(base, dim, on, suffix):
     return base.merge(dim, on=on, how='left', suffixes=('', suffix))
 
 
+def _build_dimension_lookup(dim, on):
+    if dim.empty or on not in dim.columns:
+        return {}
+    indexed = dim.drop_duplicates(subset=[on], keep='first').set_index(on)
+    return {
+        column: indexed[column]
+        for column in indexed.columns
+        if column != on
+    }
+
+
+def _dimension_lookups(dimensions):
+    cache_key = '_metox_dimension_lookups'
+    lookups = dimensions.get(cache_key)
+    if lookups is None:
+        lookups = {
+            'info_pid': _build_dimension_lookup(
+                dimensions.get('product_info_by_pid', pd.DataFrame()), '宝贝ID'
+            ),
+            'info_sku': _build_dimension_lookup(
+                dimensions.get('product_info_by_sku', pd.DataFrame()), '货号'
+            ),
+            'stock_pid': _build_dimension_lookup(
+                dimensions.get('stock_by_pid', pd.DataFrame()), '宝贝ID'
+            ),
+            'stock_sku': _build_dimension_lookup(
+                dimensions.get('stock_by_sku', pd.DataFrame()), '货号'
+            ),
+        }
+        dimensions[cache_key] = lookups
+    return lookups
+
+
+def _attach_dimension_lookup(base, on, suffix, lookup):
+    if not lookup or on not in base.columns:
+        return base
+    values = base[on].astype(str).str.strip()
+    for column, mapping in lookup.items():
+        target = column if column not in base.columns else f'{column}{suffix}'
+        base[target] = values.map(mapping)
+    return base
+
+
 def _coalesce_columns(df, target, *sources):
     if target not in df.columns:
         df[target] = ''
@@ -568,17 +619,14 @@ def merge_daily_facts(base_df, plan_ids, dimensions):
     """Attach shared dimensions and finalize a cached daily fact frame."""
     base = base_df.copy(deep=True) if base_df is not None else pd.DataFrame(columns=['宝贝ID'])
     dims = dimensions or {}
-    product_info_by_pid = dims.get('product_info_by_pid', pd.DataFrame())
-    product_info_by_sku = dims.get('product_info_by_sku', pd.DataFrame())
-    stock_by_pid = dims.get('stock_by_pid', pd.DataFrame())
-    stock_by_sku = dims.get('stock_by_sku', pd.DataFrame())
+    lookups = _dimension_lookups(dims)
 
-    base = _merge_dimension(base, product_info_by_pid, '宝贝ID', '_info_pid')
-    base = _merge_dimension(base, stock_by_pid, '宝贝ID', '_stock_pid')
+    base = _attach_dimension_lookup(base, '宝贝ID', '_info_pid', lookups['info_pid'])
+    base = _attach_dimension_lookup(base, '宝贝ID', '_stock_pid', lookups['stock_pid'])
     _coalesce_columns(base, '货号', '货号_info_pid', '货号_stock_pid')
 
-    base = _merge_dimension(base, product_info_by_sku, '货号', '_info_sku')
-    base = _merge_dimension(base, stock_by_sku, '货号', '_stock_sku')
+    base = _attach_dimension_lookup(base, '货号', '_info_sku', lookups['info_sku'])
+    base = _attach_dimension_lookup(base, '货号', '_stock_sku', lookups['stock_sku'])
 
     _coalesce_columns(base, '款式主图', '款式主图_info_pid', '款式主图_stock_pid', '款式主图_info_sku', '款式主图_stock_sku')
     _coalesce_columns(base, '创建时间', '创建时间_info_pid', '创建时间_stock_pid', '创建时间_info_sku', '创建时间_stock_sku')

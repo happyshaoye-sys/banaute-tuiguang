@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MetoX2.31 新运营培训手册</title>
+  <style>
+    body { margin:0; background:#f4f7fb; color:#1f2937; font-family:"Microsoft YaHei",Arial,sans-serif; line-height:1.7; }
+    main { max-width:980px; margin:32px auto; background:#fff; padding:36px 44px; border-radius:12px; box-shadow:0 10px 30px rgba(15,23,42,.08); }
+    h1 { margin-top:0; color:#0f172a; }
+    h2 { margin-top:30px; border-left:5px solid #2563eb; padding-left:12px; color:#172554; }
+    table { width:100%; border-collapse:collapse; margin:16px 0; }
+    th,td { border:1px solid #dbe3ef; padding:11px 12px; text-align:left; vertical-align:top; }
+    th { background:#eaf0f8; }
+    .notice { background:#eef6ff; border:1px solid #bfdbfe; border-radius:8px; padding:14px 16px; }
+    code { background:#eef2f7; padding:2px 5px; border-radius:4px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>MetoX2.31 新运营培训手册</h1>
+  <p>发布日期：2026-08-27 ｜ 外部策略算法：v9.3（未变更）</p>
+  <div class="notice"><strong>本版核心：</strong>新增只读“新品视图”Tab，用首次在线发现日定义新品D1，并在D14/D28输出“下架”或“继续观察”；同时展示主图整体点击率和创意点击率。</div>
+
+  <h2>1. 新品生命周期判断</h2>
+  <ul>
+    <li>D1来自“商品-整体”中款式首次被发现为“当前在线”的日期，不再使用ERP建档时间或45天长周期。</li>
+    <li>判定粒度是款式/货号；货号缺失时回退宝贝ID，并在页面标记为低置信度。</li>
+    <li>D14为第一轮，D28为第二轮；每轮只输出“下架”或“继续观察”。</li>
+    <li>历史边界样本会标记左截断，证据不足时不参与有效判定。</li>
+  </ul>
+
+  <h2>2. 判定证据</h2>
+  <table>
+    <tr><th>指标</th><th>口径</th><th>使用方式</th></tr>
+    <tr><td>商品加购率</td><td>商品加购件数÷商品访客数</td><td>按窗口累计分子÷累计分母重算</td></tr>
+    <tr><td>商品支付转化率</td><td>支付买家数÷商品访客数</td><td>使用买家数，不使用支付件数</td></tr>
+    <tr><td>UV价值</td><td>GMV÷商品访客数</td><td>衡量访客承接价值</td></tr>
+    <tr><td>有效天数/访客</td><td>窗口内有效经营天数和访客量</td><td>不足时进入观察或不可验证</td></tr>
+    <tr><td>库存/在线/数据有效性</td><td>库存、商品状态和数据覆盖</td><td>防止把缺货、下线或缺数误判为商品失败</td></tr>
+  </table>
+
+  <h2>3. 点击率查看</h2>
+  <ul>
+    <li>主图整体点击率来自“商品-整体”平台字段，只展示原值和有效性，不反推点击/展现。</li>
+    <li>创意点击率来自“无界-创意”，按点击量÷展现量重新计算，并展示主创意、计划ID、创意ID和主体ID。</li>
+    <li>规则A是页面主判定；B-D影子规则只用于历史回放，其中CTR保护仅使用可聚合的创意CTR。主图整体点击率只展示、不参与A-D判定。</li>
+  </ul>
+
+  <h2>4. 操作顺序</h2>
+  <ol>
+    <li>选择日期、店铺、周期后点击“加载并处理数据”。</li>
+    <li>先看“数据验收”，确认“商品-整体”和“无界-创意”是否加载成功。</li>
+    <li>进入“新品视图”，先按判定节点筛选D14或D28，再看“新品判定”和证据摘要。</li>
+    <li>对“下架”款式复核库存、在线状态、有效天数、加购率、转化率和UV价值后，再执行人工下架。</li>
+    <li>使用素材区域查看主图整体点击率和创意点击率，定位是否是素材点击问题。</li>
+    <li>使用历史回放查看命中率、误杀风险、覆盖率和MetoX保护效果，再决定是否调整阈值。</li>
+  </ol>
+
+  <h2>5. 边界说明</h2>
+  <ul>
+    <li>新品视图只读，不修改执行表、旧Excel工作表、MetoX算法、外部v9.3策略或投放动作。</li>
+    <li>缺少新品新增数据源时，仅新品视图禁用并显示原因，既有九个Tab继续运行。</li>
+    <li>v2.30品类加购件数、品类加购率、品类支付转化率及固定7日环比继续保留。</li>
+    <li>执行表TOP15品类×TOP50单品状态底色、可售天数分档、退款风险阈值和首次启动无Email提示继续沿用。</li>
+  </ul>
+</main>
+</body>
+</html>

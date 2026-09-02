@@ -13,8 +13,8 @@ from typing import Iterable
 import pandas as pd
 
 
-DAILY_FACT_CACHE_VERSION = "metox2.25-daily-facts-v1"
-SHARED_DIMENSION_CACHE_VERSION = "metox2.25-shared-dimensions-v1"
+DAILY_FACT_CACHE_VERSION = "metox2.30-daily-facts-v2"
+SHARED_DIMENSION_CACHE_VERSION = "metox2.30-shared-dimensions-v2"
 
 
 def dataset_cache_key(base_root, year, shop):

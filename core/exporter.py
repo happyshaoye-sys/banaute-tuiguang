@@ -15,6 +15,27 @@ CATEGORY_INVESTMENT_COLUMNS = [
 ]
 
 EXECUTION_SHEET = '商品推广执行表'
+NEW_PRODUCT_LIFECYCLE_SHEET = '新品判定'
+NEW_PRODUCT_MATERIAL_SHEET = '素材表现'
+NEW_PRODUCT_BACKTEST_SHEET = '回测验证'
+NEW_PRODUCT_METHODOLOGY_SHEET = '新品口径说明'
+NEW_PRODUCT_LIFECYCLE_COLUMNS = [
+    '款式主图', '货号', '关联宝贝ID', '淘宝类目', 'ERP建档时间',
+    '首次在线发现日', '新品年龄', '判定轮次', 'D15结果', 'D30结果', '当前结果',
+    '保护状态', '流量验证', '本轮成交', '判定原因', '样本充分性',
+    '保护因素', '风险因素', '预测日期',
+]
+NEW_PRODUCT_MATERIAL_COLUMNS = [
+    '宝贝ID', '货号', '淘宝类目', '主图整体点击率', '主图CTR是否有效',
+    '计划ID', '计划名称', '主体ID', '主体名称', '主体类型',
+    '创意ID', '创意名称', '创意首次发现日', '创意年龄', '创意展现量', '创意点击量',
+    '无界创意CTR', '上一7天CTR', 'CTR环比', '创意展现占比', '是否主投创意',
+]
+NEW_PRODUCT_BACKTEST_COLUMNS = [
+    '判定节点', '规则版本', '样本数', '下架建议数', '下架命中率', '误杀率',
+    '召回率', '下架覆盖率', '机会损失GMV', '机会损失预估利润',
+    '不可验证样本数', 'CTR增益', 'MetoX保护有效率', '分组',
+]
 TOP_CATEGORY_LIMIT = 15
 TOP_PRODUCT_LIMIT = 50
 STATUS_HIGH_BACKGROUND = '#DDEBF7'
@@ -239,6 +260,114 @@ def _write_metric_status_rule_sheet(writer):
     worksheet.repeat_rows(0)
 
 
+def _new_product_methodology_frame(status_note=''):
+    rows = [
+        {
+            '主题': '生命周期起点',
+            '口径': '首次在线发现日',
+            '说明': '按款式/货号聚合，同一货号下所有宝贝ID首次在商品-整体日报中当前在线的日期作为D1。',
+        },
+        {
+            '主题': '判定窗口',
+            '口径': '15天周期',
+            '说明': '第一轮D15汇总D1-D15；第二轮D30使用D16-D30，流量验证使用D1至当前周期末累计访客。当前结果仅取D15或D30。',
+        },
+        {
+            '主题': '判定结果',
+            '口径': '下架/继续观察',
+            '说明': 'D1至当前判定节点内支付买家、支付件数或GMV任一大于0即动销保护；累计无成交且累计访客满300后，才进入加购判断。加购件数为0是强弱势证据；同层同期加购率低于80%为主判定，D30额外要求当前周期未高于第一周期。支付转化率和UV价值不参与新品下架判定。',
+        },
+        {
+            '主题': '比率公式',
+            '口径': '累计分子÷累计分母',
+            '说明': '商品加购率=Σ商品加购件数÷Σ商品访客数；商品支付转化率=Σ支付买家数÷Σ商品访客数；无界创意CTR=Σ点击量÷Σ展现量。',
+        },
+        {
+            '主题': '主图整体点击率',
+            '口径': '平台原值',
+            '说明': '当前源无主图点击量/曝光量分子分母，MVP只展示，不参与A-D判定。',
+        },
+        {
+            '主题': 'MetoX',
+            '口径': '影子验证',
+            '说明': '正向标签可作为保护候选；负向标签只作旁证，不能单独触发下架。',
+        },
+    ]
+    if status_note:
+        rows.insert(0, {'主题': '导出状态', '口径': '新品上下文', '说明': status_note})
+    return pd.DataFrame(rows, columns=['主题', '口径', '说明'])
+
+
+def _frame_from_context(context, keys, columns):
+    if context is None:
+        return pd.DataFrame(columns=columns)
+    if isinstance(context, pd.DataFrame):
+        frame = context.copy()
+    elif isinstance(context, dict):
+        frame = None
+        for key in keys:
+            candidate = context.get(key)
+            if candidate is not None:
+                frame = candidate.copy() if isinstance(candidate, pd.DataFrame) else pd.DataFrame(candidate)
+                break
+        if frame is None:
+            frame = pd.DataFrame(columns=columns)
+    else:
+        frame = pd.DataFrame(context)
+    if frame.empty and not list(frame.columns):
+        return pd.DataFrame(columns=columns)
+    preferred = [column for column in columns if column in frame.columns]
+    remaining = [column for column in frame.columns if column not in preferred]
+    return frame[preferred + remaining]
+
+
+def _drop_inactive_new_product_columns(frame):
+    inactive_prefixes = ('D14', 'D21', 'D28', 'D1_D14', 'D15_D28', 'D1_D28')
+    inactive = [
+        column for column in frame.columns
+        if str(column).startswith(inactive_prefixes)
+    ]
+    return frame.drop(columns=inactive, errors='ignore')
+
+
+def _write_new_product_sheets(writer, new_product_ctx=None):
+    lifecycle = _frame_from_context(
+        new_product_ctx,
+        ('lifecycle', 'decision', 'decisions', '新品判定'),
+        NEW_PRODUCT_LIFECYCLE_COLUMNS,
+    )
+    lifecycle = _drop_inactive_new_product_columns(
+        lifecycle.drop(columns=['商品名称'], errors='ignore')
+    )
+    materials = _frame_from_context(
+        new_product_ctx,
+        ('materials', 'material', 'creative', '素材表现'),
+        NEW_PRODUCT_MATERIAL_COLUMNS,
+    )
+    materials = materials.drop(columns=['商品名称'], errors='ignore')
+    backtest = _frame_from_context(
+        new_product_ctx,
+        ('backtest', 'validation', '回测验证'),
+        NEW_PRODUCT_BACKTEST_COLUMNS,
+    )
+    if isinstance(new_product_ctx, dict) and new_product_ctx.get('methodology') is not None:
+        methodology = _frame_from_context(
+            new_product_ctx,
+            ('methodology', '口径说明'),
+            ['主题', '口径', '说明'],
+        )
+    else:
+        status_note = ''
+        if isinstance(new_product_ctx, dict):
+            status_note = str(new_product_ctx.get('message') or '').strip()
+        methodology = _new_product_methodology_frame(status_note=status_note)
+
+    lifecycle.to_excel(writer, sheet_name=NEW_PRODUCT_LIFECYCLE_SHEET, index=False)
+    materials.to_excel(writer, sheet_name=NEW_PRODUCT_MATERIAL_SHEET, index=False)
+    backtest.to_excel(writer, sheet_name=NEW_PRODUCT_BACKTEST_SHEET, index=False)
+    methodology.to_excel(writer, sheet_name=NEW_PRODUCT_METHODOLOGY_SHEET, index=False)
+
+
 def export_execution_table(df, cat_ctx=None, ranking_df=None):
     """导出执行表及品类投放占比与 ROI 为 Excel bytes。"""
     validate_paid_plan_consistency(df, '执行表Excel导出')
@@ -251,7 +380,7 @@ def export_execution_table(df, cat_ctx=None, ranking_df=None):
     return output.read()
 
 
-def export_all_sheets(df, cat_ctx=None, ranking_df=None):
+def export_all_sheets(df, cat_ctx=None, ranking_df=None, new_product_ctx=None):
     """导出全部分析 Sheet"""
     validate_paid_plan_consistency(df, '全部Sheet Excel导出')
     output = io.BytesIO()
@@ -323,6 +452,9 @@ def export_all_sheets(df, cat_ctx=None, ranking_df=None):
             if inv_cols:
                 inv = df[(df['在仓库存'] > 50) | (df['在仓库存'] == 0)].sort_values('在仓库存', ascending=False)[inv_cols]
                 inv.to_excel(writer, sheet_name='库存动作', index=False)
+
+        # 12-15. 新品视图（只读MVP）：缺少新品上下文时仍导出口径和空模板，旧分析不受影响。
+        _write_new_product_sheets(writer, new_product_ctx=new_product_ctx)
 
     output.seek(0)
     return output.read()

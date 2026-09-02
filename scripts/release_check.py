@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 from pathlib import Path
 import re
@@ -27,6 +28,9 @@ PROTECTED_FILES = {
     "core/merge.py",
     "core/metric_labels.py",
     "core/metox_algorithm.py",
+    "core/new_product_backtest.py",
+    "core/new_product_first_seen.py",
+    "core/new_product_lifecycle.py",
     "core/periods.py",
     "core/schema.py",
     "core/segmentation.py",
@@ -67,6 +71,14 @@ def _git(*args: str, check: bool = True) -> str:
 def _version_tuple(value: str) -> tuple[int, int]:
     major, minor = value.split(".")
     return int(major), int(minor)
+
+
+def _function_source(source: str, function_name: str) -> str:
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == function_name:
+            return ast.get_source_segment(source, node) or ""
+    return ""
 
 
 def _latest_version_tag() -> tuple[str | None, tuple[int, int] | None]:
@@ -148,6 +160,20 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.daily_fact_cache")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("shared_dimension_cache"):
         errors.append("VERSION.json must record rule_versions.shared_dimension_cache")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("new_product_source_ingestion"):
+        errors.append("VERSION.json must record rule_versions.new_product_source_ingestion")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("new_product_first_seen"):
+        errors.append("VERSION.json must record rule_versions.new_product_first_seen")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("new_product_lifecycle_rules"):
+        errors.append("VERSION.json must record rule_versions.new_product_lifecycle_rules")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("new_product_material_ctr"):
+        errors.append("VERSION.json must record rule_versions.new_product_material_ctr")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("new_product_backtest"):
+        errors.append("VERSION.json must record rule_versions.new_product_backtest")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("new_product_view"):
+        errors.append("VERSION.json must record rule_versions.new_product_view")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("new_product_lazy_history_load"):
+        errors.append("VERSION.json must record rule_versions.new_product_lazy_history_load")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()
@@ -176,6 +202,13 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("app.py must not hardcode APP_VERSION")
     if "DISPLAY_VERSION" not in app_source:
         errors.append("app.py must render DISPLAY_VERSION")
+    if "新品视图" not in app_source:
+        errors.append("app.py must render the read-only 新品视图 tab")
+    if "加载新品历史" not in app_source or "刷新新品历史" not in app_source:
+        errors.append("新品视图 must expose a lazy history load/refresh button")
+    load_folder_source = _function_source(app_source, "_load_folder_cached")
+    if "_load_new_product_history(" in load_folder_source:
+        errors.append("main promotion load must not eager-load new-product history")
 
     launcher_source = (ROOT / "launcher.py").read_text(encoding="utf-8")
     for snippet in (
@@ -218,13 +251,21 @@ def check_release(require_release_branch: bool = False) -> list[str]:
     merge = (ROOT / "core" / "merge.py").read_text(encoding="utf-8")
     daily_cache = (ROOT / "core" / "daily_cache.py").read_text(encoding="utf-8")
     periods = (ROOT / "core" / "periods.py").read_text(encoding="utf-8")
+    data_validation = (ROOT / "core" / "data_validation.py").read_text(encoding="utf-8")
     if "'直接购物车数':'直购数量'" not in schema:
         errors.append("direct-purchase quantity must map from 直接购物车数")
     if "'直接成交笔数':'直购数量'" in schema:
         errors.append("direct-purchase quantity must not map from 直接成交笔数")
-    if "PARSED_CACHE_VERSION = 'v10'" not in loader:
-        errors.append("source-schema validation requires parsed cache v10")
-    data_validation = (ROOT / "core" / "data_validation.py").read_text(encoding="utf-8")
+    if "PARSED_CACHE_VERSION = 'v11'" not in loader:
+        errors.append("source-schema validation requires parsed cache v11")
+    for snippet in (
+        "SOURCE_PRODUCT_OVERALL",
+        "SOURCE_WUJIE_CREATIVE",
+        "商品-整体",
+        "无界-创意",
+    ):
+        if snippet not in schema and snippet not in loader and snippet not in data_validation:
+            errors.append(f"new-product source ingestion contract missing: {snippet}")
     for snippet in (
         "validate_required_columns",
         "有付费但没有PlanID",
@@ -237,8 +278,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
     if 'grouped["直购成本"] = _ratio_series(spend, grouped["直购数量"])' not in periods:
         errors.append("period direct-purchase cost must be recalculated from period totals")
     for snippet in (
-        "metox2.25-daily-facts-v1",
-        "metox2.25-shared-dimensions-v1",
+        "metox2.30-daily-facts-v2",
+        "metox2.30-shared-dimensions-v2",
         "os.replace(tmp_path, cache_path)",
         "verified_fingerprint",
         "daily fact sources changed before cache write",
@@ -246,6 +287,58 @@ def check_release(require_release_branch: bool = False) -> list[str]:
     ):
         if snippet not in daily_cache:
             errors.append(f"daily cache safety contract missing: {snippet}")
+    for relative in (
+        "core/new_product_first_seen.py",
+        "core/new_product_lifecycle.py",
+        "core/new_product_backtest.py",
+    ):
+        if not (ROOT / relative).is_file():
+            errors.append(f"new-product core module missing: {relative}")
+    first_seen_source = (ROOT / "core" / "new_product_first_seen.py").read_text(encoding="utf-8") if (ROOT / "core" / "new_product_first_seen.py").is_file() else ""
+    lifecycle_source = (ROOT / "core" / "new_product_lifecycle.py").read_text(encoding="utf-8") if (ROOT / "core" / "new_product_lifecycle.py").is_file() else ""
+    backtest_source = (ROOT / "core" / "new_product_backtest.py").read_text(encoding="utf-8") if (ROOT / "core" / "new_product_backtest.py").is_file() else ""
+    for snippet in (
+        "首次在线发现日",
+        "left_censored",
+        "STYLE_KEY",
+    ):
+        if snippet not in first_seen_source:
+            errors.append(f"new-product first-seen contract missing: {snippet}")
+    for snippet in (
+        "D15",
+        "D30",
+        "保护状态",
+        "流量验证",
+        "下架",
+        "继续观察",
+        "商品加购率",
+    ):
+        if snippet not in lifecycle_source:
+            errors.append(f"new-product lifecycle contract missing: {snippet}")
+    for snippet in (
+        "decision_visitor_min",
+        "period_min_valid_days",
+        "min_peer_count",
+        "本轮成交",
+        "D15累计已有成交，动销保护",
+        "D30累计已有成交，动销保护",
+        '"sale_prefix": "D1_D30"',
+        '"traffic_prefix": "D1_D30"',
+        'traffic_visitors = _num(row, f"{traffic_prefix}_商品访客数")',
+        "if traffic_visitors >= config.decision_visitor_min",
+        "REASON_D15_SALE_PROTECTED",
+        "REASON_D30_SALE_PROTECTED",
+    ):
+        if snippet not in lifecycle_source:
+            errors.append(f"new-product v2.37 lifecycle rule missing: {snippet}")
+    for snippet in (
+        "rule_",
+        "precision",
+        "false",
+        "coverage",
+    ):
+        if snippet not in backtest_source:
+            errors.append(f"new-product backtest contract missing: {snippet}")
     if "result_df['商品加购率'] = _safe_div_series(add_cart, visitors)" not in merge:
         errors.append("daily product cart rate must be add-cart quantity divided by product visitors")
     if "result_df['MetoX推广加购件数'], result_df['MetoX推广访客数']" not in merge:

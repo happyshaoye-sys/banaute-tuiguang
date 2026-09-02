@@ -76,6 +76,7 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("METOX_APP_TEST=PASS", source)
         self.assertIn("Test-MetoXFreshProfile", source)
         self.assertIn('Email:', source)
+        self.assertIn("return [int]($Matches[1])", source)
 
     def test_batch_entry_points_do_not_force_fixed_port(self):
         root = Path(__file__).resolve().parent

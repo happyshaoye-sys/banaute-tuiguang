@@ -16,8 +16,8 @@ class VersionContractTests(unittest.TestCase):
     def test_version_json_is_the_application_identity(self):
         info = json.loads((ROOT / "VERSION.json").read_text(encoding="utf-8"))
         self.assertEqual(info["product"], "MetoX")
-        self.assertEqual(info["version"], "2.30")
-        self.assertEqual(info["release_date"], "2026-08-26")
+        self.assertEqual(info["version"], "2.37")
+        self.assertEqual(info["release_date"], "2026-09-02")
         self.assertEqual(info["external_strategy_version"], "v9.3")
         self.assertEqual(info["rule_versions"]["refund_risk"], "2026-08-02")
         self.assertEqual(info["rule_versions"]["startup_launcher"], "2026-08-02")
@@ -48,8 +48,8 @@ class VersionContractTests(unittest.TestCase):
         self.assertEqual(info["rule_versions"]["execution_table_styler_capacity"], "2026-08-13")
         self.assertEqual(info["rule_versions"]["execution_top_category_products"], "2026-08-13")
         self.assertEqual(info["rule_versions"]["execution_top_status_colors"], "2026-08-14")
-        self.assertEqual(info["rule_versions"]["daily_fact_cache"], "2026-08-15")
-        self.assertEqual(info["rule_versions"]["shared_dimension_cache"], "2026-08-15")
+        self.assertEqual(info["rule_versions"]["daily_fact_cache"], "2026-08-27")
+        self.assertEqual(info["rule_versions"]["shared_dimension_cache"], "2026-08-27")
         self.assertEqual(info["rule_versions"]["deferred_all_sheets_download"], "2026-08-18")
         self.assertEqual(info["rule_versions"]["dashboard_kpi_daily_trend"], "2026-08-20")
         self.assertEqual(info["rule_versions"]["category_visitor_metrics"], "2026-08-24")
@@ -57,8 +57,16 @@ class VersionContractTests(unittest.TestCase):
             info["rule_versions"]["category_cart_conversion_metrics"],
             "2026-08-26",
         )
+        self.assertEqual(info["rule_versions"]["new_product_source_ingestion"], "2026-08-27")
+        self.assertEqual(info["rule_versions"]["new_product_first_seen"], "2026-08-27")
+        self.assertEqual(info["rule_versions"]["new_product_lifecycle_rules"], "2026-09-01")
+        self.assertEqual(info["rule_versions"]["new_product_material_ctr"], "2026-08-31")
+        self.assertEqual(info["rule_versions"]["new_product_backtest"], "2026-08-28")
+        self.assertEqual(info["rule_versions"]["new_product_view"], "2026-08-29")
+        self.assertEqual(info["rule_versions"]["new_product_lazy_history_load"], "2026-08-29")
+        self.assertEqual(info["rule_versions"]["loading_speed_optimization"], "2026-08-28")
         self.assertEqual(version.VERSION_INFO, info)
-        self.assertEqual(version.DISPLAY_VERSION, "MetoX v2.30")
+        self.assertEqual(version.DISPLAY_VERSION, "MetoX v2.37")
 
     def test_app_imports_version_instead_of_assigning_one(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
@@ -79,14 +87,26 @@ class VersionContractTests(unittest.TestCase):
         self.assertNotIn("0.7", source)
         self.assertNotIn("0.8", source)
 
+    def test_new_product_history_load_is_lazy(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
+        tree = ast.parse(source)
+        load_folder = ""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_load_folder_cached":
+                load_folder = ast.get_source_segment(source, node) or ""
+                break
+        self.assertNotIn("_load_new_product_history(", load_folder)
+        self.assertIn("加载新品历史", source)
+        self.assertIn("刷新新品历史", source)
+
     def test_current_operator_documents_show_v2_contract(self):
         documents = {
-            "README.md": "MetoX v2.30",
-            "README_离线使用说明.txt": "MetoX v2.30",
-            "第三方使用说明_先看这个.txt": "MetoX v2.30",
-            "半自动推广工具_数据源与指标说明.md": "MetoX v2.30",
-            "MetoX2.30_使用说明与运营操作顺序.md": "MetoX v2.30",
-            "MetoX2.30_新运营培训手册.html": "MetoX2.30",
+            "README.md": "MetoX v2.37",
+            "README_离线使用说明.txt": "MetoX v2.37",
+            "第三方使用说明_先看这个.txt": "MetoX v2.37",
+            "半自动推广工具_数据源与指标说明.md": "MetoX v2.37",
+            "MetoX2.37_使用说明与运营操作顺序.md": "MetoX v2.37",
+            "MetoX2.37_新运营培训手册.html": "MetoX2.37",
         }
         for relative, marker in documents.items():
             with self.subTest(relative=relative):
@@ -107,6 +127,30 @@ class VersionContractTests(unittest.TestCase):
         self.assertIn("#DDEBF7", rule_text)
         self.assertIn("#FCE4EC", rule_text)
         self.assertIn("状态判定", rule_text)
+        self.assertIn("新品视图", rule_text)
+        self.assertIn("商品-整体", rule_text)
+        self.assertIn("无界-创意", rule_text)
+        self.assertIn("加载新品历史", rule_text)
+        self.assertIn("刷新新品历史", rule_text)
+        self.assertIn("主流程不主动读取新品历史", rule_text)
+        self.assertIn("D15", rule_text)
+        self.assertIn("D30", rule_text)
+        self.assertIn("15 天", rule_text)
+        self.assertIn("D1 至当前判定节点内任意成交", rule_text)
+        self.assertIn("300", rule_text)
+        self.assertIn("有效数据天数", rule_text)
+        self.assertIn("同层样本", rule_text)
+        self.assertIn("累计加购件数为 0", rule_text)
+        self.assertIn("流量验证只根据", rule_text)
+        self.assertIn("商品名称", rule_text)
+        self.assertIn("动销保护", rule_text)
+        self.assertIn("链接/库存现状", rule_text)
+        self.assertIn("素材表现表", rule_text)
+        self.assertIn("向量化", rule_text)
+        self.assertIn("14.179", rule_text)
+        self.assertIn("商品-整体退款分布", rule_text)
+        self.assertIn("90天", rule_text)
+        self.assertIn("45天", rule_text)
 
     def test_release_packager_replaces_both_versioned_manuals(self):
         source = (ROOT / "scripts" / "release_metox.py").read_text(encoding="utf-8")
@@ -140,8 +184,32 @@ class VersionContractTests(unittest.TestCase):
         self.assertIn('"execution_status_text_color": "#1F2937"', source)
         self.assertIn('"execution_status_high_background": "#DDEBF7"', source)
         self.assertIn('"execution_status_low_background": "#FCE4EC"', source)
-        self.assertIn('"daily_fact_cache": "metox2.25-daily-facts-v1"', source)
-        self.assertIn('"verified_28day_warm_seconds": 52.359', source)
+        self.assertIn('"daily_fact_cache": "metox2.30-daily-facts-v2"', source)
+        self.assertIn('"shared_dimension_cache": "metox2.30-shared-dimensions-v2"', source)
+        self.assertIn('"new_product_view":', source)
+        self.assertIn('"decision_checkpoints": ["D15", "D30"]', source)
+        self.assertIn('"decision_window_days": 15', source)
+        self.assertIn('"decision_periods": ["D1-D15", "D16-D30"]', source)
+        self.assertIn('"main_promotion_load": "does not load new-product history"', source)
+        self.assertIn('"lazy_tab_button": "加载新品历史 / 刷新新品历史"', source)
+        self.assertIn("from D1 through the current checkpoint protects the style", source)
+        self.assertNotIn("current 15-day period protects that period only", source)
+        self.assertIn('"status_inventory_context":', source)
+        self.assertIn("display context only", source)
+        self.assertIn('"context_fields": ["动作可执行", "库存提示", "保护证据", "下架阻断原因"]', source)
+        self.assertIn('"visitor_gate": 300', source)
+        self.assertIn('"visitor_gate_scope": "cumulative product visitors from D1 through current checkpoint"', source)
+        self.assertIn('"traffic_validation_basis": "cumulative visitors only; effective-day sufficiency is evaluated separately"', source)
+        self.assertIn('"data_min_valid_days": 12', source)
+        self.assertIn('"peer_min_styles": 20', source)
+        self.assertIn("zero cart count is strong weak evidence", source)
+        self.assertIn('"removed_decision_columns": ["商品名称", "商品支付转化率", "访客平均价值"]', source)
+        self.assertIn('"hidden_columns": ["商品名称", "商品支付转化率", "访客平均价值"]', source)
+        self.assertIn('"material_hidden_columns": ["商品名称"]', source)
+        self.assertNotIn('"diagnostic_only"', source)
+        self.assertIn('"verified_28day_cold_seconds": 352.067', source)
+        self.assertIn('"verified_28day_warm_seconds": 14.179', source)
+        self.assertIn('"verified_speedup": 24.831', source)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import pickle
 from pathlib import Path
 import tempfile
 import unittest
@@ -19,11 +20,14 @@ from core.daily_cache import (
     source_fingerprint,
 )
 from core.merge import (
+    _numeric_series as merge_numeric_series,
     build_daily_facts,
     build_shared_dimensions,
     merge_daily_facts,
     merge_sources,
 )
+from core.periods import _numeric_series as period_numeric_series
+from core.schema import to_num
 from core.schema import (
     SOURCE_PRODUCT_INFO,
     SOURCE_PRODUCT_ROI,
@@ -165,6 +169,13 @@ def _unpack_merged(result):
 
 
 class DailyFactPipelineContractTests(unittest.TestCase):
+    def test_vectorized_numeric_helpers_match_scalar_numeric_contract(self):
+        values = pd.Series(["1,234", " ￥5.50 ", "12%", "bad", None, 3.0])
+        expected = pd.Series([to_num(value) for value in values], dtype=float)
+
+        pdt.assert_series_equal(merge_numeric_series(values), expected)
+        pdt.assert_series_equal(period_numeric_series(values), expected)
+
     def test_split_daily_fact_pipeline_matches_legacy_merge_sources(self):
         sources = _daily_sources(include_dimensions=True)
         expected_df, expected_plan_ids = merge_sources(sources)
@@ -297,6 +308,45 @@ class DailyFactDiskCacheTests(unittest.TestCase):
                 path.write_bytes(b"not a pickle")
 
             self.assertIsNone(load_daily_fact_cache(cache_root, DAY, entries))
+
+    def test_old_cache_versions_are_treated_as_cache_miss(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_root = Path(tmp)
+            source_path = cache_root / "product-source.csv"
+            source_path.write_text("source-v1", encoding="utf-8")
+            entries = [(source_path, SOURCE_PRODUCT_ROI)]
+            fingerprint = source_fingerprint(entries)
+
+            daily_path = cache_root / "_daily_facts" / f"{DAY}.pkl"
+            daily_path.parent.mkdir(parents=True)
+            with daily_path.open("wb") as fh:
+                pickle.dump({
+                    "version": "metox2.25-daily-facts-v1",
+                    "source_fingerprint": fingerprint,
+                    "base_df": pd.DataFrame([{"宝贝ID": "1001"}]),
+                    "plan_ids": [],
+                    "files_info": [],
+                    "total_files": 1,
+                }, fh)
+            self.assertIsNone(load_daily_fact_cache(cache_root, DAY, entries))
+
+            shared_path = cache_root / "_shared_dimensions" / "_dimensions.pkl"
+            shared_path.parent.mkdir(parents=True)
+            empty = pd.DataFrame()
+            with shared_path.open("wb") as fh:
+                pickle.dump({
+                    "version": "metox2.25-shared-dimensions-v1",
+                    "source_fingerprint": fingerprint,
+                    "dimensions": {
+                        "product_info_by_pid": empty,
+                        "product_info_by_sku": empty,
+                        "stock_by_pid": empty,
+                        "stock_by_sku": empty,
+                    },
+                    "files_info": [],
+                    "total_files": 1,
+                }, fh)
+            self.assertIsNone(load_shared_dimension_cache(cache_root, entries))
 
     def test_verified_fingerprint_cannot_be_relabelled_after_source_changes(self):
         with tempfile.TemporaryDirectory() as tmp:

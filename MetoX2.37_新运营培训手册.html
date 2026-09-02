@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MetoX2.37 新运营培训手册</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: #f6f7fb;
+      color: #172033;
+      line-height: 1.65;
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 40px 24px 64px;
+    }
+    header {
+      margin-bottom: 28px;
+      border-bottom: 1px solid #d9deea;
+      padding-bottom: 20px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 32px;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin-top: 32px;
+      font-size: 22px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+    }
+    th, td {
+      border: 1px solid #d9deea;
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #eef2f7;
+      font-weight: 700;
+    }
+    .meta {
+      color: #516078;
+    }
+    .note {
+      background: #fff;
+      border-left: 4px solid #e23b3b;
+      padding: 12px 16px;
+    }
+    code {
+      background: #eef2f7;
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>MetoX2.37 新运营培训手册</h1>
+      <div class="meta">版本：MetoX v2.37 ｜ 发布日期：2026-09-02 ｜ 外部策略算法：v9.3（本次未变更）</div>
+    </header>
+
+    <section>
+      <h2>一、先看本版变化</h2>
+      <p>v2.37 修复“新品视图”的流量验证口径：流量验证只根据 D1 至当前判定节点累计商品访客数判断；有效数据天数继续独立决定样本是否充分。既有九个Tab、执行表动作、Excel旧工作表、MetoX算法、状态判定和外部 v9.3 策略保持不变。</p>
+      <div class="note">主流程不主动读取新品历史；进入“新品视图”后点击“加载新品历史”，已加载后可点“刷新新品历史”。</div>
+    </section>
+
+    <section>
+      <h2>二、判定顺序</h2>
+      <table>
+        <thead>
+          <tr><th>顺序</th><th>检查项</th><th>结果</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>D1 至当前判定节点内支付买家、支付件数或 GMV 任一大于 0</td><td>继续观察，标记动销保护</td></tr>
+          <tr><td>2</td><td>D1 至当前判定节点累计商品访客数不足 300</td><td>继续观察，标记流量验证不足</td></tr>
+          <tr><td>3</td><td>当前判定窗口有效数据天数少于 12</td><td>继续观察，标记数据不足</td></tr>
+          <tr><td>4</td><td>同店铺、同淘宝类目、同价格段有效样本少于 20</td><td>继续观察，标记同层不足</td></tr>
+          <tr><td>5</td><td>累计无成交、累计访客达标，商品加购率低于同层基准 B 的 80%，且加购件数证据弱</td><td>下架候选</td></tr>
+          <tr><td>6</td><td>有成交、流量不足、数据不足、同层不足或加购承接尚可</td><td>继续观察</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>三、字段边界</h2>
+      <p>“下架判定”与“链接/库存现状”彻底拆开。商品状态、在线状态和库存只作为运营提示，不参与“下架/继续观察”的结果判定。</p>
+      <p>新品判定表取消“商品名称”、商品支付转化率、访客平均价值/UV价值等非当前判定字段；素材表现表继续取消“商品名称”。</p>
+    </section>
+
+    <section>
+      <h2>四、素材点击率</h2>
+      <p>主图整体点击率直接读取“商品-整体”的平台字段，仅展示、不聚合、不参与下架判定。</p>
+      <p>创意点击率来自“无界-创意”，按 <code>点击量÷展现量</code> 重算，并保留计划、创意和主体标识，用于判断新品素材是否需要继续测试或替换。</p>
+      <p>展现量、点击量若包含千分位分隔符，会先还原为完整数值再汇总；例如 <code>3,628</code> 按 <code>3628</code> 计算。素材表现与素材回测使用同一清洗口径。</p>
+    </section>
+
+    <section>
+      <h2>五、日常操作</h2>
+      <ol>
+        <li>输入分析日期和时间周期，点击“加载并处理数据”。</li>
+        <li>确认页面显示 <code>MetoX v2.37</code>，先看数据验收和主执行表。</li>
+        <li>进入“新品视图”，点击“加载新品历史”；需要重读时点击“刷新新品历史”。</li>
+        <li>先看动销保护和累计访客门槛，再处理无成交且加购承接弱的下架候选。</li>
+        <li>需要交接时导出Excel，旧工作表字段和业务口径保持原样。</li>
+      </ol>
+    </section>
+  </main>
+</body>
+</html>

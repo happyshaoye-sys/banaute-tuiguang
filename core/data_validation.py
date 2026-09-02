@@ -12,8 +12,10 @@ from .plan_metrics import (
 )
 from .schema import (
     SOURCE_PRODUCT_INFO,
+    SOURCE_PRODUCT_OVERALL,
     SOURCE_PRODUCT_ROI,
     SOURCE_STOCK,
+    SOURCE_WUJIE_CREATIVE,
     SOURCE_WUJIE_SUBJECT,
 )
 
@@ -32,6 +34,13 @@ SOURCE_REQUIRED_FIELDS = {
         '宝贝ID', '付费', '计划ID', '推广投产', 'GMV', '直购数量',
         '场景名字', '转化周期', '展现', '点击', '点击率',
         '商品支付转化率', '商品加购件数', '主体类型',
+    },
+    SOURCE_PRODUCT_OVERALL: {
+        '统计日期', '宝贝ID', '商品状态', '主图整体点击率',
+    },
+    SOURCE_WUJIE_CREATIVE: {
+        '统计日期', '转化周期', '计划ID', '创意ID', '创意名字',
+        '宝贝ID', '主体ID', '主体类型', '展现', '点击',
     },
     SOURCE_STOCK: {
         '宝贝ID', '货号', '在仓库存', '在途', '成本价（含税）', '日销7',

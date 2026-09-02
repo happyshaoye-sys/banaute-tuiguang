@@ -183,6 +183,107 @@ class ExportAllSheetsTests(unittest.TestCase):
                 self.assertIn('推广加购件数÷推广访客数', rules.loc[4, '指标口径'])
                 self.assertIn('当前访客数<100', rules.loc[4, '特殊情况'])
 
+    def test_new_product_sheets_are_exported_with_empty_template_without_context(self):
+        source = pd.DataFrame([{
+            '宝贝ID': '1005',
+            '淘宝类目': '半身裙',
+            'GMV': 1000.0,
+            '付费': 0.0,
+            '商品访客数': 200,
+            '关键词': 60.0,
+            '人群': 25.0,
+            '全站': 15.0,
+        }])
+
+        workbook = export_all_sheets(source)
+        excel = pd.ExcelFile(io.BytesIO(workbook))
+
+        for sheet in ('新品判定', '素材表现', '回测验证', '新品口径说明'):
+            self.assertIn(sheet, excel.sheet_names)
+
+        lifecycle = pd.read_excel(io.BytesIO(workbook), sheet_name='新品判定')
+        methodology = pd.read_excel(io.BytesIO(workbook), sheet_name='新品口径说明')
+
+        self.assertIn('首次在线发现日', lifecycle.columns)
+        self.assertIn('D15结果', lifecycle.columns)
+        self.assertIn('D30结果', lifecycle.columns)
+        self.assertNotIn('D14结果', lifecycle.columns)
+        self.assertNotIn('D21结果', lifecycle.columns)
+        self.assertEqual(methodology.columns.tolist(), ['主题', '口径', '说明'])
+        self.assertIn('首次在线发现日', ''.join(methodology['口径'].astype(str).tolist()))
+        self.assertIn('D15', ''.join(methodology.astype(str).agg(''.join, axis=1).tolist()))
+        self.assertIn('D30', ''.join(methodology.astype(str).agg(''.join, axis=1).tolist()))
+        self.assertNotIn('D14', ''.join(methodology.astype(str).agg(''.join, axis=1).tolist()))
+        self.assertNotIn('D21', ''.join(methodology.astype(str).agg(''.join, axis=1).tolist()))
+
+    def test_new_product_context_is_written_to_all_new_sheets(self):
+        source = pd.DataFrame([{
+            '宝贝ID': '1006',
+            '淘宝类目': '连衣裙',
+            'GMV': 1200.0,
+            '付费': 0.0,
+            '商品访客数': 240,
+            '关键词': 60.0,
+            '人群': 40.0,
+            '全站': 20.0,
+        }])
+        new_product_ctx = {
+            'lifecycle': pd.DataFrame([{
+                '货号': 'SKU-1006',
+                '关联宝贝ID': '1006',
+                '商品名称': '不应导出的商品名称',
+                '首次在线发现日': '2026-08-01',
+                '新品年龄': 30,
+                'D15结果': '继续观察',
+                'D30结果': '下架',
+                'D14结果': '继续观察',
+                'D21结果': '继续观察',
+                'D28结果': '继续观察',
+                '当前结果': '下架',
+                '判定原因': 'D30加购弱且证据充分',
+            }]),
+            'materials': pd.DataFrame([{
+                '宝贝ID': '1006',
+                '商品名称': '素材表也不应导出商品名称',
+                '创意ID': 'C1006',
+                '创意展现量': 1000,
+                '创意点击量': 50,
+                '无界创意CTR': 0.05,
+                '是否主投创意': True,
+            }]),
+            'backtest': pd.DataFrame([{
+                '判定节点': 'D15',
+                '规则版本': 'A-商品经营核心规则',
+                '样本数': 1,
+                '下架建议数': 1,
+                '不可验证样本数': 0,
+            }]),
+            'methodology': pd.DataFrame([{
+                '主题': '测试口径',
+                '口径': '累计分子÷累计分母',
+                '说明': '用于导出测试',
+            }]),
+        }
+
+        workbook = export_all_sheets(source, new_product_ctx=new_product_ctx)
+
+        lifecycle = pd.read_excel(io.BytesIO(workbook), sheet_name='新品判定')
+        materials = pd.read_excel(io.BytesIO(workbook), sheet_name='素材表现')
+        backtest = pd.read_excel(io.BytesIO(workbook), sheet_name='回测验证')
+        methodology = pd.read_excel(io.BytesIO(workbook), sheet_name='新品口径说明')
+
+        self.assertEqual(lifecycle.loc[0, '货号'], 'SKU-1006')
+        self.assertEqual(lifecycle.loc[0, '当前结果'], '下架')
+        self.assertEqual(lifecycle.loc[0, 'D15结果'], '继续观察')
+        self.assertEqual(lifecycle.loc[0, 'D30结果'], '下架')
+        for stale_column in ('D14结果', 'D21结果', 'D28结果'):
+            self.assertNotIn(stale_column, lifecycle.columns)
+        self.assertNotIn('商品名称', lifecycle.columns)
+        self.assertEqual(materials.loc[0, '创意ID'], 'C1006')
+        self.assertNotIn('商品名称', materials.columns)
+        self.assertEqual(backtest.loc[0, '判定节点'], 'D15')
+        self.assertEqual(methodology.loc[0, '主题'], '测试口径')
+
 
 if __name__ == '__main__':
     unittest.main()
