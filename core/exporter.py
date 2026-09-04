@@ -268,14 +268,14 @@ def _new_product_methodology_frame(status_note=''):
             '说明': '按款式/货号聚合，同一货号下所有宝贝ID首次在商品-整体日报中当前在线的日期作为D1。',
         },
         {
-            '主题': '判定窗口',
-            '口径': '15天周期',
-            '说明': '第一轮D15汇总D1-D15；第二轮D30使用D16-D30，流量验证使用D1至当前周期末累计访客。当前结果仅取D15或D30。',
+            '主题': '判定周期',
+            '口径': 'D15至D45每日更新',
+            '说明': 'D15起每天更新当前结果，最长到D45；流量验证和成交保护使用D1至分析日累计事实，加购表现仍使用D1-D15或D16-D30固定窗口。',
         },
         {
             '主题': '判定结果',
             '口径': '下架/继续观察',
-            '说明': 'D1至当前判定节点内支付买家、支付件数或GMV任一大于0即动销保护；累计无成交且累计访客满300后，才进入加购判断。加购件数为0是强弱势证据；同层同期加购率低于80%为主判定，D30额外要求当前周期未高于第一周期。支付转化率和UV价值不参与新品下架判定。',
+            '说明': 'D45内支付买家、支付件数或GMV任一大于0即动销保护；累计访客满300后进入加购判断，D45仍无成交且累计访客不足300时直接下架。加购件数为0是强弱势证据；同层同期加购率低于80%为主判定，D30额外要求当前周期未高于第一周期。支付转化率和UV价值不参与新品下架判定。',
         },
         {
             '主题': '比率公式',
@@ -322,10 +322,24 @@ def _frame_from_context(context, keys, columns):
 
 
 def _drop_inactive_new_product_columns(frame):
-    inactive_prefixes = ('D14', 'D21', 'D28', 'D1_D14', 'D15_D28', 'D1_D28')
+    inactive_prefixes = (
+        'D14',
+        'D21',
+        'D28',
+        'D1_D14',
+        'D15_D21',
+        'D15_D28',
+        'D1_D21',
+        'D1_D28',
+    )
+    inactive_exact = {
+        'left_censored',
+        'D15商品状态',
+        'D15在仓库存',
+    }
     inactive = [
         column for column in frame.columns
-        if str(column).startswith(inactive_prefixes)
+        if column in inactive_exact or str(column).startswith(inactive_prefixes)
     ]
     return frame.drop(columns=inactive, errors='ignore')
 

@@ -358,6 +358,18 @@ class NewProductViewIntegrationTests(unittest.TestCase):
             {STYLE_KEY: "SKU-31", "D14结果": "下架", "D21结果": "下架", "D28结果": "下架"},
         ])
         lifecycle = lifecycle.merge(obsolete, on=STYLE_KEY, how="left")
+        lifecycle["left_censored"] = True
+        lifecycle["D14商品状态"] = "当前在线"
+        lifecycle["D14在仓库存"] = 10
+        lifecycle["D15商品状态"] = "当前在线"
+        lifecycle["D15在仓库存"] = 9
+        lifecycle["D21商品状态"] = "当前在线"
+        lifecycle["D21在仓库存"] = 8
+        lifecycle["D30商品状态"] = "当前在线"
+        lifecycle["D30在仓库存"] = 7
+        lifecycle["D15_D21_商品访客数"] = 200
+        lifecycle["D1_D21_商品访客数"] = 400
+        lifecycle["__D1_AS_OF_商品访客数"] = 500
 
         view = APP._format_new_product_lifecycle_view(
             lifecycle, first_seen, d15, d30, "2026-08-25"
@@ -367,9 +379,16 @@ class NewProductViewIntegrationTests(unittest.TestCase):
 
         self.assertNotIn("商品名称", view.columns)
         self.assertNotIn("商品名称", csv_header)
-        self.assertNotIn("D14结果", view.columns)
-        self.assertNotIn("D21结果", view.columns)
-        self.assertNotIn("D28结果", view.columns)
+        for stale_column in (
+            "D14结果", "D21结果", "D28结果", "left_censored",
+            "D14商品状态", "D14在仓库存", "D15商品状态", "D15在仓库存",
+            "D21商品状态", "D21在仓库存", "D15_D21_商品访客数",
+            "D1_D21_商品访客数", "__D1_AS_OF_商品访客数",
+        ):
+            self.assertNotIn(stale_column, view.columns)
+            self.assertNotIn(stale_column, csv_header)
+        self.assertEqual(keyed.loc["SKU-30", "D30商品状态"], "当前在线")
+        self.assertEqual(keyed.loc["SKU-30", "D30在仓库存"], 7)
         self.assertIn("D15结果", view.columns)
         self.assertIn("D30结果", view.columns)
         self.assertIn("保护状态", view.columns)
@@ -398,6 +417,55 @@ class NewProductViewIntegrationTests(unittest.TestCase):
         self.assertEqual(keyed.loc["SKU-30", "本轮成交"], "2单200元")
         self.assertEqual(keyed.loc["SKU-31", "D30结果"], "继续观察")
         self.assertEqual(set(view["当前结果"].unique()), {"下架", "继续观察"})
+
+    def test_lifecycle_view_uses_daily_current_decision_after_d15(self):
+        first_seen = pd.DataFrame([
+            {STYLE_KEY: "SKU-29", FIRST_SEEN_DATE: "2026-08-07", IS_HISTORY_TRUNCATED: False},
+            {STYLE_KEY: "SKU-45", FIRST_SEEN_DATE: "2026-07-22", IS_HISTORY_TRUNCATED: False},
+        ])
+        lifecycle = pd.DataFrame([
+            {STYLE_KEY: "SKU-29", "货号": "sku-29", "新品年龄": 29},
+            {STYLE_KEY: "SKU-45", "货号": "sku-45", "新品年龄": 45},
+        ])
+        d15 = pd.DataFrame([
+            {STYLE_KEY: "SKU-29", "判定结果": "继续观察", "判定原因": "D15流量不足"},
+            {STYLE_KEY: "SKU-45", "判定结果": "继续观察", "判定原因": "D15流量不足"},
+        ])
+        d30 = pd.DataFrame([
+            {STYLE_KEY: "SKU-29", "判定结果": "继续观察", "判定原因": "未到D30"},
+            {STYLE_KEY: "SKU-45", "判定结果": "继续观察", "判定原因": "D30流量不足"},
+        ])
+        current = pd.DataFrame([
+            {
+                STYLE_KEY: "SKU-29", "判定轮次": "D15", "判定结果": "下架",
+                "判定原因": "D15加购弱且证据充分", "流量验证": "已验证",
+                "保护状态": "无保护", "本轮成交": "支付买家0人/支付件数0件/GMV 0",
+            },
+            {
+                STYLE_KEY: "SKU-45", "判定轮次": "D30", "判定结果": "下架",
+                "判定原因": "D45累计访客未达300且无成交，周期到期下架",
+                "流量验证": "待流量验证", "保护状态": "无保护",
+                "本轮成交": "支付买家0人/支付件数0件/GMV 0",
+            },
+        ])
+
+        view = APP._format_new_product_lifecycle_view(
+            lifecycle,
+            first_seen,
+            d15,
+            d30,
+            "2026-09-04",
+            current=current,
+        ).set_index(STYLE_KEY)
+
+        self.assertEqual(view.loc["SKU-29", "D15结果"], "继续观察")
+        self.assertEqual(view.loc["SKU-29", "当前结果"], "下架")
+        self.assertEqual(view.loc["SKU-29", "流量验证"], "已验证")
+        self.assertEqual(view.loc["SKU-45", "当前结果"], "下架")
+        self.assertEqual(
+            view.loc["SKU-45", "判定原因"],
+            "D45累计访客未达300且无成交，周期到期下架",
+        )
 
     def test_material_view_uses_clicks_over_impressions_and_keeps_plan_subject_fields(self):
         first_seen = pd.DataFrame([

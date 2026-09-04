@@ -24,30 +24,25 @@ from .new_product_first_seen import (
 RESULT_DOWN = "下架"
 RESULT_OBSERVE = "继续观察"
 
-CHECKPOINT_D14 = "D14"
-CHECKPOINT_D21 = "D21"
 CHECKPOINT_D15 = "D15"
 CHECKPOINT_D30 = "D30"
 RULE_VERSION_A = "A-商品经营核心规则"
 
-REASON_BEFORE_D14 = "未到第一轮判定日"
-REASON_BEFORE_D21 = "未到第二轮判定日"
-REASON_BEFORE_D15 = REASON_BEFORE_D14
-REASON_BEFORE_D30 = REASON_BEFORE_D21
+REASON_BEFORE_D15 = "未到第一轮判定日"
+REASON_BEFORE_D30 = "未到第二轮判定日"
 REASON_HISTORY_TRUNCATED = "历史截断"
 REASON_DATA_INCOMPLETE = "有效数据天数不足"
 REASON_TRAFFIC_INSUFFICIENT = "流量验证不足"
+REASON_CURRENT_TRAFFIC_INSUFFICIENT = "D1至分析日累计访客不足300"
 REASON_PEER_INSUFFICIENT = "同层样本不足"
 REASON_IMPROVING = "指标正在改善"
 REASON_PERFORMANCE_NORMAL = "表现未达下架条件"
-REASON_D14_WEAK = "D14加购弱且证据充分"
-REASON_D21_WEAK = "D21加购弱且证据充分"
 REASON_D15_WEAK = "D15加购弱且证据充分"
 REASON_D30_WEAK = "D30加购弱且证据充分"
-REASON_D14_SALE_PROTECTED = "D14累计已有成交，动销保护"
-REASON_D21_SALE_PROTECTED = "D21累计已有成交，动销保护"
 REASON_D15_SALE_PROTECTED = "D15累计已有成交，动销保护"
 REASON_D30_SALE_PROTECTED = "D30累计已有成交，动销保护"
+REASON_CURRENT_SALE_PROTECTED = "D1至分析日累计已有成交，动销保护"
+REASON_D45_TRAFFIC_EXPIRED = "D45累计访客未达300且无成交，周期到期下架"
 
 PRODUCT_ID = "宝贝ID"
 SKU = "货号"
@@ -59,17 +54,16 @@ STAT_DATE = "统计日期"
 SUM_COLUMNS = ["商品访客数", "商品加购件数", "支付买家数", "支付件数", "GMV"]
 DIMENSION_COLUMNS = ["店铺", "淘宝类目", "价格段", "货号", "商品名称", "款式主图"]
 WINDOW_SPECS = {
-    "D1_D14": (1, 14),
-    "D15_D21": (15, 21),
     "D1_D15": (1, 15),
     "D16_D30": (16, 30),
 }
 CUMULATIVE_SPECS = {
-    "D1_D21": ("D1_D14", "D15_D21"),
     "D1_D30": ("D1_D15", "D16_D30"),
 }
 CART_COUNT_COLUMN = "商品加购件数"
 CART_RATE_COLUMN = "商品加购率"
+CURRENT_CUMULATIVE_PREFIX = "__D1_AS_OF"
+CURRENT_CUMULATIVE_ATTR = "new_product_current_cumulative_metrics"
 
 
 @dataclass(frozen=True)
@@ -146,7 +140,7 @@ def lifecycle_window(age_days) -> str:
         age = int(age_days)
     except (TypeError, ValueError):
         return ""
-    for label, (start, end) in (("D1_D14", (1, 14)), ("D15_D21", (15, 21))):
+    for label, (start, end) in WINDOW_SPECS.items():
         if start <= age <= end:
             return label
     return ""
@@ -200,7 +194,12 @@ def aggregate_lifecycle_windows(
         return pd.DataFrame()
 
     as_of = _parse_date(as_of_date) if as_of_date else pd.NaT
+    if pd.notna(as_of):
+        work = work[work["_data_date"] <= as_of].copy()
+        if work.empty:
+            return pd.DataFrame()
     rows = []
+    current_metrics = {}
     for style_key, part in work.groupby(STYLE_KEY, sort=False):
         part = part.sort_values("_data_date")
         first_seen = part["_first_seen_date"].iloc[0]
@@ -247,9 +246,6 @@ def aggregate_lifecycle_windows(
             row["当前商品状态"] = _last_non_empty(part[PRODUCT_STATUS])
         if "在仓库存" in part.columns:
             row["当前在仓库存"] = float(latest.get("在仓库存", 0.0))
-        _write_checkpoint_state(row, part, CHECKPOINT_D14, max_age=14)
-        _write_checkpoint_state(row, part, CHECKPOINT_D21, max_age=21)
-        _write_checkpoint_state(row, part, CHECKPOINT_D15, max_age=15)
         _write_checkpoint_state(row, part, CHECKPOINT_D30, max_age=30)
 
         for label, (start, end) in WINDOW_SPECS.items():
@@ -257,8 +253,18 @@ def aggregate_lifecycle_windows(
             _write_window_metrics(row, label, window_part)
         for label, source_windows in CUMULATIVE_SPECS.items():
             _write_cumulative_metrics(row, label, source_windows)
+        current_end_age = max(0, min(int(age), 45))
+        current_part = part[
+            (part["新品年龄"] >= 1)
+            & (part["新品年龄"] <= current_end_age)
+        ]
+        current_row = {STYLE_KEY: style_key}
+        _write_window_metrics(current_row, CURRENT_CUMULATIVE_PREFIX, current_part)
+        current_metrics[style_key] = current_row
         rows.append(row)
-    return pd.DataFrame(rows)
+    out = pd.DataFrame(rows)
+    out.attrs[CURRENT_CUMULATIVE_ATTR] = current_metrics
+    return out
 
 
 def _write_window_metrics(row: dict, prefix: str, part: pd.DataFrame) -> None:
@@ -420,16 +426,127 @@ def apply_lifecycle_decisions(
     return pd.concat([out, decisions], axis=1)
 
 
-def _decide_row(row: pd.Series, checkpoint: str, config: LifecycleDecisionConfig) -> dict:
+def apply_current_lifecycle_decisions(
+    lifecycle_frame: pd.DataFrame,
+    peer_frame: pd.DataFrame | None = None,
+    config: LifecycleDecisionConfig | None = None,
+) -> pd.DataFrame:
+    """按分析日输出当前判定：性能沿用D15/D30，流量/成交使用D1至分析日滚动累计。"""
+    config = config or LifecycleDecisionConfig()
+    if lifecycle_frame is None or len(lifecycle_frame) == 0:
+        return pd.DataFrame()
+    peer_frame = lifecycle_frame if peer_frame is None else peer_frame
+    lifecycle_with_current = _attach_current_metric_columns(lifecycle_frame)
+    peer_with_current = _attach_current_metric_columns(peer_frame)
+    pieces = []
+    checkpoint_series = _current_checkpoint_series(lifecycle_with_current)
+    for checkpoint in (CHECKPOINT_D15, CHECKPOINT_D30):
+        part = lifecycle_with_current[checkpoint_series.eq(checkpoint)].copy()
+        if part.empty:
+            continue
+        scored = attach_peer_baselines(part, peer_with_current, checkpoint, config)
+        decisions = pd.DataFrame(
+            [
+                _decide_row(
+                    row,
+                    checkpoint,
+                    config,
+                    current_prefix=CURRENT_CUMULATIVE_PREFIX,
+                )
+                for _, row in scored.iterrows()
+            ],
+            index=scored.index,
+        )
+        pieces.append(pd.concat([scored, decisions], axis=1))
+    if not pieces:
+        return pd.DataFrame()
+    out = pd.concat(pieces, axis=0).sort_index()
+    return _drop_current_metric_columns(out)
+
+
+def _current_checkpoint_series(frame: pd.DataFrame) -> pd.Series:
+    age = pd.to_numeric(
+        frame.get("新品年龄", pd.Series(0, index=frame.index)),
+        errors="coerce",
+    ).fillna(0)
+    return pd.Series(
+        np.where(age >= 30, CHECKPOINT_D30, CHECKPOINT_D15),
+        index=frame.index,
+        dtype=object,
+    )
+
+
+def _attach_current_metric_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    metrics_by_style = getattr(frame, "attrs", {}).get(CURRENT_CUMULATIVE_ATTR, {})
+    if metrics_by_style and STYLE_KEY in out.columns:
+        current_frame = pd.DataFrame(list(metrics_by_style.values()))
+        if STYLE_KEY in current_frame.columns:
+            out = out.merge(current_frame, on=STYLE_KEY, how="left")
+
+    for column in _current_metric_columns():
+        if column not in out.columns:
+            out[column] = np.nan
+    for idx, row in out.iterrows():
+        if not pd.isna(row.get(f"{CURRENT_CUMULATIVE_PREFIX}_商品访客数")):
+            continue
+        source_prefix = "D1_D30" if _num(row, "新品年龄") >= 30 else "D1_D15"
+        for field in SUM_COLUMNS:
+            out.at[idx, f"{CURRENT_CUMULATIVE_PREFIX}_{field}"] = _num(row, f"{source_prefix}_{field}")
+        out.at[idx, f"{CURRENT_CUMULATIVE_PREFIX}_有效数据天数"] = _num(
+            row, f"{source_prefix}_有效数据天数"
+        )
+        visitors = out.at[idx, f"{CURRENT_CUMULATIVE_PREFIX}_商品访客数"]
+        carts = out.at[idx, f"{CURRENT_CUMULATIVE_PREFIX}_商品加购件数"]
+        out.at[idx, f"{CURRENT_CUMULATIVE_PREFIX}_商品加购率"] = (
+            carts / visitors if visitors > 0 else np.nan
+        )
+    return out
+
+
+def _current_metric_columns() -> list[str]:
+    return [
+        *[f"{CURRENT_CUMULATIVE_PREFIX}_{field}" for field in SUM_COLUMNS],
+        f"{CURRENT_CUMULATIVE_PREFIX}_有效数据天数",
+        f"{CURRENT_CUMULATIVE_PREFIX}_商品加购率",
+    ]
+
+
+def _drop_current_metric_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    internal_cols = [
+        column for column in frame.columns
+        if str(column).startswith(f"{CURRENT_CUMULATIVE_PREFIX}_")
+    ]
+    return frame.drop(columns=internal_cols, errors="ignore")
+
+
+def _decide_row(
+    row: pd.Series,
+    checkpoint: str,
+    config: LifecycleDecisionConfig,
+    *,
+    current_prefix: str | None = None,
+) -> dict:
     spec = _decision_spec(checkpoint)
     min_age = spec["min_age"]
     prefix = spec["prefix"]
-    sale_prefix = spec["sale_prefix"]
-    traffic_prefix = spec["traffic_prefix"]
+    sale_prefix = current_prefix or spec["sale_prefix"]
+    traffic_prefix = current_prefix or spec["traffic_prefix"]
+    sales_summary_prefix = current_prefix or prefix
     trend_prefix = spec["trend_prefix"]
     prev_prefix = spec["prev_prefix"]
     weak_reason = spec["weak_reason"]
     before_reason = spec["before_reason"]
+    sale_protected_reason = (
+        REASON_CURRENT_SALE_PROTECTED
+        if current_prefix
+        else spec["sale_protected_reason"]
+    )
+    traffic_insufficient_reason = (
+        REASON_CURRENT_TRAFFIC_INSUFFICIENT
+        if current_prefix
+        else REASON_TRAFFIC_INSUFFICIENT
+    )
 
     reason = None
     result = RESULT_OBSERVE
@@ -443,19 +560,23 @@ def _decide_row(row: pd.Series, checkpoint: str, config: LifecycleDecisionConfig
         if traffic_visitors >= config.decision_visitor_min
         else "待流量验证"
     )
-    sales_summary = _sales_summary(row, prefix)
+    sales_summary = _sales_summary(row, sales_summary_prefix)
     protection_sales_summary = _sales_summary(row, sale_prefix)
     if _num(row, "新品年龄") < min_age:
         reason = before_reason
     elif _has_paid_sale(row, sale_prefix):
-        reason = spec["sale_protected_reason"]
+        reason = sale_protected_reason
         protection_status = "动销保护"
         protection_factor = reason
         protection_evidence = protection_sales_summary
     elif bool(row.get(IS_HISTORY_TRUNCATED, False)):
         reason = REASON_HISTORY_TRUNCATED
+    elif current_prefix and _num(row, "新品年龄") >= 45 and traffic_visitors < config.decision_visitor_min:
+        result = RESULT_DOWN
+        reason = REASON_D45_TRAFFIC_EXPIRED
+        sample_status = "不足"
     elif traffic_visitors < config.decision_visitor_min:
-        reason = REASON_TRAFFIC_INSUFFICIENT
+        reason = traffic_insufficient_reason
         sample_status = "不足"
     elif not _decision_data_complete(row, checkpoint, config):
         reason = REASON_DATA_INCOMPLETE
@@ -493,30 +614,6 @@ def _decide_row(row: pd.Series, checkpoint: str, config: LifecycleDecisionConfig
 
 
 def _decision_spec(checkpoint: str) -> dict:
-    if checkpoint == CHECKPOINT_D14:
-        return {
-            "min_age": 14,
-            "prefix": "D1_D14",
-            "sale_prefix": "D1_D14",
-            "traffic_prefix": "D1_D14",
-            "trend_prefix": "D1_D14",
-            "prev_prefix": "",
-            "weak_reason": REASON_D14_WEAK,
-            "before_reason": REASON_BEFORE_D14,
-            "sale_protected_reason": REASON_D14_SALE_PROTECTED,
-        }
-    if checkpoint == CHECKPOINT_D21:
-        return {
-            "min_age": 21,
-            "prefix": "D1_D21",
-            "sale_prefix": "D1_D21",
-            "traffic_prefix": "D1_D21",
-            "trend_prefix": "D1_D21",
-            "prev_prefix": "",
-            "weak_reason": REASON_D21_WEAK,
-            "before_reason": REASON_BEFORE_D21,
-            "sale_protected_reason": REASON_D21_SALE_PROTECTED,
-        }
     if checkpoint == CHECKPOINT_D15:
         return {
             "min_age": 15,
@@ -634,23 +731,18 @@ def _cart_rate_improved(row: pd.Series, prefix: str, prev_prefix: str) -> bool:
 
 
 __all__ = [
-    "CHECKPOINT_D14",
-    "CHECKPOINT_D21",
     "CHECKPOINT_D15",
     "CHECKPOINT_D30",
     "LifecycleDecisionConfig",
-    "REASON_BEFORE_D14",
-    "REASON_BEFORE_D21",
     "REASON_BEFORE_D15",
     "REASON_BEFORE_D30",
-    "REASON_D14_WEAK",
-    "REASON_D14_SALE_PROTECTED",
-    "REASON_D21_WEAK",
-    "REASON_D21_SALE_PROTECTED",
+    "REASON_CURRENT_SALE_PROTECTED",
+    "REASON_CURRENT_TRAFFIC_INSUFFICIENT",
     "REASON_D15_WEAK",
     "REASON_D15_SALE_PROTECTED",
     "REASON_D30_WEAK",
     "REASON_D30_SALE_PROTECTED",
+    "REASON_D45_TRAFFIC_EXPIRED",
     "REASON_DATA_INCOMPLETE",
     "REASON_HISTORY_TRUNCATED",
     "REASON_IMPROVING",
@@ -661,6 +753,7 @@ __all__ = [
     "RESULT_OBSERVE",
     "RULE_VERSION_A",
     "aggregate_lifecycle_windows",
+    "apply_current_lifecycle_decisions",
     "apply_lifecycle_decisions",
     "compute_peer_baselines",
     "lifecycle_window",

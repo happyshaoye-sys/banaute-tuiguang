@@ -18,6 +18,8 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
+from .version import APP_VERSION
+
 
 LLM_PROMPT_VERSION = "metox-llm-advisor-2026-09-02-v1"
 ALLOWED_RECOMMENDATIONS = ("保持", "增加", "削减", "暂停", "小额测试", "人工复核")
@@ -575,7 +577,7 @@ def call_advisor(
         {
             "Authorization": f"Bearer {config['api_key']}",
             "Content-Type": "application/json",
-            "User-Agent": "MetoX-LLM-Advisor/2.38",
+            "User-Agent": f"MetoX-LLM-Advisor/{APP_VERSION}",
         },
         request_body,
         timeout,

@@ -1,7 +1,7 @@
 {
   "product": "MetoX",
-  "version": "2.38",
-  "release_date": "2026-09-02",
+  "version": "2.39",
+  "release_date": "2026-09-04",
   "external_strategy_version": "v9.3",
   "rule_versions": {
     "refund_risk": "2026-08-02",
@@ -41,10 +41,10 @@
     "category_cart_conversion_metrics": "2026-08-26",
     "new_product_source_ingestion": "2026-08-27",
     "new_product_first_seen": "2026-08-27",
-    "new_product_lifecycle_rules": "2026-09-01",
+    "new_product_lifecycle_rules": "2026-09-04",
     "new_product_material_ctr": "2026-08-31",
-    "new_product_backtest": "2026-08-28",
-    "new_product_view": "2026-08-29",
+    "new_product_backtest": "2026-09-04",
+    "new_product_view": "2026-09-04",
     "new_product_lazy_history_load": "2026-08-29",
     "loading_speed_optimization": "2026-08-28",
     "llm_advisor": "2026-09-02",

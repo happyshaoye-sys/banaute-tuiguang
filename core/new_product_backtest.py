@@ -595,7 +595,7 @@ def _rule_a_reasons(frame: pd.DataFrame, down_mask: pd.Series, config: BacktestC
     reasons = pd.Series("继续观察", index=frame.index, dtype=object)
     reasons.loc[status.eq("legacy_checkpoint")] = "仅支持D15/D30回放"
     reasons.loc[status.eq("context_abnormal")] = "库存/状态/数据异常"
-    reasons.loc[status.eq("paid_sale_protected")] = "已有支付成交，保护观察"
+    reasons.loc[status.eq("paid_sale_protected")] = "D1至当前判定节点累计已有成交，保护观察"
     reasons.loc[status.eq("valid_days_insufficient")] = "有效数据天数不足"
     reasons.loc[status.eq("traffic_insufficient")] = "访客样本不足"
     reasons.loc[status.eq("baseline_insufficient")] = "同层同期加购率基准不足"
@@ -604,7 +604,7 @@ def _rule_a_reasons(frame: pd.DataFrame, down_mask: pd.Series, config: BacktestC
     reasons.loc[down_mask] = "无成交且加购率低于同层同期基准，且未较前窗改善"
     reasons.loc[status.eq("legacy_checkpoint")] = "仅支持D15/D30回放"
     reasons.loc[status.eq("context_abnormal")] = "历史截断或数据异常"
-    reasons.loc[status.eq("paid_sale_protected")] = "当前15天周期已有成交，保护观察"
+    reasons.loc[status.eq("paid_sale_protected")] = "D1至当前判定节点累计已有成交，保护观察"
     reasons.loc[status.eq("valid_days_insufficient")] = "当前15天周期有效数据天数不足"
     reasons.loc[status.eq("traffic_insufficient")] = "累计访客未达300"
     reasons.loc[status.eq("baseline_insufficient")] = "同层样本不足或加购率基准不可用"
@@ -678,9 +678,9 @@ def _rule_a_cart_baseline(frame: pd.DataFrame) -> pd.Series:
 
 
 def _rule_a_has_paid_sale(frame: pd.DataFrame) -> pd.Series:
-    buyers = _rule_a_current_metric(frame, "buyers").fillna(0)
-    units = _rule_a_current_metric(frame, "units").fillna(0)
-    gmv = _rule_a_current_metric(frame, "gmv").fillna(0)
+    buyers = _rule_a_cumulative_metric(frame, "buyers").fillna(0)
+    units = _rule_a_cumulative_metric(frame, "units").fillna(0)
+    gmv = _rule_a_cumulative_metric(frame, "gmv").fillna(0)
     return buyers.gt(0) | units.gt(0) | gmv.gt(0)
 
 

@@ -40,7 +40,6 @@ FIRST_SEEN_COLUMNS = [
     ERP_CREATED_AT,
     HISTORY_START_DATE,
     IS_HISTORY_TRUNCATED,
-    LEFT_CENSORED,
     MATCH_CONFIDENCE,
     STYLE_KEY_SOURCE,
 ]
@@ -193,7 +192,6 @@ def build_first_seen_index(
         work[IS_HISTORY_TRUNCATED] = bool(history_start) & (
             work[FIRST_SEEN_DATE] <= history_start
         )
-        work[LEFT_CENSORED] = work[IS_HISTORY_TRUNCATED]
         candidates.append(work[FIRST_SEEN_COLUMNS])
 
     new_index = _collapse_first_seen_candidates(candidates)
@@ -219,9 +217,10 @@ def _normalize_first_seen_index(frame: pd.DataFrame) -> pd.DataFrame:
     out[FIRST_SEEN_PRODUCT_ID] = out[FIRST_SEEN_PRODUCT_ID].map(normalize_identifier)
     out[HISTORY_START_DATE] = out[HISTORY_START_DATE].map(_parse_iso_date)
     out[IS_HISTORY_TRUNCATED] = out[IS_HISTORY_TRUNCATED].map(_to_bool)
-    out[LEFT_CENSORED] = out[LEFT_CENSORED].map(_to_bool)
-    out[IS_HISTORY_TRUNCATED] = out[IS_HISTORY_TRUNCATED] | out[LEFT_CENSORED]
-    out[LEFT_CENSORED] = out[IS_HISTORY_TRUNCATED]
+    if LEFT_CENSORED in frame.columns:
+        out[IS_HISTORY_TRUNCATED] = (
+            out[IS_HISTORY_TRUNCATED] | frame[LEFT_CENSORED].map(_to_bool)
+        )
     out = out[(out[STYLE_KEY] != "") & (out[FIRST_SEEN_DATE] != "")]
     return out[FIRST_SEEN_COLUMNS].reset_index(drop=True)
 
@@ -255,11 +254,13 @@ def _collapse_first_seen_candidates(frames: list[pd.DataFrame]) -> pd.DataFrame:
         first[ERP_CREATED_AT] = _first_non_empty(part[ERP_CREATED_AT])
         first[FIRST_SEEN_PRODUCT_ID] = _first_non_empty(part[FIRST_SEEN_PRODUCT_ID])
         first[HISTORY_START_DATE] = _first_non_empty(part[HISTORY_START_DATE])
-        first[IS_HISTORY_TRUNCATED] = bool(
+        computed_truncated = bool(
             first[HISTORY_START_DATE]
             and first[FIRST_SEEN_DATE] <= first[HISTORY_START_DATE]
         )
-        first[LEFT_CENSORED] = bool(first[IS_HISTORY_TRUNCATED])
+        first[IS_HISTORY_TRUNCATED] = computed_truncated or bool(
+            part[IS_HISTORY_TRUNCATED].map(_to_bool).any()
+        )
         if SOURCE_SKU in set(part[STYLE_KEY_SOURCE]):
             first[STYLE_KEY_SOURCE] = SOURCE_SKU
             first[MATCH_CONFIDENCE] = MATCH_CONFIDENCE_HIGH
@@ -275,7 +276,6 @@ __all__ = [
     "FirstSeenBuildConfig",
     "HISTORY_START_DATE",
     "IS_HISTORY_TRUNCATED",
-    "LEFT_CENSORED",
     "MATCH_CONFIDENCE",
     "MATCH_CONFIDENCE_HIGH",
     "MATCH_CONFIDENCE_LOW",

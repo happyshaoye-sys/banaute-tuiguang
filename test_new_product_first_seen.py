@@ -7,7 +7,6 @@ from core.new_product_first_seen import (
     FIRST_SEEN_PRODUCT_ID,
     HISTORY_START_DATE,
     IS_HISTORY_TRUNCATED,
-    LEFT_CENSORED,
     MATCH_CONFIDENCE,
     MATCH_CONFIDENCE_HIGH,
     MATCH_CONFIDENCE_LOW,
@@ -35,7 +34,7 @@ class NewProductFirstSeenTests(unittest.TestCase):
         self.assertEqual(result.loc[1, MATCH_CONFIDENCE], MATCH_CONFIDENCE_LOW)
         self.assertEqual(result.loc[3, STYLE_KEY], "123")
 
-    def test_build_index_uses_first_online_day_and_marks_left_censored(self):
+    def test_build_index_uses_first_online_day_and_marks_history_truncated(self):
         day1 = pd.DataFrame([
             {
                 "宝贝ID": "1001",
@@ -65,11 +64,40 @@ class NewProductFirstSeenTests(unittest.TestCase):
         self.assertEqual(result.loc["SKU-A", FIRST_SEEN_DATE], "2026-08-01")
         self.assertEqual(result.loc["SKU-A", FIRST_SEEN_PRODUCT_ID], "1001")
         self.assertTrue(bool(result.loc["SKU-A", IS_HISTORY_TRUNCATED]))
-        self.assertTrue(bool(result.loc["SKU-A", LEFT_CENSORED]))
         self.assertEqual(result.loc["SKU-A", HISTORY_START_DATE], "2026-08-01")
         self.assertEqual(result.loc["SKU-B", FIRST_SEEN_DATE], "2026-08-02")
         self.assertFalse(bool(result.loc["SKU-B", IS_HISTORY_TRUNCATED]))
-        self.assertFalse(bool(result.loc["SKU-B", LEFT_CENSORED]))
+        self.assertNotIn("left_censored", result.columns)
+
+    def test_legacy_left_censored_input_is_folded_into_history_truncated(self):
+        existing = pd.DataFrame([{
+            STYLE_KEY: "sku-a",
+            FIRST_SEEN_DATE: "2026-08-03",
+            FIRST_SEEN_PRODUCT_ID: "1001",
+            "ERP建档时间": "",
+            HISTORY_START_DATE: "",
+            IS_HISTORY_TRUNCATED: False,
+            "left_censored": True,
+            MATCH_CONFIDENCE: MATCH_CONFIDENCE_HIGH,
+            STYLE_KEY_SOURCE: "货号",
+        }])
+
+        result = build_first_seen_index([], existing_index=existing).set_index(STYLE_KEY)
+
+        self.assertTrue(bool(result.loc["SKU-A", IS_HISTORY_TRUNCATED]))
+        self.assertNotIn("left_censored", result.columns)
+
+        later = pd.DataFrame([{
+            "宝贝ID": "1001",
+            "货号": "sku-a",
+            "商品状态": "当前在线",
+        }])
+        updated = build_first_seen_index(
+            [("2026-08-05", later)],
+            existing_index=existing,
+        ).set_index(STYLE_KEY)
+        self.assertTrue(bool(updated.loc["SKU-A", IS_HISTORY_TRUNCATED]))
+        self.assertNotIn("left_censored", updated.columns)
 
     def test_existing_index_only_moves_first_seen_earlier(self):
         existing = pd.DataFrame([{

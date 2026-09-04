@@ -16,8 +16,8 @@ class VersionContractTests(unittest.TestCase):
     def test_version_json_is_the_application_identity(self):
         info = json.loads((ROOT / "VERSION.json").read_text(encoding="utf-8"))
         self.assertEqual(info["product"], "MetoX")
-        self.assertEqual(info["version"], "2.38")
-        self.assertEqual(info["release_date"], "2026-09-02")
+        self.assertEqual(info["version"], "2.39")
+        self.assertEqual(info["release_date"], "2026-09-04")
         self.assertEqual(info["external_strategy_version"], "v9.3")
         self.assertEqual(info["rule_versions"]["refund_risk"], "2026-08-02")
         self.assertEqual(info["rule_versions"]["startup_launcher"], "2026-08-02")
@@ -59,16 +59,16 @@ class VersionContractTests(unittest.TestCase):
         )
         self.assertEqual(info["rule_versions"]["new_product_source_ingestion"], "2026-08-27")
         self.assertEqual(info["rule_versions"]["new_product_first_seen"], "2026-08-27")
-        self.assertEqual(info["rule_versions"]["new_product_lifecycle_rules"], "2026-09-01")
+        self.assertEqual(info["rule_versions"]["new_product_lifecycle_rules"], "2026-09-04")
         self.assertEqual(info["rule_versions"]["new_product_material_ctr"], "2026-08-31")
-        self.assertEqual(info["rule_versions"]["new_product_backtest"], "2026-08-28")
-        self.assertEqual(info["rule_versions"]["new_product_view"], "2026-08-29")
+        self.assertEqual(info["rule_versions"]["new_product_backtest"], "2026-09-04")
+        self.assertEqual(info["rule_versions"]["new_product_view"], "2026-09-04")
         self.assertEqual(info["rule_versions"]["new_product_lazy_history_load"], "2026-08-29")
         self.assertEqual(info["rule_versions"]["loading_speed_optimization"], "2026-08-28")
         self.assertEqual(info["rule_versions"]["llm_advisor"], "2026-09-02")
         self.assertEqual(info["rule_versions"]["llm_feedback_learning"], "2026-09-02")
         self.assertEqual(version.VERSION_INFO, info)
-        self.assertEqual(version.DISPLAY_VERSION, "MetoX v2.38")
+        self.assertEqual(version.DISPLAY_VERSION, "MetoX v2.39")
 
     def test_app_imports_version_instead_of_assigning_one(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
@@ -103,12 +103,12 @@ class VersionContractTests(unittest.TestCase):
 
     def test_current_operator_documents_show_v2_contract(self):
         documents = {
-            "README.md": "MetoX v2.38",
-            "README_离线使用说明.txt": "MetoX v2.38",
-            "第三方使用说明_先看这个.txt": "MetoX v2.38",
-            "半自动推广工具_数据源与指标说明.md": "MetoX v2.38",
-            "MetoX2.38_使用说明与运营操作顺序.md": "MetoX v2.38",
-            "MetoX2.38_新运营培训手册.html": "MetoX2.38",
+            "README.md": "MetoX v2.39",
+            "README_离线使用说明.txt": "MetoX v2.39",
+            "第三方使用说明_先看这个.txt": "MetoX v2.39",
+            "半自动推广工具_数据源与指标说明.md": "MetoX v2.39",
+            "MetoX2.39_使用说明与运营操作顺序.md": "MetoX v2.39",
+            "MetoX2.39_新运营培训手册.html": "MetoX2.39",
         }
         for relative, marker in documents.items():
             with self.subTest(relative=relative):
@@ -190,28 +190,38 @@ class VersionContractTests(unittest.TestCase):
         self.assertIn('"shared_dimension_cache": "metox2.30-shared-dimensions-v2"', source)
         self.assertIn('"new_product_view":', source)
         self.assertIn('"decision_checkpoints": ["D15", "D30"]', source)
-        self.assertIn('"decision_window_days": 15', source)
+        self.assertIn('"decision_checkpoint_semantics": "fixed result snapshots only"', source)
+        self.assertIn('"current_decision_range": "D15-D45"', source)
+        self.assertIn('"current_decision_frequency": "daily"', source)
+        self.assertIn('"decision_window_days": 45', source)
         self.assertIn('"decision_periods": ["D1-D15", "D16-D30"]', source)
         self.assertIn('"main_promotion_load": "does not load new-product history"', source)
         self.assertIn('"lazy_tab_button": "加载新品历史 / 刷新新品历史"', source)
-        self.assertIn("from D1 through the current checkpoint protects the style", source)
+        self.assertIn("from D1 through the analysis date, capped at D45, protects the style", source)
         self.assertNotIn("current 15-day period protects that period only", source)
         self.assertIn('"status_inventory_context":', source)
         self.assertIn("display context only", source)
         self.assertIn('"context_fields": ["动作可执行", "库存提示", "保护证据", "下架阻断原因"]', source)
         self.assertIn('"visitor_gate": 300', source)
-        self.assertIn('"visitor_gate_scope": "cumulative product visitors from D1 through current checkpoint"', source)
+        self.assertIn('"visitor_gate_scope": "rolling cumulative product visitors from D1 through the analysis date, capped at D45"', source)
         self.assertIn('"traffic_validation_basis": "cumulative visitors only; effective-day sufficiency is evaluated separately"', source)
         self.assertIn('"data_min_valid_days": 12', source)
         self.assertIn('"peer_min_styles": 20', source)
-        self.assertIn("zero cart count is strong weak evidence", source)
+        self.assertIn("at D45 cumulative no sale and visitors<300 forces down", source)
         self.assertIn('"removed_decision_columns": ["商品名称", "商品支付转化率", "访客平均价值"]', source)
+        self.assertIn('"removed_lifecycle_columns": ["left_censored", "D14/D15/D21 status and stock", "D15_D21_*", "D1_D21_*"]', source)
         self.assertIn('"hidden_columns": ["商品名称", "商品支付转化率", "访客平均价值"]', source)
         self.assertIn('"material_hidden_columns": ["商品名称"]', source)
         self.assertNotIn('"diagnostic_only"', source)
         self.assertIn('"verified_28day_cold_seconds": 352.067', source)
         self.assertIn('"verified_28day_warm_seconds": 14.179', source)
         self.assertIn('"verified_speedup": 24.831', source)
+
+    def test_llm_user_agent_uses_application_version(self):
+        source = (ROOT / "core" / "llm_advisor.py").read_text(encoding="utf-8")
+        self.assertIn("from .version import APP_VERSION", source)
+        self.assertIn('f"MetoX-LLM-Advisor/{APP_VERSION}"', source)
+        self.assertNotIn("MetoX-LLM-Advisor/2.38", source)
 
 
 if __name__ == "__main__":

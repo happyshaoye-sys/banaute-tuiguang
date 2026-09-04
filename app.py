@@ -206,7 +206,10 @@ NEW_PRODUCT_LIFECYCLE_COLUMNS = [
 ]
 NEW_PRODUCT_OFFICIAL_RESULTS = {'下架', '继续观察'}
 NEW_PRODUCT_LIFECYCLE_HIDDEN_COLUMNS = {
-    '商品名称', '判定结果',
+    '商品名称', '判定结果', 'left_censored',
+    'D14商品状态', 'D14在仓库存',
+    'D15商品状态', 'D15在仓库存',
+    'D21商品状态', 'D21在仓库存',
     'D14原因', 'D21原因', 'D28原因',
     'D15原因', 'D30原因',
     'D14样本充分性', 'D21样本充分性', 'D28样本充分性',
@@ -248,11 +251,12 @@ NEW_PRODUCT_BACKTEST_COLUMNS = [
 def _new_product_methodology_frame(status_note=''):
     rows = [
         ('生命周期起点', '首次在线发现日', '同一货号下所有宝贝ID首次在商品-整体日报中当前在线的日期作为D1。'),
-        ('判定窗口', 'D15 / D30', 'D15汇总D1-D15并在15-29天展示；D30使用D16-D30并从30天起作为当前结果；官方判定结果只输出下架或继续观察。'),
-        ('动销保护', 'D1至当前判定点累计成交', '到达D15/D30后先看历史累计成交；支付买家数、支付件数、GMV任一大于0即继续观察并标记动销保护。'),
+        ('判定周期', 'D15至D45每日更新', 'D15起每天重算当前结果，最长观察到D45；官方判定结果只输出下架或继续观察。'),
+        ('动销保护', 'D1至分析日累计成交', 'D45内支付买家数、支付件数、GMV任一大于0即继续观察并标记动销保护。'),
         ('链接/库存现状', '仅作运营信息', '链接状态展示为动作可执行，库存展示为库存提示；两者不参与下架判定，库存问题由运营另行处理。'),
-        ('流量门槛', '累计访客数>=300', '从D1至当前周期末累计访客数达到300后才进入下架判定；未达到时只展示为流量验证不足。'),
-        ('无成交评估', '累计流量达标后看加购承接', 'D1至当前判定点累计无成交且累计访客数>=300时，才继续用加购件数和加购率判断承接能力。'),
+        ('流量验证', 'D1至分析日累计访客数', '达到D15后每日更新：累计商品访客数>=300为已验证，否则为待流量验证；访客数正好300属于已验证。'),
+        ('D45兜底', '无成交且累计访客数<300', 'D44及以前继续等待流量；到D45仍未成交且累计访客数<300时直接判定下架。'),
+        ('无成交评估', '已验证后看加购承接', 'D45前累计无成交且流量已验证时，继续按既有有效数据天数、同层样本和加购表现判断。'),
         ('比率公式', '累计分子÷累计分母', '商品加购率、无界创意CTR等展示指标按窗口累计分子除以累计分母重算。'),
         ('主图整体点击率', '平台原值', '当前源没有主图点击量/曝光量，MVP只展示，不聚合、不参与A-D判定；待获得点击量/曝光量后再纳入验证。'),
         ('MetoX', '影子验证', '正向标签作为保护候选；负向标签只作旁证，不能单独触发下架。'),
@@ -283,7 +287,9 @@ def _new_product_lifecycle_display_frame(frame):
         frame = pd.DataFrame(frame)
     obsolete_period_cols = [
         col for col in frame.columns
-        if str(col).startswith(('D1_D14_', 'D15_D28_', 'D1_D28_'))
+        if str(col).startswith((
+            'D1_D14_', 'D15_D21_', 'D15_D28_', 'D1_D21_', 'D1_D28_'
+        ))
     ]
     out = frame.drop(
         columns=list(NEW_PRODUCT_LIFECYCLE_HIDDEN_COLUMNS) + obsolete_period_cols,
@@ -304,7 +310,9 @@ def _new_product_lifecycle_display_frame(frame):
     preferred = [col for col in NEW_PRODUCT_LIFECYCLE_COLUMNS if col in out.columns]
     remaining = [
         col for col in out.columns
-        if col not in preferred and col not in NEW_PRODUCT_LIFECYCLE_HIDDEN_COLUMNS
+        if col not in preferred
+        and col not in NEW_PRODUCT_LIFECYCLE_HIDDEN_COLUMNS
+        and not str(col).startswith('_')
     ]
     return out[preferred + remaining]
 
@@ -1165,7 +1173,14 @@ def _collapse_backtest_rows_by_style_age(rows):
     return pd.DataFrame(collapsed)
 
 
-def _format_new_product_lifecycle_view(lifecycle, first_seen, d15=None, d30=None, date_str=''):
+def _format_new_product_lifecycle_view(
+    lifecycle,
+    first_seen,
+    d15=None,
+    d30=None,
+    date_str='',
+    current=None,
+):
     if lifecycle is None or lifecycle.empty:
         return pd.DataFrame(columns=NEW_PRODUCT_LIFECYCLE_COLUMNS)
     from core.new_product_first_seen import FIRST_SEEN_DATE, STYLE_KEY
@@ -1213,6 +1228,15 @@ def _format_new_product_lifecycle_view(lifecycle, first_seen, d15=None, d30=None
             '风险因素': f'{prefix}风险因素',
         }
         view = view.merge(part.rename(columns=rename), on=STYLE_KEY, how='left')
+    current_prefix = '__当前'
+    if current is not None and not current.empty and STYLE_KEY in current.columns:
+        current_cols = [STYLE_KEY, '判定轮次'] + decision_cols
+        current_part = current[[col for col in current_cols if col in current.columns]].copy()
+        current_part = current_part.drop_duplicates(subset=[STYLE_KEY], keep='last')
+        current_part = current_part.rename(
+            columns={col: f'{current_prefix}{col}' for col in current_part.columns if col != STYLE_KEY}
+        )
+        view = view.merge(current_part, on=STYLE_KEY, how='left')
     view['D15结果'] = _normalize_new_product_result_series(view.get('D15结果'), view.index)
     view['D30结果'] = _normalize_new_product_result_series(view.get('D30结果'), view.index)
     age = pd.to_numeric(view.get('新品年龄'), errors='coerce').fillna(0).astype(int)
@@ -1224,10 +1248,23 @@ def _format_new_product_lifecycle_view(lifecycle, first_seen, d15=None, d30=None
     view['当前结果'] = '继续观察'
     view.loc[d15_mask, '当前结果'] = view.loc[d15_mask, 'D15结果']
     view.loc[d30_mask, '当前结果'] = view.loc[d30_mask, 'D30结果']
+    current_result_col = f'{current_prefix}判定结果'
+    current_mask = age.ge(15) & view.get(
+        current_result_col,
+        pd.Series(index=view.index, dtype=object),
+    ).notna()
+    if current_result_col in view.columns:
+        view.loc[current_mask, '当前结果'] = view.loc[current_mask, current_result_col]
     view['当前结果'] = _normalize_new_product_result_series(view['当前结果'], view.index)
     view['判定原因'] = '未到第一轮判定日'
     view.loc[d15_mask, '判定原因'] = view.loc[d15_mask, 'D15原因'].fillna('')
     view.loc[d30_mask, '判定原因'] = view.loc[d30_mask, 'D30原因'].fillna('')
+    current_reason_col = f'{current_prefix}判定原因'
+    if current_reason_col in view.columns:
+        view.loc[current_mask, '判定原因'] = view.loc[current_mask, current_reason_col].fillna('')
+    current_round_col = f'{current_prefix}判定轮次'
+    if current_round_col in view.columns:
+        view.loc[current_mask, '判定轮次'] = view.loc[current_mask, current_round_col].fillna('')
 
     for target in (
         '动作可执行', '库存提示', '样本充分性', '保护证据', '流量验证',
@@ -1239,6 +1276,9 @@ def _format_new_product_lifecycle_view(lifecycle, first_seen, d15=None, d30=None
             source_col = f'{prefix}{target}'
             if source_col in view.columns:
                 view.loc[mask, target] = view.loc[mask, source_col].fillna('').astype(str)
+        current_col = f'{current_prefix}{target}'
+        if current_col in view.columns:
+            view.loc[current_mask, target] = view.loc[current_mask, current_col].fillna('').astype(str)
 
     default_protection = view.get('保护状态', pd.Series('无保护', index=view.index, dtype=object))
     view['保护状态'] = default_protection.fillna('无保护').map(_normalize_new_product_protection_status)
@@ -1251,6 +1291,11 @@ def _format_new_product_lifecycle_view(lifecycle, first_seen, d15=None, d30=None
             view.loc[mask, '保护状态'] = view.loc[mask, factor_col].fillna('').astype(str).str.strip().map(
                 lambda text: '动销保护' if text else '无保护'
             )
+    current_protection_col = f'{current_prefix}保护状态'
+    if current_protection_col in view.columns:
+        view.loc[current_mask, '保护状态'] = view.loc[
+            current_mask, current_protection_col
+        ].map(_normalize_new_product_protection_status)
     view.loc[view['保护状态'].astype(str).str.strip().eq(''), '保护状态'] = '无保护'
     blank_protection_evidence = (
         view['保护证据'].astype(str).str.strip().eq('')
@@ -1633,8 +1678,9 @@ def _build_new_product_context_from_sources(df, day_map, date_str, history_sourc
         lifecycle_core.apply_lifecycle_decisions(lifecycle, d30_checkpoint, peer_frame=lifecycle)
         if d30_checkpoint else pd.DataFrame()
     )
+    current = lifecycle_core.apply_current_lifecycle_decisions(lifecycle, peer_frame=lifecycle)
     lifecycle_view = _format_new_product_lifecycle_view(
-        lifecycle, first_seen, d15, d30, date_str=date_str
+        lifecycle, first_seen, d15, d30, date_str=date_str, current=current
     )
     materials = _build_material_view(creative_daily, product_daily, dimensions, first_seen, date_str)
     backtest = _build_backtest_view(
@@ -2322,8 +2368,9 @@ def _render_new_product_view(new_product_ctx):
         message = str(ctx.get('message') or '').strip()
 
     st.caption(
-        "只读MVP：按首次在线发现日计算新品年龄，15-29天使用D15结果，30-45天使用D30当前结果；"
-        "累计访客>=300是判定资格门槛，D1至当前判定点有任意成交即动销保护，无成交样本再按加购件数和加购率评估。"
+        "只读MVP：按首次在线发现日计算新品年龄，D15起至D45每天更新当前结果；"
+        "D1至分析日累计访客>=300为已验证，D45仍不足300且全程无成交则下架；"
+        "D45内任意一天有成交均进入动销保护。"
     )
     if message:
         if status in ('complete', 'unloaded'):

@@ -239,6 +239,29 @@ class ExportAllSheetsTests(unittest.TestCase):
                 'D14结果': '继续观察',
                 'D21结果': '继续观察',
                 'D28结果': '继续观察',
+                'left_censored': True,
+                'D14商品状态': '当前在线',
+                'D14在仓库存': 10,
+                'D15商品状态': '当前在线',
+                'D15在仓库存': 8,
+                'D21商品状态': '当前在线',
+                'D21在仓库存': 6,
+                'D30商品状态': '当前在线',
+                'D30在仓库存': 4,
+                'D15_D21_商品访客数': 300,
+                'D15_D21_商品加购件数': 3,
+                'D15_D21_支付买家数': 0,
+                'D15_D21_支付件数': 0,
+                'D15_D21_GMV': 0.0,
+                'D15_D21_有效数据天数': 7,
+                'D15_D21_商品加购率': 0.01,
+                'D1_D21_商品访客数': 600,
+                'D1_D21_商品加购件数': 6,
+                'D1_D21_支付买家数': 0,
+                'D1_D21_支付件数': 0,
+                'D1_D21_GMV': 0.0,
+                'D1_D21_有效数据天数': 21,
+                'D1_D21_商品加购率': 0.01,
                 '当前结果': '下架',
                 '判定原因': 'D30加购弱且证据充分',
             }]),
@@ -276,7 +299,34 @@ class ExportAllSheetsTests(unittest.TestCase):
         self.assertEqual(lifecycle.loc[0, '当前结果'], '下架')
         self.assertEqual(lifecycle.loc[0, 'D15结果'], '继续观察')
         self.assertEqual(lifecycle.loc[0, 'D30结果'], '下架')
-        for stale_column in ('D14结果', 'D21结果', 'D28结果'):
+        self.assertEqual(lifecycle.loc[0, 'D30商品状态'], '当前在线')
+        self.assertEqual(lifecycle.loc[0, 'D30在仓库存'], 4)
+        for stale_column in (
+            'D14结果',
+            'D21结果',
+            'D28结果',
+            'left_censored',
+            'D14商品状态',
+            'D14在仓库存',
+            'D15商品状态',
+            'D15在仓库存',
+            'D21商品状态',
+            'D21在仓库存',
+            'D15_D21_商品访客数',
+            'D15_D21_商品加购件数',
+            'D15_D21_支付买家数',
+            'D15_D21_支付件数',
+            'D15_D21_GMV',
+            'D15_D21_有效数据天数',
+            'D15_D21_商品加购率',
+            'D1_D21_商品访客数',
+            'D1_D21_商品加购件数',
+            'D1_D21_支付买家数',
+            'D1_D21_支付件数',
+            'D1_D21_GMV',
+            'D1_D21_有效数据天数',
+            'D1_D21_商品加购率',
+        ):
             self.assertNotIn(stale_column, lifecycle.columns)
         self.assertNotIn('商品名称', lifecycle.columns)
         self.assertEqual(materials.loc[0, '创意ID'], 'C1006')

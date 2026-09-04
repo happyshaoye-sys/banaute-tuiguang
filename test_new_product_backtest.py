@@ -107,7 +107,7 @@ class NewProductBacktestTests(unittest.TestCase):
         self.assertEqual(d30["cumulative_visitors"], 450)
         self.assertEqual(d30["validation_valid_days"], 15)
 
-    def test_rule_a_d15_down_uses_current_cycle_sales_and_cumulative_traffic_without_trend_gate(self):
+    def test_rule_a_d15_down_uses_cumulative_sales_and_traffic_without_trend_gate(self):
         frame = pd.DataFrame([
             self._checkpoint_row(
                 "d15-down",
@@ -126,7 +126,7 @@ class NewProductBacktestTests(unittest.TestCase):
         self.assertEqual(scored.loc["d15-down", "rule_A_status"], "down_eligible")
         self.assertEqual(scored.loc["d15-down", "future_label"], FUTURE_FAILURE)
 
-    def test_rule_a_d30_uses_cumulative_traffic_but_current_cycle_sale_protection(self):
+    def test_rule_a_d30_uses_cumulative_traffic_and_cumulative_sale_protection(self):
         frame = pd.DataFrame([
             self._checkpoint_row(
                 "d30-low-current-traffic",
@@ -143,7 +143,8 @@ class NewProductBacktestTests(unittest.TestCase):
                 current_visitors=50,
                 cumulative_visitors=350,
                 current_valid_days=12,
-                current_buyers=1,
+                current_buyers=0,
+                cumulative_buyers=1,
             ),
         ])
 
@@ -154,7 +155,7 @@ class NewProductBacktestTests(unittest.TestCase):
         self.assertEqual(scored.loc["d30-sale-protected", "rule_A_decision"], DECISION_OBSERVE)
         self.assertEqual(scored.loc["d30-sale-protected", "rule_A_status"], "paid_sale_protected")
 
-    def test_unit_only_sale_survives_daily_collapse_and_protects_current_cycle(self):
+    def test_unit_only_sale_survives_daily_collapse_and_protects_cumulative_cycle(self):
         rows = weak_days("SKU-UNIT", range(1, 16), visitors=20, carts=0)
         rows.append(
             day_row("SKU-UNIT", 5, visitors=0, carts=0, buyers=0, units=1, gmv=0.0)

@@ -299,7 +299,7 @@ def check_release(require_release_branch: bool = False) -> list[str]:
     backtest_source = (ROOT / "core" / "new_product_backtest.py").read_text(encoding="utf-8") if (ROOT / "core" / "new_product_backtest.py").is_file() else ""
     for snippet in (
         "首次在线发现日",
-        "left_censored",
+        "是否历史截断",
         "STYLE_KEY",
     ):
         if snippet not in first_seen_source:
