@@ -9,6 +9,7 @@ from .schema import safe_div, to_num
 
 
 FULL_PLAN_DETAIL_COLUMN = '推广计划全量明细'
+CURRENT_ACTIVE_PLAN_COUNT_COLUMN = '当前有效投放计划数'
 PLAN_TOTAL_COUNT_COLUMN = '推广计划总数'
 PLAN_DISPLAY_COUNT_COLUMN = '推广计划展示数'
 PLAN_COVERAGE_COLUMN = '计划覆盖率'
@@ -19,6 +20,7 @@ PLAN_PERIOD_LABEL_COLUMN = '计划数据口径'
 PLAN_PERIOD_RANGE_COLUMN = '计划数据范围'
 
 PLAN_METADATA_COLUMNS = [
+    CURRENT_ACTIVE_PLAN_COUNT_COLUMN,
     FULL_PLAN_DETAIL_COLUMN,
     PLAN_TOTAL_COUNT_COLUMN,
     PLAN_DISPLAY_COUNT_COLUMN,
@@ -29,6 +31,8 @@ PLAN_METADATA_COLUMNS = [
     PLAN_PERIOD_LABEL_COLUMN,
     PLAN_PERIOD_RANGE_COLUMN,
 ]
+
+_DATE_COLUMNS = ('_数据日期', '统计日期')
 
 
 def _text(value) -> str:
@@ -44,6 +48,124 @@ def _first_text(*values) -> str:
         if text:
             return text
     return ''
+
+
+def _clean_id_series(values) -> pd.Series:
+    return (
+        pd.Series(values)
+        .astype(str)
+        .str.replace(r'\.0$', '', regex=True)
+        .str.strip()
+        .replace({'nan': '', 'None': '', '<NA>': ''})
+    )
+
+
+def _numeric_series(values) -> pd.Series:
+    series = pd.Series(values)
+    if pd.api.types.is_numeric_dtype(series):
+        return pd.to_numeric(series, errors='coerce').fillna(0.0).astype(float)
+    cleaned = (
+        series.astype(str)
+        .str.strip()
+        .str.replace(r'[,\s¥￥$%]', '', regex=True)
+    )
+    return pd.to_numeric(cleaned, errors='coerce').fillna(0.0).astype(float)
+
+
+def _date_key_series(values) -> pd.Series:
+    series = pd.Series(values)
+    text = (
+        series.astype(str)
+        .str.strip()
+        .replace({'': '', 'nan': '', 'None': '', '<NA>': '', 'NaT': ''})
+    )
+    parsed = pd.to_datetime(series, errors='coerce')
+    normalized = parsed.dt.strftime('%Y-%m-%d')
+    return normalized.where(parsed.notna(), text)
+
+
+def _latest_date_rows(
+    rows: pd.DataFrame,
+    latest_date: str = '',
+    date_columns: tuple[str, ...] = _DATE_COLUMNS,
+) -> pd.DataFrame:
+    for column in date_columns:
+        if column not in rows.columns:
+            continue
+        keys = _date_key_series(rows[column])
+        valid = keys.ne('')
+        if not valid.any():
+            continue
+        target = _date_key_series([latest_date]).iloc[0] if latest_date else keys[valid].max()
+        if not target:
+            continue
+        return rows.loc[keys.eq(target)].copy()
+    return rows.copy()
+
+
+def current_active_plan_counts(
+    rows: pd.DataFrame,
+    product_col: str = '宝贝ID',
+    plan_col: str = '计划ID',
+    spend_col: str = '付费',
+    latest_date: str = '',
+    date_columns: tuple[str, ...] = _DATE_COLUMNS,
+) -> pd.DataFrame:
+    """Count distinct paid PlanIDs on the latest available/current date."""
+    columns = ['宝贝ID', CURRENT_ACTIVE_PLAN_COUNT_COLUMN]
+    if (
+        rows is None or len(rows) == 0
+        or product_col not in rows.columns
+        or plan_col not in rows.columns
+        or spend_col not in rows.columns
+    ):
+        return pd.DataFrame(columns=columns)
+
+    latest_rows = _latest_date_rows(rows, latest_date=latest_date, date_columns=date_columns)
+    if latest_rows.empty:
+        return pd.DataFrame(columns=columns)
+
+    work = pd.DataFrame({
+        '宝贝ID': _clean_id_series(latest_rows[product_col]),
+        '_plan_id': _clean_id_series(latest_rows[plan_col]),
+        '_spend': _numeric_series(latest_rows[spend_col]),
+    })
+    work = work[(work['宝贝ID'].ne('')) & (work['_plan_id'].ne('')) & (work['_spend'] > 0)]
+    if work.empty:
+        return pd.DataFrame(columns=columns)
+
+    return (
+        work.drop_duplicates(['宝贝ID', '_plan_id'])
+        .groupby('宝贝ID', as_index=False)
+        .size()
+        .rename(columns={'size': CURRENT_ACTIVE_PLAN_COUNT_COLUMN})
+    )
+
+
+def current_active_counts_from_latest_snapshot(
+    rows: pd.DataFrame,
+    latest_date: str = '',
+    product_col: str = '宝贝ID',
+    count_col: str = CURRENT_ACTIVE_PLAN_COUNT_COLUMN,
+    date_columns: tuple[str, ...] = _DATE_COLUMNS,
+) -> pd.DataFrame:
+    columns = ['宝贝ID', CURRENT_ACTIVE_PLAN_COUNT_COLUMN]
+    if rows is None or len(rows) == 0 or product_col not in rows.columns or count_col not in rows.columns:
+        return pd.DataFrame(columns=columns)
+
+    latest_rows = _latest_date_rows(rows, latest_date=latest_date, date_columns=date_columns)
+    if latest_rows.empty:
+        return pd.DataFrame(columns=columns)
+
+    work = pd.DataFrame({
+        '宝贝ID': _clean_id_series(latest_rows[product_col]),
+        CURRENT_ACTIVE_PLAN_COUNT_COLUMN: _numeric_series(latest_rows[count_col]),
+    })
+    work = work[work['宝贝ID'].ne('')]
+    if work.empty:
+        return pd.DataFrame(columns=columns)
+
+    return work.groupby('宝贝ID', as_index=False)[CURRENT_ACTIVE_PLAN_COUNT_COLUMN].max()
 
 
 def _normalize_record(item: dict) -> dict | None:

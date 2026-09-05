@@ -10,6 +10,7 @@ from .schema import (
     to_num,
 )
 from .plan_metrics import (
+    CURRENT_ACTIVE_PLAN_COUNT_COLUMN,
     FULL_PLAN_DETAIL_COLUMN,
     PLAN_ACTUAL_DAYS_COLUMN,
     PLAN_COMPLETENESS_COLUMN,
@@ -19,6 +20,7 @@ from .plan_metrics import (
     PLAN_PERIOD_LABEL_COLUMN,
     PLAN_PERIOD_RANGE_COLUMN,
     PLAN_TOTAL_COUNT_COLUMN,
+    current_active_plan_counts,
     summarize_plan_records,
 )
 from .data_validation import validate_paid_plan_consistency
@@ -64,6 +66,7 @@ REQUIRED_COLS = [
     '上周期金额','上周期付费','上周期人群','上周期关键词','上周期全站',
     '日销3','日销15','花费3','花费7','花费15',
     '关键词环比','人群环比','全站环比','店铺直达环比',
+    CURRENT_ACTIVE_PLAN_COUNT_COLUMN,
     PLAN_TOTAL_COUNT_COLUMN, PLAN_DISPLAY_COUNT_COLUMN, PLAN_COVERAGE_COLUMN,
     PLAN_COMPLETENESS_COLUMN, PLAN_PERIOD_DAYS_COLUMN, PLAN_ACTUAL_DAYS_COLUMN,
 ]
@@ -274,8 +277,18 @@ def _collect_plan_ids(work):
 
 
 def _promotion_detail_agg(work):
+    columns = [
+        '宝贝ID', CURRENT_ACTIVE_PLAN_COUNT_COLUMN,
+        '推广明细', FULL_PLAN_DETAIL_COLUMN,
+    ]
     if work.empty or '计划ID' not in work.columns:
-        return pd.DataFrame(columns=['宝贝ID', '推广明细', FULL_PLAN_DETAIL_COLUMN])
+        return pd.DataFrame(columns=columns)
+
+    active_counts = current_active_plan_counts(work, product_col='_pid')
+    active_count_map = (
+        active_counts.set_index('宝贝ID')[CURRENT_ACTIVE_PLAN_COUNT_COLUMN].to_dict()
+        if not active_counts.empty else {}
+    )
 
     detail = work.copy()
     detail['plan_id'] = _clean_id_series(detail['计划ID'])
@@ -290,7 +303,7 @@ def _promotion_detail_agg(work):
     detail['channel'] = scene.map(classify_channel)
     detail = detail[(detail['_pid'].ne('')) & (detail['plan_id'].ne('')) & (detail['spend'] > 0)]
     if detail.empty:
-        return pd.DataFrame(columns=['宝贝ID', '推广明细', FULL_PLAN_DETAIL_COLUMN])
+        return pd.DataFrame(columns=columns)
 
     grouped = (
         detail.groupby(['_pid', 'plan_id'], as_index=False)
@@ -319,6 +332,7 @@ def _promotion_detail_agg(work):
         ]
         rows.append({
             '宝贝ID': pid,
+            CURRENT_ACTIVE_PLAN_COUNT_COLUMN: active_count_map.get(pid, 0),
             **summarize_plan_records(
                 records,
                 period_days=1,
@@ -327,7 +341,16 @@ def _promotion_detail_agg(work):
                 full_source_available=True,
             ),
         })
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=columns + [
+        PLAN_TOTAL_COUNT_COLUMN,
+        PLAN_DISPLAY_COUNT_COLUMN,
+        PLAN_COVERAGE_COLUMN,
+        PLAN_COMPLETENESS_COLUMN,
+        PLAN_PERIOD_DAYS_COLUMN,
+        PLAN_ACTUAL_DAYS_COLUMN,
+        PLAN_PERIOD_LABEL_COLUMN,
+        PLAN_PERIOD_RANGE_COLUMN,
+    ])
 
 
 def _product_info_agg(sources):
@@ -515,6 +538,7 @@ def _finalize_result(base):
 
     for col in [
         '款式主图', '货号', '商品名称', '统计日期', '淘宝类目', '创建时间',
+        CURRENT_ACTIVE_PLAN_COUNT_COLUMN,
         '推广明细', FULL_PLAN_DETAIL_COLUMN, PLAN_PERIOD_LABEL_COLUMN,
         PLAN_PERIOD_RANGE_COLUMN,
     ]:
@@ -528,6 +552,7 @@ def _finalize_result(base):
         '成功退款金额', '搜索引导访客数',
         '直购数量', '直购成本', '展现', '点击',
         '在仓库存', '在途', '成本价（含税）', '日销7',
+        CURRENT_ACTIVE_PLAN_COUNT_COLUMN,
         PLAN_TOTAL_COUNT_COLUMN, PLAN_DISPLAY_COUNT_COLUMN, PLAN_COVERAGE_COLUMN,
         PLAN_COMPLETENESS_COLUMN, PLAN_PERIOD_DAYS_COLUMN, PLAN_ACTUAL_DAYS_COLUMN,
     ]:

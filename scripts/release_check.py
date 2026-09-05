@@ -278,7 +278,7 @@ def check_release(require_release_branch: bool = False) -> list[str]:
     if 'grouped["直购成本"] = _ratio_series(spend, grouped["直购数量"])' not in periods:
         errors.append("period direct-purchase cost must be recalculated from period totals")
     for snippet in (
-        "metox2.30-daily-facts-v2",
+        "metox2.39-daily-facts-v3",
         "metox2.30-shared-dimensions-v2",
         "os.replace(tmp_path, cache_path)",
         "verified_fingerprint",

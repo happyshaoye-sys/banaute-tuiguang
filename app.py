@@ -3501,7 +3501,7 @@ with tab4:
         "链接投产状态", "可售天数状态",
         "商品加购率状态", "商品支付转化率状态", "推广加购率状态",
         "v9.3信号", "MetoX算法命中", "MetoX算法分", "MetoX算法原因",
-        "商品加购率", "推广加购率",
+        "商品加购率", "推广加购率", "当前有效投放计划数",
     ]:
         if c in all_cols and c not in st.session_state["exec_cols_pref"]:
             st.session_state["exec_cols_pref"].append(c)
@@ -3572,6 +3572,10 @@ with tab4:
         hide_index=True,
         height=600,
         column_config={
+            "当前有效投放计划数": st.column_config.NumberColumn(
+                "当前有效投放计划数",
+                format="%d",
+            ),
             "商品加购率": st.column_config.NumberColumn(
                 "商品加购率",
                 format="percent",

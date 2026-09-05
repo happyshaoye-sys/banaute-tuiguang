@@ -7,6 +7,7 @@ import pandas as pd
 
 from .schema import safe_div, to_num
 from .plan_metrics import (
+    CURRENT_ACTIVE_PLAN_COUNT_COLUMN,
     FULL_PLAN_DETAIL_COLUMN,
     PLAN_ACTUAL_DAYS_COLUMN,
     PLAN_COMPLETENESS_COLUMN,
@@ -15,6 +16,7 @@ from .plan_metrics import (
     PLAN_METADATA_COLUMNS,
     PLAN_PERIOD_DAYS_COLUMN,
     PLAN_TOTAL_COUNT_COLUMN,
+    current_active_counts_from_latest_snapshot,
     summarize_period_product_plans,
 )
 from .data_validation import validate_paid_plan_consistency
@@ -144,6 +146,11 @@ def aggregate_period_frame(
     )
     scope_start = str(period_start or (date_values[0] if date_values else ''))
     scope_end = str(period_end or (date_values[-1] if date_values else ''))
+    current_count_date = date_values[-1] if date_values else scope_end
+    current_active_counts = current_active_counts_from_latest_snapshot(
+        work,
+        latest_date=current_count_date,
+    )
 
     plan_summaries = []
     if has_full_plan_details:
@@ -185,6 +192,12 @@ def aggregate_period_frame(
         for column in PLAN_METADATA_COLUMNS:
             if column not in grouped.columns:
                 grouped[column] = '' if column == FULL_PLAN_DETAIL_COLUMN else 0
+    if not current_active_counts.empty:
+        if CURRENT_ACTIVE_PLAN_COUNT_COLUMN in grouped.columns:
+            grouped = grouped.drop(columns=[CURRENT_ACTIVE_PLAN_COUNT_COLUMN])
+        grouped = grouped.merge(current_active_counts, on="宝贝ID", how="left")
+    elif CURRENT_ACTIVE_PLAN_COUNT_COLUMN not in grouped.columns:
+        grouped[CURRENT_ACTIVE_PLAN_COUNT_COLUMN] = 0.0
 
     for col in sum_cols + stable_numeric_cols:
         if col not in grouped.columns:
@@ -201,6 +214,7 @@ def aggregate_period_frame(
         PLAN_COMPLETENESS_COLUMN,
         PLAN_PERIOD_DAYS_COLUMN,
         PLAN_ACTUAL_DAYS_COLUMN,
+        CURRENT_ACTIVE_PLAN_COUNT_COLUMN,
     ):
         if col in grouped.columns:
             grouped[col] = _numeric_series(grouped[col])
@@ -244,6 +258,10 @@ def aggregate_period_frame(
     grouped["CPM"] = _ratio_series(spend, views) * 1000
     daily_sales = grouped["日销7"]
     grouped["可售天数"] = (grouped["在仓库存"] / daily_sales.where(daily_sales > 0)).round(1)
+    if CURRENT_ACTIVE_PLAN_COUNT_COLUMN in grouped.columns and "推广明细" in grouped.columns:
+        columns = [column for column in grouped.columns if column != CURRENT_ACTIVE_PLAN_COUNT_COLUMN]
+        insert_at = columns.index("推广明细")
+        grouped = grouped.loc[:, columns[:insert_at] + [CURRENT_ACTIVE_PLAN_COUNT_COLUMN] + columns[insert_at:]]
 
     validate_paid_plan_consistency(grouped, '周期累计')
     return grouped

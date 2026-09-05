@@ -13,7 +13,7 @@ from typing import Iterable
 import pandas as pd
 
 
-DAILY_FACT_CACHE_VERSION = "metox2.30-daily-facts-v2"
+DAILY_FACT_CACHE_VERSION = "metox2.39-daily-facts-v3"
 SHARED_DIMENSION_CACHE_VERSION = "metox2.30-shared-dimensions-v2"
 
 
