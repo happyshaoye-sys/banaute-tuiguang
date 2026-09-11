@@ -1,10 +1,15 @@
-"""Build an immutable, audited MetoX third-party release artifact."""
+"""Build an immutable, audited MetoX third-party release artifact.
+
+默认输出目录是发版总目录 ``E:\\08-推广``（与历史 MetoX2.x 产物放在一起）；
+可用 ``--output-root`` 或环境变量 ``METOX_RELEASE_DIR`` 覆盖。
+"""
 from __future__ import annotations
 
 import argparse
 from datetime import datetime
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -16,6 +21,8 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
+#: 发版产物默认落盘目录（用户约定：所有 MetoX 打包产物统一放在 E:\08-推广）
+DEFAULT_OUTPUT_ROOT = Path(r"E:\08-推广")
 OVERLAY_FILES = (
     ".streamlit/config.toml",
     "app.py",
@@ -354,8 +361,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--baseline-package", required=True, type=Path)
     parser.add_argument("--launcher-runtime", required=True, type=Path)
-    parser.add_argument("--output-root", required=True, type=Path)
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        default=None,
+        help=f"发版产物输出目录，默认 {DEFAULT_OUTPUT_ROOT}（可用 METOX_RELEASE_DIR 覆盖）",
+    )
     args = parser.parse_args()
+    configured_root = str(os.environ.get("METOX_RELEASE_DIR", "") or "").strip()
+    output_root = args.output_root or (Path(configured_root) if configured_root else DEFAULT_OUTPUT_ROOT)
+    print(f"release-build output-root: {output_root}", flush=True)
     try:
         _run([sys.executable, str(ROOT / "scripts" / "release_check.py"), "--release"])
         _run([sys.executable, "-m", "unittest", "discover", "-p", "test_*.py"])
