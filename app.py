@@ -2407,6 +2407,11 @@ BUDGET_DECISION_LEADING_COLUMNS = [
 ]
 BUDGET_DECISION_HIDDEN_COLUMNS = {
     "预算风险", "阈值状态", "阈值窗口", "阈值周数", "阈值版本",
+    # TH_MAIN / TH_MID 是店铺级常量（每行都一样），不必在列里重复展现；导出仍保留供审计
+    "TH_MAIN", "TH_MID",
+    # 角色闸门命中只在"原本要加投却被角色层拦下"时才有值；
+    # 逐行信号已由 预算匹配状态=角色闸门拦截(角色名) 承载，这里不再单列
+    "角色闸门命中",
     "D3商品整体信号",
 }
 BUDGET_DECISION_HIDDEN_COLUMN_TOKENS = (
@@ -3075,6 +3080,21 @@ def _render_threshold_freeze_panel():
             )
 
 
+def _budget_role_interception_counts(products) -> tuple[int, int]:
+    """统计本轮被角色闸门实际拦下 / 封顶的款数（DataFrame 或 dict 列表都能吃）。"""
+    from core.budget_role import GATE_BLOCK, GATE_CAP
+
+    if isinstance(products, pd.DataFrame):
+        if '角色闸门命中' not in products.columns:
+            return 0, 0
+        hits = products['角色闸门命中'].astype(str).str.strip()
+        return int((hits == GATE_BLOCK).sum()), int((hits == GATE_CAP).sum())
+    rows = [dict(item) for item in (products or [])]
+    blocked = sum(1 for row in rows if str(row.get('角色闸门命中') or '').strip() == GATE_BLOCK)
+    capped = sum(1 for row in rows if str(row.get('角色闸门命中') or '').strip() == GATE_CAP)
+    return blocked, capped
+
+
 def _render_budget_role_summary(products):
     """在预算决策看板展示决策角色分布与闸门拦截情况（角色层未启用时不显示）。"""
     if products is None or len(products) == 0:
@@ -3115,9 +3135,12 @@ def _render_budget_role_summary(products):
             },
         )
         roles = sorted(summary_frame['决策角色'].astype(str))
+        blocked, capped = _budget_role_interception_counts(products)
         st.caption(
-            "判定基准：固定近7日日均GMV（金额口径）；阈值：7天窗口×8窗覆盖法中位数。"
+            "判定基准：固定近7日日均GMV（金额口径）；阈值：7天窗口×8窗覆盖法中位数（店铺级常量，未在列中重复展示）。"
             "闸门语义：禁止加投=归零、测试封顶=压到500元/周、放行=原样。"
+            f"本轮角色层实际拦下加投 {blocked} 款、封顶 {capped} 款"
+            f"（被拦下的行会在“预算匹配状态”显示为“角色闸门拦截(角色名)”）。"
             f"本轮命中角色：{'、'.join(roles)}"
         )
 

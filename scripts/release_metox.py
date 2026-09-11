@@ -370,7 +370,9 @@ def main() -> int:
     args = parser.parse_args()
     configured_root = str(os.environ.get("METOX_RELEASE_DIR", "") or "").strip()
     output_root = args.output_root or (Path(configured_root) if configured_root else DEFAULT_OUTPUT_ROOT)
-    print(f"release-build output-root: {output_root}", flush=True)
+    # 回填解析结果：build_release 调用形式（args.output_root.absolute()）保持不变
+    args.output_root = Path(output_root)
+    print(f"release-build output-root: {args.output_root}", flush=True)
     try:
         _run([sys.executable, str(ROOT / "scripts" / "release_check.py"), "--release"])
         _run([sys.executable, "-m", "unittest", "discover", "-p", "test_*.py"])

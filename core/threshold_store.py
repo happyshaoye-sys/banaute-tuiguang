@@ -17,6 +17,7 @@ import json
 import math
 import os
 from pathlib import Path
+import subprocess
 from threading import Lock
 from typing import Mapping
 
@@ -37,6 +38,45 @@ DEFAULT_RECHECK_TOLERANCE = 0.30
 HISTORY_LIMIT = 50
 
 _WRITE_LOCK = Lock()
+#: git 把提示信息写在 stderr（如 `warning: could not open directory ...`、CRLF 提示），
+#: 而 `core.version_control._run_git` 会把 stdout 与 stderr 拼成一个字符串。
+#: 判断"有没有改动"必须只看真正的 porcelain 行，不能把提示当成脏状态。
+_GIT_NOTICE_PREFIXES = ('warning:', 'error:', 'hint:', 'fatal:', 'info:', 'note:')
+
+
+def porcelain_lines(text: str) -> list[str]:
+    """从 git 输出里挑出真正的 porcelain 行，忽略 warning/error/hint 等提示行。"""
+    lines: list[str] = []
+    for raw in str(text or '').splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            continue
+        lowered = line.strip().lower()
+        if any(lowered.startswith(prefix) for prefix in _GIT_NOTICE_PREFIXES):
+            continue
+        lines.append(line)
+    return lines
+
+
+def _git_capture(
+    repo: Path,
+    *args: str,
+    timeout: int = 30,
+) -> tuple[str, str, int]:
+    """运行 git 并**分离** stdout / stderr，返回 (stdout, stderr, returncode)。
+
+    不抛出异常：调用方按返回码判断，避免把 git 的提示当成失败。
+    """
+    env = os.environ.copy()
+    env.update({'GIT_TERMINAL_PROMPT': '0', 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8'})
+    try:
+        completed = subprocess.run(
+            ['git', *args], cwd=str(repo), env=env, capture_output=True,
+            text=True, encoding='utf-8', errors='replace', timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:  # pragma: no cover - git 不可用
+        return '', str(exc), 1
+    return completed.stdout or '', completed.stderr or '', int(completed.returncode)
 
 
 class ThresholdFreezeError(ValueError):
@@ -278,19 +318,19 @@ def registry_git_status(root=None, app_dir: str | os.PathLike[str] | None = None
         status['错误'] = f'登记目录不在仓库内：{store_root}'
         return status
     status['relative_path'] = relative.as_posix()
-    try:
-        from .version_control import _run_git
-
-        tracked = _run_git(
-            Path(repo), 'ls-files', '--error-unmatch', status['relative_path'], check=False,
-        )
-        status['tracked'] = bool(tracked.strip()) and 'error' not in tracked.lower()
-        porcelain = _run_git(
-            Path(repo), 'status', '--short', '--', status['relative_path'], check=False,
-        )
-        status['dirty'] = bool(porcelain.strip())
-    except Exception as exc:  # pragma: no cover - git 异常不阻断
-        status['错误'] = str(exc)
+    repo_path = Path(repo)
+    # 已跟踪：以 git 的返回码为准（未跟踪时 stdout 为空、returncode 非 0）
+    _, _, tracked_code = _git_capture(
+        repo_path, 'ls-files', '--error-unmatch', '--', status['relative_path'],
+    )
+    status['tracked'] = tracked_code == 0
+    # 脏状态：只看 stdout 里的 porcelain 行；stderr 的 warning/hint 不算改动
+    stdout, stderr, code = _git_capture(
+        repo_path, 'status', '--short', '--', status['relative_path'],
+    )
+    status['dirty'] = bool(porcelain_lines(stdout))
+    if code != 0 and not status['dirty'] and stderr.strip():
+        status['错误'] = stderr.strip()
     return status
 
 
@@ -324,22 +364,29 @@ def commit_freeze_registry(
     repo = Path(status['repo'])
     relative = status['relative_path']
     try:
-        from .version_control import _run_git
-
-        _run_git(repo, 'add', '--', relative, timeout=timeout)
-        staged = _run_git(repo, 'diff', '--cached', '--name-only', '--', relative, timeout=timeout)
-        if not staged.strip():
+        _, stderr, code = _git_capture(repo, 'add', '--', relative, timeout=timeout)
+        if code != 0:
+            result['detail'] = stderr.strip() or 'git add 失败'
+            return result
+        staged_stdout, _, _ = _git_capture(
+            repo, 'diff', '--cached', '--name-only', '--', relative, timeout=timeout,
+        )
+        if not porcelain_lines(staged_stdout):
             result['detail'] = '登记内容没有变化，无需提交'
             result['ok'] = True
             return result
-        _run_git(repo, 'commit', '-m', message, timeout=timeout)
-        result['commit'] = _run_git(repo, 'rev-parse', '--short', 'HEAD', timeout=timeout).strip()
+        _, commit_stderr, commit_code = _git_capture(repo, 'commit', '-m', message, timeout=timeout)
+        if commit_code != 0:
+            result['detail'] = commit_stderr.strip() or 'git commit 失败'
+            return result
+        head_stdout, _, _ = _git_capture(repo, 'rev-parse', '--short', 'HEAD', timeout=timeout)
+        result['commit'] = head_stdout.strip()
         result['ok'] = True
         if push:
-            push_output = _run_git(repo, 'push', timeout=timeout, check=False)
-            lowered = push_output.lower()
-            result['pushed'] = bool(push_output.strip()) and 'error' not in lowered and 'rejected' not in lowered
-            result['detail'] = push_output.strip() or '已推送'
+            push_stdout, push_stderr, push_code = _git_capture(repo, 'push', timeout=timeout)
+            combined = f'{push_stdout}\n{push_stderr}'.lower()
+            result['pushed'] = push_code == 0 and 'rejected' not in combined
+            result['detail'] = (push_stdout.strip() or push_stderr.strip() or '已推送')
             if not result['pushed']:
                 result['message'] = f'{message}（已提交 {result["commit"]}，推送未成功）'
         else:
@@ -364,5 +411,6 @@ __all__ = [
     'find_repository',
     'freeze_commit_message',
     'freeze_key',
+    'porcelain_lines',
     'registry_git_status',
 ]

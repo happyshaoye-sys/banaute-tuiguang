@@ -1,10 +1,18 @@
-# MetoX v2.50 半自动推广工具
+# MetoX v2.51 半自动推广工具
 
-应用版本：MetoX v2.50
+应用版本：MetoX v2.51
 
 外部策略算法版本：v9.3（独立版本，本次未变更）
 
-## v2.50 核心变更
+## v2.51 核心变更
+
+- 修复阈值冻结在 git 提示存在时被误判成"工作区有改动"：`core/threshold_store.py` 不再把 git 的 stderr 提示（如 `warning: could not open directory ...`、CRLF 提示）当作状态行，改为分离 stdout/stderr 并只解析真正的 porcelain 行；`tracked` 改用 `git ls-files --error-unmatch` 的返回码，冻结提交的空提交判断同步修正。新增两条回归测试（解析层 + 用 icacls 制造真实 git 警告）。
+- 预算决策看板列收敛：店铺级常量 `TH_MAIN / TH_MID` 与只在拦截时才有的 `角色闸门命中` 不再占用列位（导出仍保留供审计）；角色分布面板直接给出"本轮拦下加投 X 款、封顶 Y 款"。
+- 修复角色分布面板在真实数据下的渲染异常（把 DataFrame 当行字典迭代导致 `'str' object has no attribute 'get'`）。
+- 发版产物默认输出目录固化为 `E:\08-推广`（`scripts/release_metox.py` 的 `--output-root` 变可选，可用 `METOX_RELEASE_DIR` 覆盖）。
+- 验证：版本门禁 PASS、全量 321 项测试、造数自检 131 项、MetoX 算法与导出口径回归全部通过。
+
+## 历史 v2.50 核心变更
 
 - 原“AI任务视图”替换为只读“预算决策看板”，原“执行表”继续独立保留，不改变执行表字段与下载入口。
 - 看板按宝贝ID计算`销售占比=商品GMV÷全店GMV`、`花费占比=商品付费÷全店付费`、`占比差(pp)=花费占比-销售占比`；正数表示超投，`预算错配金额=商品付费-销售占比×全店付费`。

@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,6 +29,7 @@ from core.threshold_store import (
     default_freeze_root,
     freeze_commit_message,
     freeze_key,
+    porcelain_lines,
     registry_git_status,
 )
 
@@ -187,11 +190,14 @@ class ThresholdFreezeGitTests(unittest.TestCase):
 
     def setUp(self):
         import os
+        import shutil
         import subprocess
         from unittest import mock
 
-        self._tmp = tempfile.TemporaryDirectory()
-        self.repo = Path(self._tmp.name)
+        self._shutil = shutil
+        self._subprocess = subprocess
+        self._blocked_dir = None
+        self.repo = Path(tempfile.mkdtemp(prefix='metox_freeze_git_'))
         git_kwargs = {'cwd': self.repo, 'check': True, 'capture_output': True,
                       'text': True, 'encoding': 'utf-8', 'errors': 'replace'}
         subprocess.run(['git', 'init', '-q'], **git_kwargs)
@@ -205,7 +211,15 @@ class ThresholdFreezeGitTests(unittest.TestCase):
 
     def tearDown(self):
         self._env.stop()
-        self._tmp.cleanup()
+        # 本测试可能给子目录设过拒绝权限：先递归恢复，再删除，避免残留不可读目录
+        if self._blocked_dir is not None and self._blocked_dir.exists():
+            account = os.environ.get('USERNAME', '')
+            for args in (
+                ['icacls', str(self._blocked_dir), '/remove:d', account, '/T'],
+                ['icacls', str(self._blocked_dir), '/grant', f'{account}:(OI)(CI)F', '/T'],
+            ):
+                self._subprocess.run(args, capture_output=True, text=True)
+        self._shutil.rmtree(self.repo, ignore_errors=True)
 
     def test_default_root_prefers_repo_config_directory(self):
         root = default_freeze_root(app_dir=self.repo)
@@ -289,6 +303,60 @@ class ThresholdFreezeGitTests(unittest.TestCase):
         status = registry_git_status(app_dir=self.repo)
         self.assertTrue(status['tracked'])
         self.assertFalse(status['dirty'])
+
+    def test_porcelain_parser_ignores_git_warnings_on_stderr(self):
+        """git 把 warning/error/hint 写在 stderr：拼接进状态会让"干净"被误判成"有改动"。"""
+        self.assertEqual(porcelain_lines(''), [])
+        self.assertEqual(porcelain_lines('warning: could not open directory \'sub/\''), [])
+        self.assertEqual(
+            porcelain_lines("warning: could not open directory 'sub/'\nhint: something"),
+            [],
+        )
+        self.assertEqual(
+            porcelain_lines("warning: LF will be replaced by CRLF\n M config/threshold_freeze.json"),
+            [' M config/threshold_freeze.json'],
+        )
+        self.assertEqual(porcelain_lines('?? config/threshold_freeze.json'), ['?? config/threshold_freeze.json'])
+        self.assertEqual(porcelain_lines('error: pathspec did not match'), [])
+
+    @unittest.skipUnless(sys.platform.startswith('win'), '需要 Windows 的 icacls 制造 git 警告')
+    def test_clean_registry_is_not_marked_dirty_when_git_warns(self):
+        """回归：仓库里存在不可读目录时，git 会给 stderr 警告；真实 porcelain 仍为空。"""
+        subprocess = self._subprocess
+        git_kwargs = {'cwd': self.repo, 'capture_output': True, 'text': True,
+                      'encoding': 'utf-8', 'errors': 'replace'}
+
+        store_root = default_freeze_root(app_dir=self.repo)
+        store_root.mkdir(parents=True, exist_ok=True)
+        store = ThresholdFreezeStore(store_root)
+        store.save('2026', '集团店', th_main=520.0, th_mid=78.5, operator='张三')
+        committed = commit_freeze_registry(
+            app_dir=self.repo, message=freeze_commit_message(store.get('2026', '集团店')),
+        )
+        self.assertTrue(committed['ok'], committed)
+
+        blocked = self.repo / 'blocked_dir'
+        blocked.mkdir(exist_ok=True)
+        (blocked / 'inner.txt').write_text('x\n', encoding='utf-8')
+        subprocess.run(['git', 'add', '-A'], **git_kwargs)
+        subprocess.run(['git', 'commit', '-qm', 'add blocked dir'], **git_kwargs)
+
+        account = str(os.environ.get('USERNAME', ''))
+        self._blocked_dir = blocked
+        denied = subprocess.run(
+            ['icacls', str(blocked), '/deny', f'{account}:(OI)(CI)(RX)'], **git_kwargs,
+        )
+        if denied.returncode != 0:
+            self._blocked_dir = None
+            self.skipTest(f'icacls 无法设置拒绝权限：{denied.stdout or denied.stderr}')
+
+        raw = subprocess.run(
+            ['git', 'status', '--short', '--', 'config/threshold_freeze.json'], **git_kwargs,
+        )
+        self.assertEqual(raw.stdout.strip(), '')          # 真实 porcelain 为空
+        status = registry_git_status(app_dir=self.repo)
+        self.assertTrue(status['tracked'])
+        self.assertFalse(status['dirty'], f'被 stderr 警告误判成脏：{status}')
 
 
 class ThresholdFreezeAppWiringTests(unittest.TestCase):
