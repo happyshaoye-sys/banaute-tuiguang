@@ -6,7 +6,7 @@ import unittest
 
 import pandas as pd
 
-from core.exporter import export_all_sheets, export_execution_table
+from core.exporter import EXECUTION_SHEET, export_all_sheets, export_execution_table
 from core.schema import EXPORT_COLS, ensure_export_columns, execution_export_frame
 
 
@@ -27,6 +27,41 @@ EXPECTED_EXPORT_COLS = [
     '商品支付转化率','访客平均价值','成功退款金额','退款率',
 ]
 
+BUDGET_RETIRED_OR_DASHBOARD_ONLY_COLUMNS = [
+    '销售占比',
+    '花费占比',
+    '占比差(pp)',
+    '预算错配金额',
+    '未来7日建议调整金额',
+    '预算角色',
+    '预算动作',
+    '角色候选',
+    '角色状态',
+    '角色原因',
+    '角色风险',
+    '预算角色候选',
+    '预算角色状态',
+    '预算角色判定依据',
+    '预算风险',
+    '人工业务标记',
+    '人工标记',
+    '本月主推',
+    '应季状态',
+    '季节状态',
+    '人工清仓',
+    'NOCAP',
+    '生效月份',
+    '标记备注',
+    'manual_marks',
+    'manual_state',
+    'effective_month',
+    '候选',
+    '状态',
+    '判定依据',
+    '风险',
+    '推广商品定位',
+]
+
 
 class ExecutionColumnOrderTests(unittest.TestCase):
     def test_export_columns_match_operator_order_without_duplicate_headers(self):
@@ -34,6 +69,8 @@ class ExecutionColumnOrderTests(unittest.TestCase):
         self.assertEqual(len(EXPORT_COLS), len(set(EXPORT_COLS)))
         self.assertEqual(EXPORT_COLS.count('推广动作'), 1)
         self.assertNotIn('操作', EXPORT_COLS)
+        for column in BUDGET_RETIRED_OR_DASHBOARD_ONLY_COLUMNS:
+            self.assertNotIn(column, EXPORT_COLS)
 
     def test_missing_columns_are_added_without_changing_existing_values(self):
         source = pd.DataFrame([{
@@ -64,7 +101,9 @@ class ExecutionColumnOrderTests(unittest.TestCase):
         for exporter in (export_execution_table, export_all_sheets):
             with self.subTest(exporter=exporter.__name__):
                 payload = exporter(source)
-                exported = pd.read_excel(io.BytesIO(payload), sheet_name='商品推广执行表')
+                excel = pd.ExcelFile(io.BytesIO(payload))
+                self.assertEqual(excel.sheet_names[0], EXECUTION_SHEET)
+                exported = pd.read_excel(io.BytesIO(payload), sheet_name=EXECUTION_SHEET)
 
                 self.assertEqual(exported.columns.tolist(), EXPECTED_EXPORT_COLS)
                 self.assertEqual(str(exported.loc[0, '宝贝ID']), '1001')

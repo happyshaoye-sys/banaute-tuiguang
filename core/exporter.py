@@ -1,10 +1,11 @@
 """Excel 导出"""
 import io
 import pandas as pd
-from .analysis import build_ai_task_view, category_analysis
+from .analysis import category_analysis
 from .data_validation import validate_paid_plan_consistency
 from .metric_labels import METRIC_STATUS_RULE_SHEET, metric_status_rule_frame
-from .schema import execution_export_frame, safe_div
+from .schema import execution_export_frame
+from .budget_decision import is_removed_budget_column
 
 
 CATEGORY_INVESTMENT_SHEET = '品类投放占比与ROI'
@@ -36,6 +37,57 @@ NEW_PRODUCT_BACKTEST_COLUMNS = [
     '召回率', '下架覆盖率', '机会损失GMV', '机会损失预估利润',
     '不可验证样本数', 'CTR增益', 'MetoX保护有效率', '分组',
 ]
+BUDGET_DECISION_PRODUCT_SHEET = '预算决策看板'
+BUDGET_DECISION_TIER_SHEET = '排名档对齐'
+BUDGET_DECISION_PLAN_SHEET = '推广计划管理'
+BUDGET_RANK_BAND_COLUMN = '排名档'
+BUDGET_RANK_BAND_LEGACY_COLUMNS = ('销售梯队', '梯队', '层级')
+BUDGET_RANK_BAND_VALUE_MAP = {
+    'S1': 'Top1-5',
+    'S2': 'Top6-10',
+    'S3': 'Top11-20',
+    'S4': 'Top21-50',
+    'S5': 'Top51-100',
+    'S6': 'Top101-尾部',
+    'Top101以后': 'Top101-尾部',
+    'Top101后': 'Top101-尾部',
+    'Top101以上': 'Top101-尾部',
+}
+BUDGET_DECISION_REQUIRED_PRODUCT_COLUMNS = [
+    BUDGET_RANK_BAND_COLUMN,
+    '预算风险',
+    '近7日日均GMV',
+    '上一7日日均GMV',
+    'GMV趋势率',
+    'TH_MAIN',
+    'TH_MID',
+    '阈值版本',
+]
+BUDGET_DECISION_PRODUCT_ALIASES = {
+    BUDGET_RANK_BAND_COLUMN: BUDGET_RANK_BAND_LEGACY_COLUMNS,
+    '预算风险': ('风险',),
+}
+BUDGET_DECISION_PRODUCT_DROP_COLUMNS = {
+    '风险',
+    *BUDGET_RANK_BAND_LEGACY_COLUMNS,
+}
+BUDGET_DECISION_TIER_COLUMNS = [
+    BUDGET_RANK_BAND_COLUMN, '商品数', 'GMV', '销售占比', '付费', '花费占比',
+    '占比差(pp)', '预算错配金额', 'ROI', '未来7日建议调整金额',
+    '待回收金额', '建议增加金额', '零GMV消耗', '显著错配',
+]
+BUDGET_DECISION_TIER_ALIASES = {
+    BUDGET_RANK_BAND_COLUMN: BUDGET_RANK_BAND_LEGACY_COLUMNS,
+    '预算错配金额': ('错配金额',),
+}
+BUDGET_DECISION_TIER_DROP_COLUMNS = {'错配金额', *BUDGET_RANK_BAND_LEGACY_COLUMNS}
+BUDGET_DECISION_PLAN_COLUMNS = [
+    '序号', '计划ID', '计划名称', '所属渠道', '商品数', '计划类型',
+    '计划经营结构', '周期花费', '归因成交', 'ROI', '方向证据', '计划管理建议',
+]
+BUDGET_DECISION_PLAN_ALIASES = {
+    '计划类型': ('计划商品类型',),
+}
 TOP_CATEGORY_LIMIT = 15
 TOP_PRODUCT_LIMIT = 50
 STATUS_HIGH_BACKGROUND = '#DDEBF7'
@@ -321,6 +373,121 @@ def _frame_from_context(context, keys, columns):
     return frame[preferred + remaining]
 
 
+def _dedupe_columns(columns):
+    result = []
+    seen = set()
+    for column in columns:
+        if column in seen:
+            continue
+        seen.add(column)
+        result.append(column)
+    return result
+
+
+def _to_float(value, default=0.0):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if pd.isna(number):
+        return default
+    return number
+
+
+def _clean_export_text(value):
+    if value is None:
+        return ''
+    try:
+        if pd.isna(value):
+            return ''
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    return '' if text in ('', 'nan', 'None', '<NA>', 'NaT') else text
+
+
+def _clean_budget_plan_advice_text(value):
+    text = _clean_export_text(value)
+    replacements = (
+        ('先按预算角色拆分复核', '先拆分复核'),
+        ('按预算角色拆分复核', '拆分复核'),
+        ('商品预算动作', '商品调整方向'),
+        ('预算动作', '调整方向'),
+        ('预算角色', '经营结构'),
+    )
+    for old, new in replacements:
+        text = text.replace(old, new)
+    return text
+
+
+def _rank_band_value(value, gmv=None):
+    text = _clean_export_text(value)
+    if any(token in text for token in ('零GMV', '零成交', '零销售')):
+        return '零GMV回收池'
+    if text == 'S6' and _to_float(gmv, default=0.0) <= 0:
+        return '零GMV回收池'
+    return BUDGET_RANK_BAND_VALUE_MAP.get(text, text)
+
+
+def _normalize_rank_band_frame(frame):
+    if frame is None:
+        return pd.DataFrame()
+    work = frame.copy()
+    legacy_source_column = next(
+        (column for column in BUDGET_RANK_BAND_LEGACY_COLUMNS if column in work.columns),
+        None,
+    )
+    if BUDGET_RANK_BAND_COLUMN not in work.columns:
+        if legacy_source_column is not None:
+            work.insert(
+                work.columns.get_loc(legacy_source_column),
+                BUDGET_RANK_BAND_COLUMN,
+                work[legacy_source_column],
+            )
+        else:
+            return work
+    elif legacy_source_column is not None:
+        work[BUDGET_RANK_BAND_COLUMN] = work[BUDGET_RANK_BAND_COLUMN].mask(
+            _blank_series_mask(work[BUDGET_RANK_BAND_COLUMN]),
+            work[legacy_source_column],
+        )
+    if BUDGET_RANK_BAND_COLUMN in work.columns:
+        gmv_values = work['GMV'] if 'GMV' in work.columns else pd.Series([None] * len(work), index=work.index)
+        work[BUDGET_RANK_BAND_COLUMN] = [
+            _rank_band_value(value, gmv)
+            for value, gmv in zip(work[BUDGET_RANK_BAND_COLUMN], gmv_values)
+        ]
+    return work.drop(columns=list(BUDGET_RANK_BAND_LEGACY_COLUMNS), errors='ignore')
+
+
+def _with_budget_decision_identity_columns_adjacent(columns):
+    group = [BUDGET_RANK_BAND_COLUMN]
+    present = [column for column in group if column in columns]
+    if not present:
+        return columns
+    remaining = [column for column in columns if column not in group]
+    anchor = next((column for column in ('淘宝类目', '货号', '宝贝ID') if column in remaining), None)
+    insert_at = remaining.index(anchor) + 1 if anchor is not None else 0
+    return remaining[:insert_at] + present + remaining[insert_at:]
+
+
+def _budget_product_columns_from_canonical(product_columns):
+    columns = []
+    for column in product_columns:
+        if column in BUDGET_RANK_BAND_LEGACY_COLUMNS:
+            column = BUDGET_RANK_BAND_COLUMN
+        if is_removed_budget_column(column) or column in BUDGET_DECISION_PRODUCT_DROP_COLUMNS:
+            continue
+        columns.append(column)
+    return _with_budget_decision_identity_columns_adjacent(_dedupe_columns(columns))
+
+
+def budget_decision_product_columns():
+    from .budget_decision import PRODUCT_COLUMNS
+
+    return _budget_product_columns_from_canonical(PRODUCT_COLUMNS)
+
+
 def _drop_inactive_new_product_columns(frame):
     inactive_prefixes = (
         'D14',
@@ -382,6 +549,69 @@ def _write_new_product_sheets(writer, new_product_ctx=None):
     methodology.to_excel(writer, sheet_name=NEW_PRODUCT_METHODOLOGY_SHEET, index=False)
 
 
+def _blank_series_mask(series):
+    text = series.astype('string').fillna('').str.strip()
+    return text.eq('') | text.isin(['nan', 'None', '<NA>', 'NaT'])
+
+
+def _budget_frame_from_context(context, keys, columns, aliases=None, drop_columns=None):
+    frame = _frame_from_context(context, keys, columns)
+    for target, sources in (aliases or {}).items():
+        if target not in frame.columns:
+            frame[target] = ''
+        for source in sources:
+            if source in frame.columns:
+                frame[target] = frame[target].mask(_blank_series_mask(frame[target]), frame[source])
+                break
+    for column in columns:
+        if column not in frame.columns:
+            frame[column] = ''
+    frame = _normalize_rank_band_frame(frame)
+    frame = frame.drop(columns=list(drop_columns or set()), errors='ignore')
+    frame = frame.loc[:, [column for column in frame.columns if not is_removed_budget_column(column)]]
+    preferred = [column for column in columns if column in frame.columns]
+    remaining = [column for column in frame.columns if column not in preferred]
+    return frame.loc[:, preferred + remaining]
+
+
+def _write_budget_decision_sheets(writer, df, budget_decision_context=None):
+    if budget_decision_context is None:
+        from .budget_decision import build_budget_decision_context
+
+        context = build_budget_decision_context(df)
+    else:
+        context = budget_decision_context
+    products = _budget_frame_from_context(
+        context,
+        ('products', BUDGET_DECISION_PRODUCT_SHEET),
+        budget_decision_product_columns(),
+        aliases=BUDGET_DECISION_PRODUCT_ALIASES,
+        drop_columns=BUDGET_DECISION_PRODUCT_DROP_COLUMNS,
+    )
+    tiers = _budget_frame_from_context(
+        context,
+        ('tiers', BUDGET_DECISION_TIER_SHEET),
+        BUDGET_DECISION_TIER_COLUMNS,
+        aliases=BUDGET_DECISION_TIER_ALIASES,
+        drop_columns=BUDGET_DECISION_TIER_DROP_COLUMNS,
+    )
+    plans = _budget_frame_from_context(
+        context,
+        ('plans', BUDGET_DECISION_PLAN_SHEET),
+        BUDGET_DECISION_PLAN_COLUMNS,
+        aliases=BUDGET_DECISION_PLAN_ALIASES,
+    )
+    if '计划管理建议' in plans.columns:
+        plans['计划管理建议'] = plans['计划管理建议'].map(_clean_budget_plan_advice_text)
+
+    products.to_excel(writer, sheet_name=BUDGET_DECISION_PRODUCT_SHEET, index=False)
+    tiers.to_excel(writer, sheet_name=BUDGET_DECISION_TIER_SHEET, index=False)
+    plans.to_excel(writer, sheet_name=BUDGET_DECISION_PLAN_SHEET, index=False)
+
+
+BUDGET_DECISION_PRODUCT_COLUMNS = budget_decision_product_columns()
+
+
 def export_execution_table(df, cat_ctx=None, ranking_df=None):
     """导出执行表及品类投放占比与 ROI 为 Excel bytes。"""
     validate_paid_plan_consistency(df, '执行表Excel导出')
@@ -394,7 +624,9 @@ def export_execution_table(df, cat_ctx=None, ranking_df=None):
     return output.read()
 
 
-def export_all_sheets(df, cat_ctx=None, ranking_df=None, new_product_ctx=None):
+def export_all_sheets(
+        df, cat_ctx=None, ranking_df=None, new_product_ctx=None,
+        budget_decision_context=None):
     """导出全部分析 Sheet"""
     validate_paid_plan_consistency(df, '全部Sheet Excel导出')
     output = io.BytesIO()
@@ -405,9 +637,10 @@ def export_all_sheets(df, cat_ctx=None, ranking_df=None, new_product_ctx=None):
         # 2. 五项核心指标状态规则文档
         _write_metric_status_rule_sheet(writer)
 
-        # 3. AI任务视图（基于当前导出范围的最终执行表）
-        ai_tasks = build_ai_task_view(df)
-        ai_tasks.to_excel(writer, sheet_name='AI任务视图', index=False)
+        # 3. 预算决策
+        _write_budget_decision_sheets(
+            writer, df, budget_decision_context=budget_decision_context
+        )
 
         # 4. 分层
         seg_cols = [c for c in ['组合','综合等级','商品定位','对应操作'] if c in df.columns]

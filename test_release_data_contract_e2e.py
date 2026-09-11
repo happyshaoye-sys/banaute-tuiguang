@@ -9,11 +9,19 @@ import unittest
 import pandas as pd
 
 from core.analysis import build_ai_task_view
+from core.budget_decision import build_budget_decision_context
 from core.data_validation import (
     DataValidationError,
     validate_paid_plan_consistency,
 )
-from core.exporter import export_all_sheets
+from core.exporter import (
+    BUDGET_DECISION_PLAN_SHEET,
+    BUDGET_DECISION_PRODUCT_SHEET,
+    BUDGET_DECISION_REQUIRED_PRODUCT_COLUMNS,
+    BUDGET_DECISION_TIER_SHEET,
+    EXECUTION_SHEET,
+    export_all_sheets,
+)
 from core.loader import read_prepared_source, scan_folder
 from core.jst_refund import load_refund_rates
 from core.jst_stock import load_snapshot_as_stock
@@ -22,6 +30,32 @@ from core.metox_algorithm import apply_metox_algorithm
 from core.periods import aggregate_period_frame
 from core.schema import SOURCE_WUJIE_SUBJECT
 from core.segmentation import segment_products
+
+
+BUDGET_DECISION_FORBIDDEN_PRODUCT_COLUMNS = [
+    '预算角色',
+    '预算动作',
+    '角色候选',
+    '角色状态',
+    '角色原因',
+    '人工业务标记',
+    '人工标记',
+    '本月主推',
+    '应季状态',
+    '季节状态',
+    '人工清仓',
+    'NOCAP',
+    '生效月份',
+    '标记备注',
+    'manual_marks',
+    'manual_state',
+    'effective_month',
+    '候选',
+    '状态',
+    '判定依据',
+    '风险',
+    '推广商品定位',
+]
 
 
 def _product_roi_row() -> dict:
@@ -64,6 +98,37 @@ def _write_sources(root: Path, wujie_row: dict | None = None) -> None:
         '货号': 'SKU-1001', '创建时间': '2026-01-01 10:00:00',
         '成本价（含税）': 50,
     }]).to_excel(root / '店铺商品资料-2026-08-01.xlsx', index=False)
+
+
+def _context_frame(context, key):
+    value = context.get(key)
+    if isinstance(value, pd.DataFrame):
+        return value.copy()
+    return pd.DataFrame(value)
+
+
+def _by_clean_id(frame, column):
+    work = frame.copy()
+    work[column] = (
+        work[column]
+        .astype(str)
+        .str.replace(r'\.0$', '', regex=True)
+        .str.strip()
+    )
+    return work.set_index(column, drop=False)
+
+
+def _assert_excel_value(testcase, actual, expected):
+    if pd.isna(expected):
+        testcase.assertTrue(pd.isna(actual))
+        return
+    try:
+        expected_num = float(expected)
+        actual_num = float(actual)
+    except (TypeError, ValueError):
+        testcase.assertEqual(str(actual), str(expected))
+    else:
+        testcase.assertAlmostEqual(actual_num, expected_num, places=6)
 
 
 class ReleaseDataContractE2ETests(unittest.TestCase):
@@ -112,7 +177,7 @@ class ReleaseDataContractE2ETests(unittest.TestCase):
             with self.assertRaisesRegex(DataValidationError, '缺少必需原始字段：退款率'):
                 load_refund_rates(path)
 
-    def test_excel_files_to_ai_task_sheet_full_pipeline(self):
+    def test_excel_files_to_budget_decision_sheets_full_pipeline(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_sources(root)
@@ -137,16 +202,66 @@ class ReleaseDataContractE2ETests(unittest.TestCase):
             tasks = build_ai_task_view(final)
             self.assertEqual(len(tasks), 1)
             self.assertIn('P1001', tasks.iloc[0]['计划执行明细'])
-
-            workbook = export_all_sheets(final)
-            excel = pd.ExcelFile(io.BytesIO(workbook))
-            self.assertIn('商品推广执行表', excel.sheet_names)
-            self.assertIn('AI任务视图', excel.sheet_names)
-            exported_tasks = pd.read_excel(
-                io.BytesIO(workbook), sheet_name='AI任务视图'
+            budget_context = build_budget_decision_context(final)
+            budget_products = _context_frame(budget_context, 'products')
+            self.assertEqual(
+                _by_clean_id(budget_products, '宝贝ID').index.tolist(),
+                ['1001'],
             )
-            self.assertEqual(exported_tasks['宝贝ID'].astype(str).tolist(), ['1001'])
-            self.assertIn('P1001', exported_tasks.loc[0, '计划执行明细'])
+
+            workbook = export_all_sheets(final, budget_decision_context=budget_context)
+            excel = pd.ExcelFile(io.BytesIO(workbook))
+            self.assertIn(EXECUTION_SHEET, excel.sheet_names)
+            self.assertIn(BUDGET_DECISION_PRODUCT_SHEET, excel.sheet_names)
+            self.assertIn(BUDGET_DECISION_TIER_SHEET, excel.sheet_names)
+            self.assertIn(BUDGET_DECISION_PLAN_SHEET, excel.sheet_names)
+            self.assertNotIn('AI任务视图', excel.sheet_names)
+
+            exported_products = pd.read_excel(
+                io.BytesIO(workbook), sheet_name=BUDGET_DECISION_PRODUCT_SHEET
+            )
+            exported_by_id = _by_clean_id(exported_products, '宝贝ID')
+            context_by_id = _by_clean_id(budget_products, '宝贝ID')
+            self.assertEqual(exported_by_id.index.tolist(), ['1001'])
+            for column in BUDGET_DECISION_REQUIRED_PRODUCT_COLUMNS:
+                self.assertIn(column, exported_products.columns)
+            for column in BUDGET_DECISION_FORBIDDEN_PRODUCT_COLUMNS:
+                self.assertNotIn(column, exported_products.columns)
+
+            for exported_column, context_column in (
+                ('销售占比', '销售占比'),
+                ('花费占比', '花费占比'),
+                ('占比差(pp)', '占比差(pp)'),
+                ('预算错配金额', '预算错配金额'),
+                ('未来7日建议调整金额', '未来7日建议调整金额'),
+            ):
+                self.assertIn(exported_column, exported_products.columns)
+                _assert_excel_value(
+                    self,
+                    exported_by_id.loc['1001', exported_column],
+                    context_by_id.loc['1001', context_column],
+                )
+
+            exported_plans = pd.read_excel(
+                io.BytesIO(workbook), sheet_name=BUDGET_DECISION_PLAN_SHEET
+            )
+            budget_plans = _context_frame(budget_context, 'plans')
+            exported_plan_by_id = _by_clean_id(exported_plans, '计划ID')
+            context_plan_by_id = _by_clean_id(budget_plans, '计划ID')
+            plan_ids = (
+                exported_plans['计划ID']
+                .astype(str)
+                .str.replace(r'\.0$', '', regex=True)
+                .tolist()
+            )
+            self.assertIn('P1001', plan_ids)
+            expected_plan_type_column = (
+                '计划类型' if '计划类型' in budget_plans.columns else '计划商品类型'
+            )
+            self.assertEqual(
+                exported_plan_by_id.loc['P1001', '计划类型'],
+                context_plan_by_id.loc['P1001', expected_plan_type_column],
+            )
 
 
 if __name__ == '__main__':

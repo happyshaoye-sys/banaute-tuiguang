@@ -16,7 +16,9 @@ class DeferredAllSheetsDownloadTests(unittest.TestCase):
 
     def test_all_sheets_is_generated_by_deferred_download_callable(self):
         self.assertIn("all_sheets_download = partial(", self.export_block)
-        self.assertIn("export_all_sheets,", self.export_block)
+        self.assertIn("_call_export_all_sheets_with_budget_context,", self.export_block)
+        self.assertNotIn("role_context=", self.export_block)
+        self.assertNotIn("build_budget_decision_context(", self.export_block)
         self.assertIn("data=all_sheets_download", self.export_block)
 
     def test_large_workbook_is_not_retained_in_session_state(self):

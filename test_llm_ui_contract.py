@@ -8,23 +8,29 @@ ROOT = Path(__file__).resolve().parent
 
 
 class LLMUIContractTests(unittest.TestCase):
-    def test_ai_task_view_exposes_optional_advice_and_one_click_feedback(self):
+    def test_main_page_no_longer_exposes_llm_feedback_controls(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
 
-        self.assertIn("大模型复核与人工反馈", source)
-        self.assertIn("生成 / 刷新大模型建议", source)
-        for decision in ("采纳", "修改后采纳", "驳回", "暂缓"):
-            self.assertIn(f'"{decision}"', source)
-        self.assertIn("回填后续结果（可选）", source)
-        self.assertIn("导出全部人工反馈 CSV", source)
+        self.assertNotIn("大模型复核与人工反馈", source)
+        self.assertNotIn("生成 / 刷新大模型建议", source)
+        self.assertNotIn("一键反馈给MetoX", source)
+        self.assertNotIn("回填后续结果（可选）", source)
+        self.assertNotIn("导出全部人工反馈 CSV", source)
+        self.assertNotIn("PROVIDER_SPECS", source)
+        self.assertNotIn("FeedbackStore", source)
+        self.assertNotIn("call_advisor", source)
+        self.assertNotIn("provider_key_available", source)
+        self.assertNotIn("llm_recommendations", source)
+        self.assertNotIn("llm_feedback_status", source)
 
-    def test_ui_reads_environment_keys_and_never_collects_api_keys(self):
-        source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
+    def test_core_llm_advisor_keeps_manual_execution_and_env_key_boundaries(self):
+        source = (ROOT / "core" / "llm_advisor.py").read_text(encoding="utf-8-sig")
 
-        self.assertIn("provider_key_available(llm_provider)", source)
-        self.assertNotIn('st.text_input("API Key', source)
-        self.assertNotIn('st.text_input("API密钥', source)
-        self.assertIn("不会自动执行预算调整", source)
+        self.assertIn('"automatic_execution": False', source)
+        self.assertIn("env.get(spec.api_key_env", source)
+        self.assertIn("未配置环境变量", source)
+        self.assertIn("api_key_env", source)
+        self.assertNotIn('"automatic_execution": True', source)
 
 
 if __name__ == "__main__":

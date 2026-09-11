@@ -1,8 +1,11 @@
 """AI任务策略引擎18个反向场景与页面契约测试。"""
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 import json
+import sys
+import types
 import unittest
 
 import pandas as pd
@@ -20,6 +23,206 @@ from core.task_engine import (
 
 
 ROOT = Path(__file__).resolve().parent
+
+
+class _FakeSessionState(dict):
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+    def __setattr__(self, name, value):
+        self[name] = value
+
+
+def _fake_streamlit_modules():
+    streamlit = types.ModuleType("streamlit")
+    components = types.ModuleType("streamlit.components")
+    components_v1 = types.ModuleType("streamlit.components.v1")
+
+    def cache_data(*args, **_kwargs):
+        if args and callable(args[0]):
+            return args[0]
+
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+    streamlit.cache_data = cache_data
+    streamlit.session_state = _FakeSessionState()
+    streamlit.column_config = types.SimpleNamespace(
+        TextColumn=lambda *args, **kwargs: ("TextColumn", args, kwargs),
+        NumberColumn=lambda *args, **kwargs: ("NumberColumn", args, kwargs),
+        CheckboxColumn=lambda *args, **kwargs: ("CheckboxColumn", args, kwargs),
+        SelectboxColumn=lambda *args, **kwargs: ("SelectboxColumn", args, kwargs),
+        PercentColumn=lambda *args, **kwargs: ("PercentColumn", args, kwargs),
+    )
+    streamlit.components = components
+    components.v1 = components_v1
+    return {
+        "streamlit": streamlit,
+        "streamlit.components": components,
+        "streamlit.components.v1": components_v1,
+    }
+
+
+def _load_app_helpers():
+    app_path = ROOT / "app.py"
+    tree = ast.parse(app_path.read_text(encoding="utf-8-sig"), filename=str(app_path))
+    constants = {
+        "NEW_PRODUCT_HISTORY_DAYS",
+        "NEW_PRODUCT_BUSINESS_HISTORY_DAYS",
+        "DEFAULT_YEAR",
+        "DEFAULT_SHOP",
+        "APP_DIR",
+        "CACHE_DIR",
+        "BUDGET_DECISION_CONTEXT_CACHE_VERSION",
+        "BUDGET_RANK_BAND_COLUMN",
+        "BUDGET_RANK_BAND_LEGACY_COLUMNS",
+        "BUDGET_RANK_BAND_VALUE_MAP",
+        "BUDGET_DECISION_LEADING_COLUMNS",
+        "BUDGET_DECISION_HIDDEN_COLUMNS",
+        "BUDGET_DECISION_HIDDEN_COLUMN_TOKENS",
+    }
+    body = []
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef)):
+            body.append(node)
+        elif isinstance(node, ast.Assign):
+            targets = [target for target in node.targets if isinstance(target, ast.Name)]
+            if targets and all(target.id in constants for target in targets):
+                body.append(node)
+    helper_tree = ast.Module(body=body, type_ignores=[])
+    ast.fix_missing_locations(helper_tree)
+
+    module = types.ModuleType("app_helpers_for_ai_task_tests")
+    module.__file__ = str(app_path)
+    fake_modules = _fake_streamlit_modules()
+    previous = {name: sys.modules.get(name) for name in fake_modules}
+    sys.modules.update(fake_modules)
+    try:
+        exec(compile(helper_tree, str(app_path), "exec"), module.__dict__)
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = value
+    return module
+
+
+APP = _load_app_helpers()
+
+
+class BudgetDecisionAppHelperContractTests(unittest.TestCase):
+    def setUp(self):
+        APP.st.session_state.clear()
+
+    def test_budget_decision_context_cache_depends_on_data_identity_and_version(self):
+        original_builder = APP.build_budget_decision_context
+        original_version = APP.BUDGET_DECISION_CONTEXT_CACHE_VERSION
+        calls = []
+
+        def fake_builder(frame, **kwargs):
+            calls.append((id(frame), APP.BUDGET_DECISION_CONTEXT_CACHE_VERSION))
+            return {"products": [{"宝贝ID": "1001"}], "calls": len(calls)}
+
+        APP.build_budget_decision_context = fake_builder
+        APP.st.session_state.budget_decision_ctx_cache = None
+        try:
+            frame = pd.DataFrame([{"宝贝ID": "1001", "GMV": 100}])
+            first = APP._build_budget_decision_context_cached(frame)
+            second = APP._build_budget_decision_context_cached(frame)
+            self.assertIs(first, second)
+            self.assertEqual(len(calls), 1)
+
+            APP.BUDGET_DECISION_CONTEXT_CACHE_VERSION = "budget_decision_context_test_v3"
+            third = APP._build_budget_decision_context_cached(frame)
+            self.assertEqual(third["calls"], 2)
+
+            same_rows_new_frame = frame.copy()
+            fourth = APP._build_budget_decision_context_cached(same_rows_new_frame)
+            self.assertEqual(fourth["calls"], 3)
+            self.assertEqual(len(calls), 3)
+        finally:
+            APP.build_budget_decision_context = original_builder
+            APP.BUDGET_DECISION_CONTEXT_CACHE_VERSION = original_version
+
+    def test_retired_role_and_manual_mark_columns_are_hidden_from_product_display(self):
+        frame = pd.DataFrame(
+            [[
+                "1001", "https://img.example/1.jpg", "SKU-A", "连衣裙", "ZT",
+                "S1", "保持", "ZT候选", "正式", "人工指定", "应季", True,
+                "2026-09", {"1001": {"本月主推": True}}, 300.0, 30.0,
+                10.0, 70.0, "旧定位", "重复宝贝",
+            ]],
+            columns=[
+                "宝贝ID", "款式主图", "货号", "淘宝类目", "预算角色",
+                "销售梯队", "预算动作", "角色候选", "角色状态", "角色原因",
+                "季节状态", "本月主推", "生效月份", "manual_marks", "GMV", "付费",
+                "预算错配金额", "未来7日建议调整金额",
+                "推广商品定位", "宝贝ID",
+            ],
+        )
+
+        display = APP._budget_decision_products_for_display(frame)
+        product_columns = APP._budget_decision_product_columns(
+            display,
+            APP.BUDGET_DECISION_MAIN_COLUMNS,
+        )
+        product_table = display[product_columns]
+
+        self.assertEqual(len(product_columns), len(set(map(str, product_columns))))
+        self.assertFalse(product_table.columns.has_duplicates)
+        self.assertEqual(
+            product_columns[:5],
+            ["宝贝ID", "款式主图", "货号", "淘宝类目", "排名档"],
+        )
+        self.assertEqual(display.loc[0, "排名档"], "Top1-5")
+        removed_columns = {
+            "预算角色", "预算动作", "角色候选", "角色状态", "角色原因",
+            "季节状态", "本月主推", "生效月份", "manual_marks", "推广商品定位",
+        }
+        self.assertTrue(removed_columns.isdisjoint(display.columns))
+        self.assertTrue(removed_columns.isdisjoint(product_columns))
+        self.assertNotIn("销售梯队", product_columns)
+        for column in ("GMV", "付费", "预算错配金额", "未来7日建议调整金额"):
+            self.assertIn(column, product_columns)
+
+    def test_all_sheet_budget_context_is_built_only_when_export_callable_runs(self):
+        original_builder = APP.build_budget_decision_context
+        original_exporter = APP._call_export_all_sheets
+        calls = []
+
+        def fake_builder(frame, **kwargs):
+            calls.append(("build", list(frame["宝贝ID"])))
+            return {"products": [{"宝贝ID": "FILTERED"}]}
+
+        def fake_exporter(frame, **kwargs):
+            calls.append(("export", list(frame["宝贝ID"]), kwargs))
+            return b"xlsx"
+
+        APP.build_budget_decision_context = fake_builder
+        APP._call_export_all_sheets = fake_exporter
+        try:
+            result = APP._call_export_all_sheets_with_budget_context(
+                pd.DataFrame([{"宝贝ID": "FILTERED"}]),
+                cat_ctx={"period_choice": "7天"},
+            )
+        finally:
+            APP.build_budget_decision_context = original_builder
+            APP._call_export_all_sheets = original_exporter
+
+        self.assertEqual(result, b"xlsx")
+        self.assertEqual([call[0] for call in calls], ["build", "export"])
+        self.assertEqual(calls[0][1], ["FILTERED"])
+        self.assertNotIn("role_context", calls[1][2])
+        self.assertEqual(
+            calls[1][2]["budget_decision_context"]["products"][0]["宝贝ID"],
+            "FILTERED",
+        )
 
 
 def _detail(*plans):
@@ -476,60 +679,181 @@ class AITaskViewAdditionalContractTests(unittest.TestCase):
         self.assertEqual(explained['计划动作数据源'], '近7天商品×PlanID数据（Top3展示）')
 
 
-class AITaskViewUIContractTests(unittest.TestCase):
+class BudgetDecisionDashboardUIContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.source = (ROOT / 'app.py').read_text(encoding='utf-8-sig')
 
-    def test_tab_order_places_ai_task_view_between_acceptance_and_execution(self):
+    def _budget_view_source(self):
+        return self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]
+
+    def test_tab_order_places_budget_dashboard_between_acceptance_and_execution(self):
         # The new-product view contains its own nested tabs, so anchor this
         # contract to the top-level navigation assignment instead of the first
         # st.tabs call in the module.
         main_tabs = 'tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(['
         start = self.source.index(main_tabs)
         tabs = self.source[start:self.source.index('])', start)]
-        self.assertLess(tabs.index('数据验收'), tabs.index('AI任务视图'))
-        self.assertLess(tabs.index('AI任务视图'), tabs.index('执行表'))
+        self.assertLess(tabs.index('数据验收'), tabs.index('预算决策看板'))
+        self.assertLess(tabs.index('预算决策看板'), tabs.index('执行表'))
+        self.assertNotIn('AI任务视图', tabs)
 
     def test_view_is_built_from_final_session_dataframe(self):
         main = self.source[self.source.index('# 主内容区'):]
         normalize = main.index('st.session_state.df = _normalize_display_columns')
-        build = main.index('build_ai_task_view(st.session_state.df)')
+        validate = main.index("validate_paid_plan_consistency(df, '预算决策看板')")
+        build = main.index('_build_budget_decision_context_cached(')
         tabs = main.index('st.tabs([')
-        self.assertLess(normalize, build)
+        self.assertLess(normalize, validate)
+        self.assertLess(validate, build)
         self.assertLess(build, tabs)
+        pre_tabs = main[:tabs]
+        self.assertNotIn('_load_new_product_business_history(', pre_tabs)
 
-    def test_image_url_is_shown_as_link_without_image_column(self):
-        view = self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]
+    def test_budget_dashboard_has_summary_first_and_three_subtabs(self):
+        view = self._budget_view_source()
+        self.assertLess(view.index('摘要先行'), view.index('product_tab, tier_tab, plan_tab = st.tabs(['))
+        self.assertIn('"商品预算决策", "排名档对齐", "推广计划管理"', view)
+        self.assertIn("budget_decision_ctx.get('products')", view)
+        self.assertIn("budget_decision_ctx.get('tiers')", view)
+        self.assertIn("budget_decision_ctx.get('plans')", view)
+        self.assertIn("budget_decision_ctx.get('summary')", view)
+        self.assertIn("budget_decision_ctx.get('actual_days')", view)
+
+    def test_summary_cards_use_budget_summary_keys(self):
+        view = self._budget_view_source()
+        for label in ('商品数', '周期GMV', '周期花费', '待回收金额', '建议增加金额', '零GMV消耗'):
+            self.assertIn(f"summary.get('{label}'", view)
+        self.assertIn('metric_cols = st.columns(6)', view)
+
+    def test_required_methodology_copy_is_visible(self):
+        view = self._budget_view_source()
+        self.assertIn('不依赖计划组/后台当前预算/目标预算/出价', view)
+        self.assertIn('销售占比=GMV/全店GMV', view)
+        self.assertIn('花费占比=付费/全店付费', view)
+        self.assertIn('占比差=花费占比-销售占比，正数为超投', view)
+        self.assertIn('未来7日为所选周期日均等比例换算', view)
+        self.assertIn('库存只提醒不判定', view)
+
+    def test_product_page_exposes_remaining_required_filters(self):
+        view = self._budget_view_source()
+        for label, key in (
+            ('排名档', 'budget_decision_tier_filter'),
+            ('淘宝类目', 'budget_decision_category_filter'),
+        ):
+            self.assertIn(f'"{label}"', view)
+            self.assertIn(f"key='{key}'", view)
+        self.assertNotIn('"预算动作"', view)
+        self.assertNotIn("key='budget_decision_action_filter'", view)
+        self.assertNotIn('"预算角色"', view)
+        self.assertNotIn("key='budget_decision_role_filter'", view)
+        self.assertNotIn('"推广商品定位"', view)
+        self.assertNotIn("key='budget_decision_position_filter'", view)
+
+    def test_retired_budget_role_and_manual_mark_controls_are_absent(self):
+        view = self._budget_view_source()
+        for retired_text in (
+            '"刷新并冻结8周阈值"',
+            'BUDGET_ROLE_THRESHOLD_WINDOW_DAYS',
+            'history_days=BUDGET_ROLE_THRESHOLD_WINDOW_DAYS',
+            'budget_role_history_day_map',
+            'st.session_state.budget_role_history_day_map = {}',
+            '阈值缓存：',
+            '展示窗口=',
+            '周数=',
+            '版本=',
+            '人工业务标记（本地保存，不写回执行表）',
+            '"本月主推"',
+            '"季节状态"',
+            '"生效月份"',
+            'BUDGET_ROLE_SEASON_OPTIONS',
+            '"保存人工业务标记"',
+            'with st.form("budget_role_manual_marks_form"',
+            'BUDGET_ROLE_MANUAL_EDITOR_MAX_ROWS',
+            '"搜索待标记商品"',
+            'key="budget_role_manual_marks_editor"',
+        ):
+            self.assertNotIn(retired_text, view)
+            self.assertNotIn(retired_text, self.source)
+
+    def test_main_load_has_no_retired_budget_role_history_state(self):
+        start = self.source.index('def _load_folder_cached(')
+        end = self.source.index('# ── 缓存：分层', start)
+        main_loader = self.source[start:end]
+        self.assertNotIn('BUDGET_ROLE_THRESHOLD_WINDOW_DAYS', main_loader)
+        self.assertIn('day_map=day_map', main_loader)
+        self.assertNotIn('budget_role_history_day_map', self.source)
+
+    def test_budget_pool_reference_summary_is_removed(self):
+        view = self._budget_view_source()
+        self.assertNotIn('BUDGET_ROLE_POOL_REFERENCE', self.source)
+        self.assertNotIn('预算池结构参考', view)
+        self.assertNotIn('仅作结构参考，不自动生成后台目标预算', view)
+        self.assertNotIn('_build_budget_role_pool_reference(products)', view)
+
+    def test_product_table_uses_budget_projection_and_column_types(self):
+        view = self._budget_view_source()
+        self.assertIn('BUDGET_DECISION_MAIN_COLUMNS', view)
+        self.assertIn('_dedupe_dataframe_columns(product_filtered)', view)
+        self.assertIn('_unique_budget_decision_columns', self.source)
         self.assertIn("'款式主图': st.column_config.LinkColumn(", view)
-        self.assertIn("'款式主图链接'", view)
-        self.assertNotIn('ImageColumn', view)
+        self.assertIn("'排名档': st.column_config.TextColumn", view)
+        for column in ('预算角色', '角色候选', '角色状态', '角色原因', '角色风险'):
+            self.assertNotIn(f"'{column}': st.column_config.TextColumn", view)
+        for column in ('阈值状态', '阈值窗口', '阈值版本'):
+            self.assertNotIn(f"'{column}': st.column_config.TextColumn", view)
+        self.assertNotIn("'阈值周数': st.column_config.NumberColumn", view)
+        self.assertIn("'库存提醒': st.column_config.TextColumn", view)
+        self.assertIn('库存提醒（只提醒不判定）', view)
+        self.assertIn("'销售占比': st.column_config.PercentColumn('销售占比')", view)
+        self.assertIn("'花费占比': st.column_config.PercentColumn('花费占比')", view)
+        self.assertIn("'GMV': st.column_config.NumberColumn", view)
+        self.assertIn("'付费': st.column_config.NumberColumn", view)
+        self.assertIn("'预算错配金额': st.column_config.NumberColumn", view)
+        self.assertIn("'未来7日建议调整金额': st.column_config.NumberColumn", view)
+        self.assertIn("'占比差(pp)': st.column_config.NumberColumn", view)
+        self.assertIn('暂无商品预算决策数据', view)
 
-    def test_main_table_hides_full_plan_json_and_detail_selector_expands_it(self):
-        view = self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]
-        self.assertIn('task_main = task_filtered[AI_TASK_MAIN_COLUMNS].copy()', view)
-        self.assertIn('parse_plan_execution_details', view)
-        self.assertIn('选择商品查看计划动作', view)
-        self.assertNotIn("task_choices.at[idx, '商品名称']", view)
+    def test_tier_page_charts_alignment_before_detail_table(self):
+        view = self._budget_view_source()
+        tier_view = view[view.index('with tier_tab:'):view.index('with plan_tab:')]
+        self.assertIn('st.bar_chart', tier_view)
+        self.assertLess(tier_view.index('st.bar_chart'), tier_view.index('st.dataframe('))
+        self.assertIn("y=['销售占比', '花费占比']", tier_view)
+        self.assertIn('显著错配口径：abs占比差>5个百分点 且 abs错配金额>=500', tier_view)
+        self.assertIn('排名档为Top1-5、Top6-10、Top11-20、Top21-50、Top51-100、Top101-尾部、零GMV回收池', tier_view)
+        self.assertIn("'预算错配金额', 'ROI', '未来7日建议调整金额'", tier_view)
+        self.assertIn("'ROI': st.column_config.NumberColumn('ROI', format='%.2f')", tier_view)
+        self.assertIn('tier_table = tiers[tier_columns]', tier_view)
+        self.assertIn('column in tier_table.columns', tier_view)
 
-    def test_main_table_renames_strategy_and_exposes_one_confidence_detail(self):
-        view = self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]
-        self.assertIn("'商品级总策略': st.column_config.TextColumn('商品级策略'", view)
-        self.assertIn("'AI可信度': st.column_config.TextColumn(", view)
-        self.assertIn('with st.expander("AI可信度说明"', view)
-        self.assertIn("selected_task['AI可信度说明'].splitlines()", view)
+    def test_plan_page_lists_plan_management_contract(self):
+        view = self._budget_view_source()
+        plan_view = view[view.index('with plan_tab:'):]
+        for column in (
+            '序号', '计划ID', '所属渠道', '商品数', '计划类型', '计划经营结构',
+            '周期花费', '归因成交', 'ROI', '方向证据', '计划管理建议',
+        ):
+            self.assertIn(column, plan_view)
+        self.assertIn("'序号', '计划ID'", plan_view)
+        self.assertIn("'序号': st.column_config.NumberColumn('序号', format='%d')", plan_view)
+        self.assertIn('合集计划只给父级诊断，勿把商品建议重复落成预算', plan_view)
+        self.assertIn('不得推断计划名称/计划组/预算/出价', plan_view)
 
-    def test_metox_filter_uses_the_renamed_cart_burst_label(self):
-        view = self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]
-        self.assertIn("'加购爆发'", view)
-        self.assertNotIn("'爆发'", view)
-
-    def test_plan_explanation_states_period_top3_and_coverage(self):
-        view = self.source[self.source.index('with tab3:'):self.source.index('# ── Tab 4:')]
-        self.assertIn('Top3关键计划（按周期花费排序）', view)
-        self.assertIn('计划覆盖率', view)
-        self.assertIn('AI可信度', view)
-        self.assertIn('商品-计划级', view)
+    def test_execution_table_remains_independent_tab4(self):
+        tab4_start = self.source.index('with tab4:')
+        tab4_source = self.source[tab4_start:self.source.index('# ── Tab 5:', tab4_start)]
+        exec_block = tab4_source[tab4_source.index('with ce1:'):tab4_source.index('with ce2:')]
+        all_sheet_block = tab4_source[tab4_source.index('with ce2:'):]
+        self.assertIn('execution_df = ensure_export_columns(df)', tab4_source)
+        self.assertNotIn('budget_decision_context=', exec_block)
+        self.assertNotIn('build_budget_decision_context(', all_sheet_block)
+        self.assertIn('filtered,', all_sheet_block)
+        self.assertNotIn('role_context=', all_sheet_block)
+        self.assertNotIn('export_budget_decision_ctx', all_sheet_block)
+        self.assertNotIn('budget_decision_context=budget_decision_ctx', tab4_source)
+        self.assertIn('_call_export_all_sheets_with_budget_context', all_sheet_block)
+        self.assertNotIn('预算池结构参考', all_sheet_block)
 
     def test_sidebar_supports_30_day_period(self):
         self.assertIn('["当日", "3天", "7天", "15天", "30天"]', self.source)

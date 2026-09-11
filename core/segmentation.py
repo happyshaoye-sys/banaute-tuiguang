@@ -130,16 +130,15 @@ def _apply_matrix(df):
         if to_num(row.get('在途', 0)) > 0 and stock < 10: risks.append('🚚在途补货中')
 
         # P1-P4预算优先级仍使用独立的0.4低退款线，不与0.7/0.8风险标签阈值混用。
+        # 库存只保留为风险提醒，不参与预算优先级或推广动作判定。
         is_low_refund = refund_rate < 0.4
-        has_stock = stock >= 10
         spend = to_num(row.get('付费', 0))
-        if (grade in ('S','A+')) and action in ('放量','适当放量') and is_low_refund and has_stock:
+        if (grade in ('S','A+')) and action in ('放量','适当放量') and is_low_refund:
             priority = 'P1'
         elif grade == 'A' or (grade == 'B' and action in ('成长期','成熟期')):
             priority = 'P2'
         elif ((grade in ('C','D') and action in ('观察期','淘汰'))
               or (not is_low_refund and refund_rate > 0)
-              or (not has_stock and stock >= 0)
               or (roi < 1 and spend > 100)):
             priority = 'P4'
         else:

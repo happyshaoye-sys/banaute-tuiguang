@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MetoX2.50 新运营培训手册</title>
+  <style>
+    body { margin: 0; background: #f6f7fb; color: #172033; font: 16px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    main { max-width: 920px; margin: 0 auto; padding: 40px 24px 64px; }
+    header, section { background: #fff; border: 1px solid #d9deea; border-radius: 10px; padding: 24px; margin-bottom: 20px; }
+    h1, h2 { margin-top: 0; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #d9deea; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: #eef2f7; }
+    code { background: #eef2f7; padding: 1px 5px; border-radius: 4px; }
+    .note { border-left: 4px solid #e23b3b; padding-left: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>MetoX2.50 新运营培训手册</h1>
+      <p>版本：MetoX v2.50 ｜ 发布日期：2026-09-05 ｜ 外部策略：v9.3（未变更）</p>
+    </header>
+    <section>
+      <h2>本次需要理解的字段</h2>
+      <table>
+        <thead><tr><th>字段</th><th>含义</th><th>7/15/30 日窗口的取值</th></tr></thead>
+        <tbody>
+          <tr><td><code>当前有效投放计划数</code></td><td>宝贝最新统计日中，花费大于 0 的去重计划ID数量。</td><td>只取窗口内最新统计日期。</td></tr>
+          <tr><td><code>推广计划总数</code></td><td>所选周期内出现过的去重计划ID数量。</td><td>整个窗口的计划并集。</td></tr>
+        </tbody>
+      </table>
+      <p class="note">这两个字段不能互相替代：前者用于判断今天实际在投规模，后者用于判断周期内历史覆盖范围。</p>
+    </section>
+    <section>
+      <h2>使用步骤</h2>
+      <ol>
+        <li>选择分析日期和时间周期后，点击“加载并处理数据”。</li>
+        <li>在执行表中查看位于“推广明细”之前的“当前有效投放计划数”。</li>
+        <li>先用当前有效投放计划数判断是否仍在投，再结合推广计划总数和推广明细分析历史计划覆盖。</li>
+        <li>导出 Excel 时字段会完整保留，页面列偏好不影响导出。</li>
+      </ol>
+    </section>
+    <section>
+      <h2>边界</h2>
+      <p>本次只增加计划数展示口径；不改变 MetoX 算法、商品/渠道动作、退款规则、新品规则或外部 v9.3 策略。</p>
+    </section>
+  </main>
+</body>
+</html>

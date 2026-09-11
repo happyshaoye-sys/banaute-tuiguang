@@ -1,7 +1,7 @@
 {
   "product": "MetoX",
-  "version": "2.40",
-  "release_date": "2026-09-05",
+  "version": "2.50",
+  "release_date": "2026-09-11",
   "external_strategy_version": "v9.3",
   "rule_versions": {
     "refund_risk": "2026-08-02",
@@ -49,6 +49,8 @@
     "loading_speed_optimization": "2026-08-28",
     "llm_advisor": "2026-09-02",
     "llm_feedback_learning": "2026-09-02",
-    "current_active_plan_count": "2026-09-05"
+    "current_active_plan_count": "2026-09-05",
+    "budget_role_rules": "2026-09-09",
+    "budget_threshold_coverage": "2026-09-09"
   }
 }

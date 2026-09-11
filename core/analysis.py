@@ -642,7 +642,8 @@ def _channel_decision(row, spend, attr, roi, base_roi):
     risk_signal = (
         grade in ('C', 'D')
         or op in ('观察期', '淘汰', '衰退期', '待优化')
-        or any(x in risks for x in ['缺货', '高退款', '亏损投放', '库存不足'])
+        # 库存只作为独立提醒，不参与渠道预算动作判定。
+        or any(x in risks for x in ['高退款', '亏损投放'])
     )
 
     def _reason(prefix):

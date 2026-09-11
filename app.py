@@ -42,21 +42,15 @@ from core.segmentation import segment_products
 from core.analysis import (
     build_daily_kpi_trends, calc_kpis, calc_kpi_mom_percent, grade_distribution, channel_summary,
     segment_summary, category_analysis, refund_risk, channel_top, inventory_actions,
-    build_operating_daily_report, build_ai_task_view,
+    build_operating_daily_report,
 )
 from core.acceptance import build_source_status
+from core.budget_decision import (
+    BUDGET_DECISION_MAIN_COLUMNS, build_budget_decision_context, is_removed_budget_column,
+)
 from core.v93_signal import parse_v93_report
 from core.metox_algorithm import apply_metox_algorithm
 from core.metric_labels import apply_metric_labels
-from core.task_engine import AI_TASK_MAIN_COLUMNS, parse_plan_execution_details
-from core.llm_advisor import (
-    LLMAdvisorError,
-    PROVIDER_SPECS,
-    build_task_payload,
-    call_advisor,
-    provider_key_available,
-)
-from core.feedback_store import FeedbackStore, FeedbackValidationError
 from core.jst_stock import find_snapshot, load_snapshot_as_stock
 from core.jst_refund import find_refund_snapshot, load_refund_rates
 from core.exporter import export_execution_table, export_all_sheets, style_execution_table
@@ -73,18 +67,21 @@ from core.schema import (
 st.set_page_config(page_title=f"{DISPLAY_VERSION} 半自动推广工具", layout="wide")
 st.title(f"{DISPLAY_VERSION} 半自动推广工具")
 GIT_PROJECT_NAME = PRODUCT_NAME
+if not hasattr(st.column_config, "PercentColumn"):
+    st.column_config.PercentColumn = partial(
+        st.column_config.NumberColumn,
+        format="percent",
+    )
 
 # ── 初始化 Session State ─────────────────────────────────
 for key in ['df','prev_df','kpis','prev_kpis','kpi_mom','plan_ids','prev_plan_ids','cur_date','prev_date',
             'sources_info','traffic_bounds','value_bounds','traffic_ref','value_ref',
             'loaded','processing_msg','timings','total_time','period_logs','cat_ctx','kpi_trends',
             'new_product_ctx','new_product_load_state','new_product_history','new_product_progress',
-            'llm_recommendations','llm_feedback_status']:
+            'budget_decision_ctx_cache']:
     if key not in st.session_state:
         if key == 'loaded':
             st.session_state[key] = False
-        elif key in ('llm_recommendations', 'llm_feedback_status'):
-            st.session_state[key] = {}
         else:
             st.session_state[key] = None
 
@@ -139,6 +136,37 @@ def _parse_bounds(s):
     if len(parts) == 5 and all(parts[i] < parts[i + 1] for i in range(4)):
         return parts
     return None
+
+
+def _as_dataframe(value):
+    if isinstance(value, pd.DataFrame):
+        return value.copy()
+    if value is None:
+        return pd.DataFrame()
+    return pd.DataFrame(value)
+
+
+def _option_values(frame, column):
+    if column not in frame.columns:
+        return []
+    return sorted({
+        str(value).strip() for value in frame[column].dropna()
+        if str(value).strip() not in ('', 'nan', 'None')
+    })
+
+
+def _as_float(value, default=0.0):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if pd.isna(number):
+        return default
+    return number
+
+
+def _format_money(value):
+    return f"¥{_as_float(value) / 1e4:.2f}万"
 
 
 # ── 加载数据 ──────────────────────────────────────────────
@@ -441,6 +469,28 @@ def _call_with_supported_kwargs(func, **kwargs):
         return func(**kwargs)
     supported = {name: value for name, value in kwargs.items() if name in signature.parameters}
     return func(**supported)
+
+
+def _call_export_execution_table(df, **kwargs):
+    return _call_with_supported_kwargs(export_execution_table, df=df, **kwargs)
+
+
+def _call_export_all_sheets(df, **kwargs):
+    return _call_with_supported_kwargs(export_all_sheets, df=df, **kwargs)
+
+
+def _call_export_all_sheets_with_budget_context(df, **kwargs):
+    """Build the filtered budget context only when the download is requested.
+
+    与看板保持一致：导出同样打开决策角色层（roles=True），
+    否则导出的商品预算表会缺角色/闸门列。
+    """
+    context = build_budget_decision_context(df, roles=True) or {}
+    return _call_export_all_sheets(
+        df,
+        budget_decision_context=context,
+        **kwargs,
+    )
 
 
 def _coerce_new_product_context(result, default_message='新品生命周期模块未返回结果'):
@@ -1981,6 +2031,44 @@ def _cat_sum(frame, col):
     return w.groupby("淘宝类目")[col].sum().to_dict()
 
 
+def _attach_budget_role_basis(df, day_map, date_str):
+    """把「固定近7日判定基准 + 覆盖法阈值」写进执行表，供预算决策的角色层使用。
+
+    * 判定基准固定近 7 日，与左侧「时间周期」（当日/3天/7天/15天/30天）无关；
+    * 阈值 = 7 天窗口 × 8 个窗口的覆盖法分界中位数（50% / 80%）；
+    * 写入的列：近7日日均GMV、上一7日日均GMV、GMV趋势率、
+      TH_MAIN、TH_MID、阈值版本、阈值窗口、阈值周数、阈值状态、阈值参照日。
+      阈值* 列在预算决策视图里默认隐藏，也不会进入执行表（执行表按 EXPORT_COLS 白名单展示）。
+
+    任何一步失败都只回退到"没有阈值"，由角色层返回「未判定 + 放行加投」，
+    不影响既有预算决策结果。
+    """
+    if df is None or len(df) == 0:
+        return df
+    try:
+        from core.budget_role import (
+            compute_coverage_thresholds_from_day_map,
+            inject_rolling_daily_gmv,
+            role_input_check,
+        )
+
+        work = inject_rolling_daily_gmv(df, day_map, end_date=date_str)
+        result = compute_coverage_thresholds_from_day_map(day_map, end_date=date_str)
+        payload = result.as_dict()
+        warnings = payload.pop('阈值警告', '')
+        for column, value in payload.items():
+            work[column] = value
+        check = role_input_check(work)
+        if warnings:
+            print(f"[角色层] 阈值提示：{warnings}")
+        if not check.get('ready'):
+            print(f"[角色层] 输入自检警告：{'；'.join(check.get('warnings', ()))}")
+        return work
+    except Exception as exc:  # pragma: no cover - 兜底，绝不阻断主流程
+        print(f"[WARNING] 角色层基准/阈值计算失败，已跳过（角色层将不介入）：{exc}")
+        return df
+
+
 def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_dir=None,
                         jst_snap_dir=None, jst_refund_dir=None, period_choice="当日"):
     """读取当前日，并按日/3日/7日/15日/30日生成周期累计环比。一次扫描全部日期，不重复读文件。
@@ -2047,6 +2135,16 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
     # 日销/花费滚动字段固定需要近15天；核心指标状态的同层基准固定读取过去28天。
     baseline_start = (pd.Timestamp(date_str) - pd.Timedelta(days=27)).date().isoformat()
     for d in iter_dates(baseline_start, date_str):
+        all_needed_dates.add(d)
+    # 预算决策角色层：固定近7日基准 + 覆盖法阈值需要 8 个完整 7 天窗口（=56 天），
+    # 与左侧时间周期无关，所以这里显式补齐，避免只有 28 天导致阈值只能用 4 个窗口。
+    from core.budget_role import THRESHOLD_WINDOW_DAYS, THRESHOLD_WINDOWS
+
+    role_history_days = int(THRESHOLD_WINDOW_DAYS) * int(THRESHOLD_WINDOWS)
+    role_history_start = (
+        pd.Timestamp(date_str) - pd.Timedelta(days=role_history_days - 1)
+    ).date().isoformat()
+    for d in iter_dates(role_history_start, date_str):
         all_needed_dates.add(d)
     rolling_start = periods.get("15日环比", {}).get("current_start", date_str)
     for d in iter_dates(rolling_start, date_str):
@@ -2151,6 +2249,10 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
     t_step = time.perf_counter()
     df = apply_metox_algorithm(df, day_map, date_str)
     _log_time(timings, "MetoX算法打标", t_step, f"{len(df)} 行")
+    # 预算决策角色层：固定近7日判定基准 + 覆盖法阈值（失败自动跳过，不影响既有结果）
+    t_step = time.perf_counter()
+    df = _attach_budget_role_basis(df, day_map, date_str, year=year, shop=shop)
+    _log_time(timings, "角色层基准+阈值", t_step, "固定近7日 + 覆盖法(7天×8窗)")
     # 链接数:当前表内同一货号(款式)的链接个数——多链接共享同一款式库存池,
     # 该列标出分流规模;货号为空的行留空(无法判定款式归属)
     t_step = time.perf_counter()
@@ -2286,6 +2388,30 @@ APP_DIR = Path(__file__).resolve().parent
 CACHE_DIR = APP_DIR / "cache"
 CACHE_RESULT_DIR = APP_DIR / "cache_result"
 COLUMN_PREFS_PATH = CACHE_DIR / "column_prefs.json"
+BUDGET_DECISION_CONTEXT_CACHE_VERSION = "budget_decision_context_v3_roles"
+BUDGET_RANK_BAND_COLUMN = "排名档"
+BUDGET_RANK_BAND_LEGACY_COLUMNS = ("销售梯队", "梯队", "层级")
+BUDGET_RANK_BAND_VALUE_MAP = {
+    "S1": "Top1-5",
+    "S2": "Top6-10",
+    "S3": "Top11-20",
+    "S4": "Top21-50",
+    "S5": "Top51-100",
+    "S6": "Top101-尾部",
+    "Top101以后": "Top101-尾部",
+    "Top101后": "Top101-尾部",
+    "Top101以上": "Top101-尾部",
+}
+BUDGET_DECISION_LEADING_COLUMNS = [
+    "宝贝ID", "款式主图", "货号", "淘宝类目", BUDGET_RANK_BAND_COLUMN, "决策角色",
+]
+BUDGET_DECISION_HIDDEN_COLUMNS = {
+    "预算风险", "阈值状态", "阈值窗口", "阈值周数", "阈值版本",
+    "D3商品整体信号",
+}
+BUDGET_DECISION_HIDDEN_COLUMN_TOKENS = (
+    "阈值", "门槛", "threshold",
+)
 
 
 _LEGACY_METOX_PREFIX = "v" + "9" + "." + "3"
@@ -2578,6 +2704,499 @@ def _save_column_prefs(cols):
     except Exception:
         pass
 
+
+def _clean_text_value(value):
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    return "" if text in ("", "nan", "None", "<NA>", "NaT") else text
+
+
+def _rank_band_value(value, gmv=None):
+    text = _clean_text_value(value)
+    if any(token in text for token in ("零GMV", "零成交", "零销售")):
+        return "零GMV回收池"
+    if text == "S6" and _as_float(gmv, default=0.0) <= 0:
+        return "零GMV回收池"
+    return BUDGET_RANK_BAND_VALUE_MAP.get(text, text)
+
+
+def _normalize_rank_band_dataframe(frame):
+    work = _as_dataframe(frame)
+    legacy_source_column = next(
+        (column for column in BUDGET_RANK_BAND_LEGACY_COLUMNS if column in work.columns),
+        None,
+    )
+    if BUDGET_RANK_BAND_COLUMN not in work.columns:
+        if legacy_source_column is None:
+            return work
+        work.insert(
+            work.columns.get_loc(legacy_source_column),
+            BUDGET_RANK_BAND_COLUMN,
+            work[legacy_source_column],
+        )
+    elif legacy_source_column is not None:
+        blank = work[BUDGET_RANK_BAND_COLUMN].map(_clean_text_value).eq("")
+        work.loc[blank, BUDGET_RANK_BAND_COLUMN] = work.loc[blank, legacy_source_column]
+    gmv_values = work["GMV"] if "GMV" in work.columns else pd.Series([None] * len(work), index=work.index)
+    work[BUDGET_RANK_BAND_COLUMN] = [
+        _rank_band_value(value, gmv)
+        for value, gmv in zip(work[BUDGET_RANK_BAND_COLUMN], gmv_values)
+    ]
+    return work.drop(columns=list(BUDGET_RANK_BAND_LEGACY_COLUMNS), errors="ignore")
+
+
+
+def _is_budget_decision_hidden_column(column):
+    text = str(column)
+    if is_removed_budget_column(column) or text in BUDGET_DECISION_HIDDEN_COLUMNS:
+        return True
+    return any(token in text for token in BUDGET_DECISION_HIDDEN_COLUMN_TOKENS)
+
+
+def _dedupe_dataframe_columns(frame):
+    work = _as_dataframe(frame)
+    if getattr(work.columns, "has_duplicates", False):
+        work = work.loc[:, ~work.columns.duplicated()].copy()
+    return work
+
+
+def _unique_budget_decision_columns(*column_groups):
+    columns = []
+    seen = set()
+    for group in column_groups:
+        for column in group:
+            key = str(column)
+            if key in seen:
+                continue
+            seen.add(key)
+            columns.append(column)
+    return columns
+
+
+def _threshold_freeze_store():
+    """阈值冻结登记：默认落在仓库内 config/（随 git 走），无仓库时回退 cache/。"""
+    from core.threshold_store import ThresholdFreezeStore, default_freeze_root
+
+    return ThresholdFreezeStore(default_freeze_root(app_dir=APP_DIR))
+
+
+def _threshold_freeze_git_status():
+    from core.threshold_store import registry_git_status
+
+    try:
+        return registry_git_status(app_dir=APP_DIR)
+    except Exception as exc:  # pragma: no cover
+        return {'in_repo': False, '错误': str(exc), 'path': '', 'relative_path': ''}
+
+
+def _threshold_freeze_after_change(current, *, action='冻结', commit: bool, push: bool) -> str:
+    """冻结/清除登记后：可选把登记提交到 git（提交信息带操作人）。返回提示文案。"""
+    from core.threshold_store import commit_freeze_registry, freeze_commit_message
+
+    if not commit:
+        return ''
+    result = commit_freeze_registry(
+        app_dir=APP_DIR,
+        message=freeze_commit_message(current, action=action),
+        push=push,
+    )
+    if result.get('ok') and result.get('commit'):
+        text = f"登记已提交 git：{result['commit']}"
+        if push and result.get('pushed'):
+            text += f"（已推送）"
+        elif push:
+            text += f"（推送未成功：{result.get('detail', '')[:120]}）"
+        return text
+    return f"登记未提交 git：{result.get('detail', '')}"
+
+
+def _attach_budget_role_basis(df, day_map, date_str, year=None, shop=None):
+    """把「固定近7日判定基准 + 生效阈值」写进执行表，供预算决策的角色层使用。
+
+    * 判定基准固定近 7 日，与左侧「时间周期」（当日/3天/7天/15天/30天）无关；
+    * 阈值由**运营人员冻结**：登记里冻结值优先；没有冻结时用引擎建议值并标记未冻结；
+    * 引擎每次仍照算建议值（7天窗口 × 8窗中位数），只用于对照与漂移监控；
+    * 写入的列：近7日日均GMV、上一7日日均GMV、GMV趋势率，以及 阈值* / TH_MAIN / TH_MID。
+      阈值* 列在预算决策视图里默认隐藏，也不会进入执行表（执行表按 EXPORT_COLS 白名单展示）。
+
+    任何一步失败都只回退到"没有阈值"，由角色层返回「未判定 + 放行加投」，
+    不影响既有预算决策结果。
+    """
+    if df is None or len(df) == 0:
+        return df
+    try:
+        from core.budget_role import (
+            compute_coverage_thresholds_from_day_map,
+            inject_rolling_daily_gmv,
+            resolve_thresholds,
+            role_input_check,
+            threshold_columns_from_payload,
+        )
+
+        work = inject_rolling_daily_gmv(df, day_map, end_date=date_str)
+        engine = compute_coverage_thresholds_from_day_map(day_map, end_date=date_str)
+        frozen = None
+        if year is not None and shop:
+            try:
+                frozen = _threshold_freeze_store().get(year, shop)
+            except Exception as exc:  # pragma: no cover - 登记读失败不阻断
+                print(f"[WARNING] 阈值冻结登记读取失败，按未冻结处理：{exc}")
+        payload = resolve_thresholds(engine, frozen)
+        for column, value in threshold_columns_from_payload(payload).items():
+            work[column] = value
+        # 供「阈值冻结」面板展示引擎建议值（不必重新读数据）
+        st.session_state['threshold_engine_snapshot'] = {
+            'TH_MAIN': engine.th_main,
+            'TH_MID': engine.th_mid,
+            '阈值参照日': engine.end_date,
+            '阈值周数': engine.weeks,
+            '阈值状态': engine.state,
+            '阈值版本': engine.version,
+            '参考日窗口分界': [
+                {'周次': row.get('周次'), '起始日': row.get('起始日'), '结束日': row.get('结束日'),
+                 'TH_MAIN': row.get('TH_MAIN'), 'TH_MID': row.get('TH_MID')}
+                for row in engine.weekly
+            ],
+            '警告': list(engine.warnings),
+        }
+        check = role_input_check(work)
+        if engine.warnings:
+            print(f"[角色层] 阈值提示：{'；'.join(engine.warnings)}")
+        if payload.get('阈值复核提示'):
+            print(f"[角色层] {payload['阈值复核提示']}")
+        if not check.get('ready'):
+            print(f"[角色层] 输入自检警告：{'；'.join(check.get('warnings', ()))}")
+        return work
+    except Exception as exc:  # pragma: no cover - 兜底，绝不阻断主流程
+        print(f"[WARNING] 角色层基准/阈值计算失败，已跳过（角色层将不介入）：{exc}")
+        return df
+
+
+def _refresh_budget_threshold_columns():
+    """冻结/清除冻结后，就地刷新执行表里的阈值列并让预算看板缓存失效。"""
+    from core.budget_role import (
+        THRESHOLD_WINDOW_DAYS,
+        resolve_thresholds,
+        threshold_columns_from_payload,
+    )
+
+    df = st.session_state.get('df')
+    snapshot = st.session_state.get('threshold_engine_snapshot') or {}
+    if df is None or len(df) == 0 or not snapshot:
+        return False
+    engine_like = type('ThresholdSnapshot', (), {
+        'th_main': snapshot.get('TH_MAIN', 0.0),
+        'th_mid': snapshot.get('TH_MID', 0.0),
+        'version': snapshot.get('阈值版本', ''),
+        'state': snapshot.get('阈值状态', ''),
+        'end_date': snapshot.get('阈值参照日', ''),
+        'weeks': int(snapshot.get('阈值周数') or 0),
+        'window_days': int(THRESHOLD_WINDOW_DAYS),
+    })()
+    frozen = None
+    year, shop = st.session_state.get('cur_year'), st.session_state.get('cur_shop')
+    if year is not None and shop:
+        frozen = _threshold_freeze_store().get(year, shop)
+    payload = resolve_thresholds(engine_like, frozen)
+    for column, value in threshold_columns_from_payload(payload).items():
+        df[column] = value
+    st.session_state.df = df
+    _invalidate_budget_decision_context_cache()
+    return True
+
+
+def _render_threshold_freeze_panel():
+    """预算决策看板里的「阈值冻结（运营确认）」面板。"""
+    from core.budget_role import THRESHOLD_WINDOW_DAYS
+
+    snapshot = st.session_state.get('threshold_engine_snapshot') or {}
+    year = st.session_state.get('cur_year')
+    shop = st.session_state.get('cur_shop')
+    if not snapshot:
+        st.caption("阈值信息尚未生成（本次加载未产出引擎建议值）。")
+        return
+
+    engine_main = float(snapshot.get('TH_MAIN') or 0.0)
+    engine_mid = float(snapshot.get('TH_MID') or 0.0)
+    weekly = snapshot.get('参考日窗口分界') or []
+    latest = weekly[0] if weekly else {}
+    frozen = None
+    if year is not None and shop:
+        try:
+            frozen = _threshold_freeze_store().get(year, shop)
+        except Exception as exc:  # pragma: no cover
+            st.warning(f"阈值冻结登记读取失败：{exc}")
+
+    with st.expander("🔒 阈值冻结（由运营确认，决定角色判定线）", expanded=False):
+        st.caption(
+            f"判定口径固定近{int(THRESHOLD_WINDOW_DAYS)}天（与左侧时间周期无关）。"
+            "引擎只给建议值，**生效阈值以运营冻结值为准**；冻结后除非运营更新或清除，不会自动变化。"
+        )
+        info_cols = st.columns(3)
+        if frozen:
+            info_cols[0].metric("当前生效（运营冻结）", f"{frozen['TH_MAIN']:.2f} / {frozen['TH_MID']:.2f}")
+            info_cols[1].metric("冻结人 / 时间", f"{frozen.get('冻结人', '')}",
+                                f"{frozen.get('冻结时间', '')}")
+            info_cols[2].metric("阈值版本", frozen.get('阈值版本', ''))
+        else:
+            info_cols[0].metric("当前生效（引擎建议·未冻结）", f"{engine_main:.2f} / {engine_mid:.2f}")
+            info_cols[1].metric("引擎建议参照日", snapshot.get('阈值参照日', ''))
+            info_cols[2].metric("窗口数", f"{snapshot.get('阈值周数', 0)} 个 × {int(THRESHOLD_WINDOW_DAYS)}天")
+
+        compare = pd.DataFrame([
+            {'口径': f'引擎建议（{snapshot.get("阈值周数", 0)}窗中位数，参照 {snapshot.get("阈值参照日", "")}）',
+             'TH_MAIN': engine_main, 'TH_MID': engine_mid},
+            {'口径': f'最新一周（{latest.get("起始日", "")}~{latest.get("结束日", "")}）',
+             'TH_MAIN': latest.get('TH_MAIN'), 'TH_MID': latest.get('TH_MID')},
+            {'口径': '当前生效', 'TH_MAIN': (frozen or {}).get('TH_MAIN', engine_main),
+             'TH_MID': (frozen or {}).get('TH_MID', engine_mid)},
+        ])
+        st.dataframe(
+            compare, width="stretch", hide_index=True,
+            column_config={
+                'TH_MAIN': st.column_config.NumberColumn('TH_MAIN（50%覆盖分界）', format='%.4f'),
+                'TH_MID': st.column_config.NumberColumn('TH_MID（80%覆盖分界）', format='%.4f'),
+            },
+        )
+        if frozen:
+            deviation_main = (frozen['TH_MAIN'] - engine_main) / engine_main if engine_main else 0.0
+            deviation_mid = (frozen['TH_MID'] - engine_mid) / engine_mid if engine_mid else 0.0
+            hint = f"冻结值与引擎建议偏离：TH_MAIN {deviation_main:+.1%}、TH_MID {deviation_mid:+.1%}"
+            if max(abs(deviation_main), abs(deviation_mid)) > 0.30:
+                st.warning(hint + "（超过 30%，建议复核是否更新冻结值）")
+            else:
+                st.caption(hint)
+            if frozen.get('备注'):
+                st.caption(f"冻结备注：{frozen['备注']}")
+
+        default_main = float((frozen or {}).get('TH_MAIN', engine_main) or 0.0)
+        default_mid = float((frozen or {}).get('TH_MID', engine_mid) or 0.0)
+        input_cols = st.columns(3)
+        input_main = input_cols[0].number_input(
+            "TH_MAIN（50%覆盖分界，元/天）", value=default_main, min_value=0.0,
+            step=10.0, format="%.4f", key='threshold_freeze_main_input',
+        )
+        input_mid = input_cols[1].number_input(
+            "TH_MID（80%覆盖分界，元/天）", value=default_mid, min_value=0.0,
+            step=10.0, format="%.4f", key='threshold_freeze_mid_input',
+        )
+        operator = input_cols[2].text_input("操作人（登记用）", key='threshold_freeze_operator')
+        note = st.text_input("备注（为什么定这个值）", key='threshold_freeze_note')
+
+        git_status = _threshold_freeze_git_status()
+        if git_status.get('in_repo') and not git_status.get('错误'):
+            st.caption(
+                f"登记随 git 走：`{git_status.get('relative_path')}`"
+                f"（{'已纳入版本管理' if git_status.get('tracked') else '尚未纳入版本管理，首次冻结会自动 add'}）"
+            )
+            git_cols = st.columns(2)
+            commit_registry = git_cols[0].checkbox(
+                "冻结时提交到 git（登记随仓库共享/可追溯）", value=True,
+                key='threshold_freeze_commit',
+            )
+            push_registry = git_cols[1].checkbox(
+                "同时推送远端", value=False, key='threshold_freeze_push',
+            )
+        else:
+            commit_registry = push_registry = False
+            st.caption(
+                f"⚠ 未找到 git 仓库，登记只在本机：`{git_status.get('path', '')}`"
+                f"（{git_status.get('错误', '')}）"
+            )
+
+        action_cols = st.columns(4)
+        if action_cols[0].button("🔒 冻结 / 更新", key='threshold_freeze_save', type="primary"):
+            try:
+                saved = _threshold_freeze_store().save(
+                    year, shop, th_main=input_main, th_mid=input_mid,
+                    operator=operator, note=note,
+                    engine={'TH_MAIN': engine_main, 'TH_MID': engine_mid,
+                            '阈值参照日': snapshot.get('阈值参照日', ''),
+                            '阈值周数': snapshot.get('阈值周数', 0)},
+                )
+                _refresh_budget_threshold_columns()
+                git_note = _threshold_freeze_after_change(
+                    saved, action='冻结', commit=commit_registry, push=push_registry,
+                )
+                st.success(f"已冻结：TH_MAIN={saved['TH_MAIN']:.4f}、TH_MID={saved['TH_MID']:.4f}"
+                           f"（版本 {saved['阈值版本']}）")
+                if git_note:
+                    st.info(git_note)
+                elif commit_registry is False and git_status.get('in_repo'):
+                    st.caption("（本次未提交 git，登记仅在本机工作区）")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"冻结失败：{exc}")
+        if action_cols[1].button("✅ 采纳引擎建议并冻结", key='threshold_freeze_adopt'):
+            try:
+                saved = _threshold_freeze_store().save(
+                    year, shop, th_main=engine_main, th_mid=engine_mid,
+                    operator=operator, note=note or '采纳引擎建议值',
+                    engine={'TH_MAIN': engine_main, 'TH_MID': engine_mid,
+                            '阈值参照日': snapshot.get('阈值参照日', ''),
+                            '阈值周数': snapshot.get('阈值周数', 0)},
+                )
+                _refresh_budget_threshold_columns()
+                git_note = _threshold_freeze_after_change(
+                    saved, action='冻结', commit=commit_registry, push=push_registry,
+                )
+                st.success(f"已按引擎建议冻结（版本 {saved['阈值版本']}）")
+                if git_note:
+                    st.info(git_note)
+                st.rerun()
+            except Exception as exc:
+                st.error(f"冻结失败：{exc}")
+        if action_cols[2].button("↩ 清除冻结", key='threshold_freeze_clear'):
+            try:
+                previous = frozen
+                cleared = _threshold_freeze_store().clear(year, shop, operator=operator, note=note)
+                _refresh_budget_threshold_columns()
+                git_note = _threshold_freeze_after_change(
+                    previous, action='清除', commit=commit_registry, push=push_registry,
+                )
+                st.success("已清除冻结，改为使用引擎建议值" if cleared else "当前没有冻结记录")
+                if git_note:
+                    st.info(git_note)
+                st.rerun()
+            except Exception as exc:
+                st.error(f"清除失败：{exc}")
+
+        history = _threshold_freeze_store().history(year, shop, limit=5) if (year and shop) else []
+        if history:
+            st.caption("最近变更记录（新→旧）")
+            st.dataframe(
+                pd.DataFrame(list(reversed(history))), width="stretch", hide_index=True,
+            )
+
+
+def _render_budget_role_summary(products):
+    """在预算决策看板展示决策角色分布与闸门拦截情况（角色层未启用时不显示）。"""
+    if products is None or len(products) == 0:
+        return
+    if '决策角色' not in getattr(products, 'columns', []):
+        return
+    try:
+        from core.budget_role import role_summary
+
+        rows = role_summary(products)
+    except Exception as exc:  # pragma: no cover - 兜底
+        print(f"[WARNING] 角色汇总生成失败：{exc}")
+        return
+    if not rows:
+        return
+    with st.expander("🎯 决策角色分布（只拦加投，不改回收）", expanded=False):
+        summary_frame = pd.DataFrame(rows)
+        display_columns = [
+            column for column in (
+                '决策角色', '款数', '销售份额', '花费份额', '占比差(pp)',
+                'ROI', '预算错配金额', '未来7日建议调整金额', '禁止加投款数',
+            )
+            if column in summary_frame.columns
+        ]
+        st.dataframe(
+            summary_frame[display_columns],
+            width="stretch",
+            hide_index=True,
+            column_config={
+                '决策角色': st.column_config.TextColumn('决策角色'),
+                '销售份额': st.column_config.PercentColumn('销售份额'),
+                '花费份额': st.column_config.PercentColumn('花费份额'),
+                '占比差(pp)': st.column_config.NumberColumn('占比差（百分点）', format='%.2f'),
+                'ROI': st.column_config.NumberColumn('ROI', format='%.2f'),
+                '预算错配金额': st.column_config.NumberColumn('预算错配金额', format='¥%.2f'),
+                '未来7日建议调整金额': st.column_config.NumberColumn('建议调整金额', format='¥%.2f'),
+                '禁止加投款数': st.column_config.NumberColumn('禁止加投款数'),
+            },
+        )
+        roles = sorted(summary_frame['决策角色'].astype(str))
+        st.caption(
+            "判定基准：固定近7日日均GMV（金额口径）；阈值：7天窗口×8窗覆盖法中位数。"
+            "闸门语义：禁止加投=归零、测试封顶=压到500元/周、放行=原样。"
+            f"本轮命中角色：{'、'.join(roles)}"
+        )
+
+
+def _budget_decision_products_for_display(products):
+    display = _normalize_rank_band_dataframe(_dedupe_dataframe_columns(products))
+    return _hide_budget_decision_columns(display)
+
+
+def _hide_budget_decision_columns(frame):
+    display = _dedupe_dataframe_columns(frame)
+    hidden_columns = [
+        column for column in display.columns
+        if _is_budget_decision_hidden_column(column)
+    ]
+    if hidden_columns:
+        display = display.drop(columns=hidden_columns)
+    return display
+
+
+def _budget_decision_product_columns(display_products, canonical_columns):
+    if display_products is None or display_products.empty:
+        return []
+    available_columns = list(dict.fromkeys(display_products.columns))
+    leading = [
+        column for column in BUDGET_DECISION_LEADING_COLUMNS
+        if column in available_columns and not _is_budget_decision_hidden_column(column)
+    ]
+    canonical = []
+    for column in canonical_columns:
+        normalized_column = (
+            BUDGET_RANK_BAND_COLUMN
+            if column in BUDGET_RANK_BAND_LEGACY_COLUMNS
+            else column
+        )
+        if (
+            normalized_column in BUDGET_RANK_BAND_LEGACY_COLUMNS
+            or _is_budget_decision_hidden_column(normalized_column)
+        ):
+            continue
+        if normalized_column in available_columns:
+            canonical.append(normalized_column)
+    remaining = [
+        column for column in available_columns
+        if column not in leading and column not in canonical
+        and column not in BUDGET_RANK_BAND_LEGACY_COLUMNS
+        and not _is_budget_decision_hidden_column(column)
+        and not str(column).startswith("_")
+    ]
+    return _unique_budget_decision_columns(leading, canonical, remaining)
+
+
+def _budget_decision_context_cache_token(df):
+    return (
+        BUDGET_DECISION_CONTEXT_CACHE_VERSION,
+        id(df),
+        len(df) if isinstance(df, pd.DataFrame) else 0,
+    )
+
+
+def _invalidate_budget_decision_context_cache():
+    st.session_state.budget_decision_ctx_cache = None
+
+
+def _build_budget_decision_context_cached(df):
+    token = _budget_decision_context_cache_token(df)
+    cached = st.session_state.get("budget_decision_ctx_cache")
+    if (
+        isinstance(cached, dict)
+        and cached.get("token") == token
+        and isinstance(cached.get("context"), dict)
+    ):
+        return cached["context"]
+    context = build_budget_decision_context(df, roles=True) or {}
+    st.session_state.budget_decision_ctx_cache = {
+        "token": token,
+        "context": context,
+    }
+    return context
 
 def _cache_key(base_root, year, shop, date_str):
     """按数据集生成稳定缓存目录名，让相邻分析日复用重叠历史日期。"""
@@ -2935,6 +3554,8 @@ with st.sidebar:
                         st.session_state.kpis, st.session_state.prev_kpis
                     )
                     st.session_state.cur_date = date_str
+                    st.session_state.cur_year = year
+                    st.session_state.cur_shop = shop
                     st.session_state.prev_date = None
                     st.session_state.sources_info = files_info
                     st.session_state.cat_ctx = cat_ctx
@@ -2943,6 +3564,7 @@ with st.sidebar:
                     st.session_state.new_product_load_state = new_product_load_state
                     st.session_state.new_product_history = None
                     st.session_state.new_product_progress = ''
+                    _invalidate_budget_decision_context_cache()
                     st.session_state.loaded = True
                     st.session_state.traffic_bounds = tb_load
                     st.session_state.value_bounds = vb_load
@@ -2962,16 +3584,16 @@ if not st.session_state.loaded:
 st.session_state.df = _normalize_display_columns(st.session_state.df)
 df = st.session_state.df
 try:
-    validate_paid_plan_consistency(df, 'AI任务视图')
+    validate_paid_plan_consistency(df, '预算决策看板')
 except DataValidationError as exc:
-    st.error(f"数据验收失败，AI任务视图已停止生成：{exc}")
+    st.error(f"数据验收失败，预算决策看板已停止生成：{exc}")
     st.stop()
-ai_task_df = build_ai_task_view(st.session_state.df)
+budget_decision_ctx = _build_budget_decision_context_cached(st.session_state.df)
 kpis = st.session_state.kpis
 kpi_mom = st.session_state.kpi_mom or calc_kpi_mom_percent(kpis, {})
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
-    "📈 数据看板", "📋 数据验收", "🤖 AI任务视图", "📊 执行表",
+    "📈 数据看板", "📋 数据验收", "💰 预算决策看板", "📊 执行表",
     "🎯 商品分层", "📂 品类分析", "⚠ 退款风险", "🔑 渠道分析", "📦 库存动作",
     "🆕 新品视图"
 ])
@@ -3086,390 +3708,271 @@ with tab2:
     exec_spend = df['付费'].sum()
     st.write(f"执行表 GMV: ¥{exec_gmv/1e4:.2f}万 | 执行表 花费: ¥{exec_spend/1e4:.2f}万")
 
-# ── Tab 3: AI任务视图 ────────────────────────────────────
+# ── Tab 3: 预算决策看板 ───────────────────────────────────
 with tab3:
-    st.subheader("🤖 AI任务视图")
+    st.subheader("💰 预算决策看板")
     st.caption(
-        "只读决策视图：仅基于最终执行表生成商品级建议，不重读数据、不重跑MetoX或商品分层，"
-        "也不会修改执行表及推广平台预算。"
+        "口径：不依赖计划组/后台当前预算/目标预算/出价；销售占比=GMV/全店GMV，"
+        "花费占比=付费/全店付费，占比差=花费占比-销售占比，正数为超投；"
+        "未来7日为所选周期日均等比例换算；库存只提醒不判定。"
+        "角色判定与阈值锚定**固定近7日**（与左侧时间周期无关），角色层只拦加投、不改回收。"
     )
-    if not ai_task_df.empty:
-        source_sample = ai_task_df.iloc[0]
-        st.caption(
-            f"AI规则数据来源｜商品策略：{source_sample['商品策略数据源']}｜"
-            f"渠道动作：{source_sample['渠道动作数据源']}｜"
-            f"计划动作：{source_sample['计划动作数据源']}"
-        )
 
-    task_counts = {
-        '全部任务': len(ai_task_df),
-        'P1': int((ai_task_df['执行优先级'] == 'P1').sum()),
-        '放量': int((ai_task_df['AI任务类型'] == '放量任务').sum()),
-        '测试': int((ai_task_df['AI任务类型'].isin(['测试任务', '恢复测试任务'])).sum()),
-        '稳量': int((ai_task_df['AI任务类型'] == '稳量任务').sum()),
-        '渠道调整': int((ai_task_df['AI任务类型'] == '渠道调整任务').sum()),
-        '止损': int((ai_task_df['AI任务类型'] == '止损任务').sum()),
-        '人工复核': int((ai_task_df['AI任务类型'] == '人工复核任务').sum()),
-    }
-    metric_cols = st.columns(len(task_counts))
-    for metric_col, (label, value) in zip(metric_cols, task_counts.items()):
+    products = _budget_decision_products_for_display(budget_decision_ctx.get('products'))
+    tiers = _hide_budget_decision_columns(
+        _normalize_rank_band_dataframe(budget_decision_ctx.get('tiers'))
+    )
+    plans = _hide_budget_decision_columns(budget_decision_ctx.get('plans'))
+    raw_summary = budget_decision_ctx.get('summary') or {}
+    summary = raw_summary if isinstance(raw_summary, dict) else dict(raw_summary)
+    actual_days = budget_decision_ctx.get('actual_days')
+
+    st.markdown("#### 摘要先行")
+    summary_cards = [
+        ("商品数", f"{int(_as_float(summary.get('商品数', len(products)))):,}"),
+        ("周期GMV", _format_money(summary.get('周期GMV', summary.get('全店GMV', summary.get('GMV', 0))))),
+        ("周期花费", _format_money(summary.get('周期花费', summary.get('全店付费', summary.get('付费', 0))))),
+        ("待回收金额", _format_money(summary.get('待回收金额', summary.get('待回收预算', 0)))),
+        ("建议增加金额", _format_money(summary.get('建议增加金额', summary.get('建议增加预算', 0)))),
+        ("零GMV消耗", _format_money(summary.get('零GMV消耗', summary.get('零GMV花费', summary.get('零GMV付费', 0))))),
+    ]
+    metric_cols = st.columns(6)
+    for metric_col, (label, value) in zip(metric_cols, summary_cards):
         metric_col.metric(label, value)
+    if actual_days:
+        st.caption(f"实际数据天数：{actual_days} 天；未来7日字段按所选周期日均等比例换算。")
 
-    def _task_options(column):
-        if column not in ai_task_df.columns:
-            return []
-        return sorted({
-            str(value).strip() for value in ai_task_df[column].dropna()
-            if str(value).strip() not in ('', 'nan', 'None')
-        })
+    _render_threshold_freeze_panel()
+    _render_budget_role_summary(products)
 
-    f1, f2, f3, f4 = st.columns(4)
-    with f1:
-        task_type_filter = st.multiselect(
-            "AI任务类型", _task_options('AI任务类型'), key='ai_task_type_filter'
-        )
-    with f2:
-        task_priority_filter = st.multiselect(
-            "执行优先级", ['P1', 'P2', 'P3', 'P4'], key='ai_task_priority_filter'
-        )
-    with f3:
-        task_grade_filter = st.multiselect(
-            "综合等级", _task_options('综合等级'), key='ai_task_grade_filter'
-        )
-    with f4:
-        task_position_filter = st.multiselect(
-            "商品定位", _task_options('商品定位'), key='ai_task_position_filter'
-        )
+    product_tab, tier_tab, plan_tab = st.tabs([
+        "商品预算决策", "排名档对齐", "推广计划管理"
+    ])
 
-    f5, f6, f7 = st.columns(3)
-    with f5:
-        task_cycle_filter = st.multiselect(
-            "商品周期", _task_options('商品周期'), key='ai_task_cycle_filter'
-        )
-    with f6:
-        metox_filter_options = [
-            label for label in (
-                '明日之星', '强主推', '近3日潜力', '加购爆发', '亏损风险',
-                '加预算', '饱和观察', '保护持有', '削减', '溢出',
+    with product_tab:
+        f1, f2 = st.columns(2)
+        with f1:
+            rank_band_filter = st.multiselect(
+                "排名档",
+                _option_values(products, '排名档'),
+                key='budget_decision_tier_filter',
             )
-            if ai_task_df['MetoX算法命中'].astype(str).str.contains(
-                label, regex=False, na=False
-            ).any()
-        ]
-        task_metox_filter = st.multiselect(
-            "MetoX算法命中", metox_filter_options, key='ai_task_metox_filter'
-        )
-    with f7:
-        task_category_filter = st.multiselect(
-            "淘宝类目", _task_options('淘宝类目'), key='ai_task_category_filter'
-        )
-
-    task_filtered = ai_task_df.copy()
-    for selected, column in (
-        (task_type_filter, 'AI任务类型'),
-        (task_priority_filter, '执行优先级'),
-        (task_grade_filter, '综合等级'),
-        (task_position_filter, '商品定位'),
-        (task_cycle_filter, '商品周期'),
-        (task_category_filter, '淘宝类目'),
-    ):
-        if selected:
-            task_filtered = task_filtered[task_filtered[column].astype(str).isin(selected)]
-    if task_metox_filter:
-        task_filtered = task_filtered[
-            task_filtered['MetoX算法命中'].astype(str).apply(
-                lambda text: any(label in text for label in task_metox_filter)
+        with f2:
+            category_filter = st.multiselect(
+                "淘宝类目",
+                _option_values(products, '淘宝类目'),
+                key='budget_decision_category_filter',
             )
-        ]
 
-    st.caption(f"筛选结果：{len(task_filtered)} / {len(ai_task_df)} 条任务")
-    if task_filtered.empty:
-        st.info("当前筛选条件下暂无具有明确处理价值的商品任务")
-    else:
-        task_main = task_filtered[AI_TASK_MAIN_COLUMNS].copy()
-        st.dataframe(
-            task_main,
-            width="stretch",
-            hide_index=True,
-            height=650,
-            column_config={
+        product_filtered = products.copy()
+        for selected, column in (
+            (rank_band_filter, '排名档'),
+            (category_filter, '淘宝类目'),
+        ):
+            if selected and column in product_filtered.columns:
+                product_filtered = product_filtered[
+                    product_filtered[column].astype(str).isin(selected)
+                ]
+
+        st.caption(f"筛选结果：{len(product_filtered)} / {len(products)} 个商品")
+        if products.empty:
+            st.info("暂无商品预算决策数据。")
+        elif product_filtered.empty:
+            st.info("当前筛选条件下暂无商品预算决策。")
+        else:
+            display_products = _dedupe_dataframe_columns(product_filtered)
+            product_columns = _budget_decision_product_columns(
+                display_products,
+                BUDGET_DECISION_MAIN_COLUMNS,
+            )
+            if not product_columns:
+                product_columns = list(display_products.columns)
+            if '占比差' in product_columns and '占比差' in display_products.columns:
+                display_products['占比差（百分点）'] = (
+                    pd.to_numeric(display_products['占比差'], errors='coerce') * 100
+                )
+                product_columns = [
+                    '占比差（百分点）' if column == '占比差' else column
+                    for column in product_columns
+                ]
+            product_table = display_products[product_columns]
+            product_column_config = {
                 '款式主图': st.column_config.LinkColumn(
-                    '款式主图链接',
+                    '款式主图',
                     width='medium',
                     help='仅显示链接，不预加载图片',
                 ),
-                '商品级总策略': st.column_config.TextColumn('商品级策略'),
-                'AI可信度': st.column_config.TextColumn(
-                    'AI可信度',
-                    help=(
-                        '综合商品、渠道、商品-计划、Top3覆盖、周期一致性、'
-                        '数据缺失和MetoX完整性。选择商品后可查看详细依据。'
-                    ),
+                '排名档': st.column_config.TextColumn('排名档'),
+                '决策角色': st.column_config.TextColumn(
+                    '决策角色',
+                    help='按固定近7日基准判定的投放角色：ZT主推/ZT趋势预警/TC投产/TD梯队/TD候选/CS测试/QC回收/清理/观察/未判定',
                 ),
-            },
-        )
-
-        st.markdown("#### 计划执行明细")
-        st.caption(
-            "主表保持一行一个宝贝ID；计划动作对象为商品-计划级，不代表修改整个共享计划。"
-            "计划指标先按所选周期完整累计，再按周期花费展示Top3关键计划（按周期花费排序）；"
-            "计划名称、预算和出价未提供时不会推断。"
-        )
-        task_choices = task_filtered.reset_index(drop=True)
-        selected_task_index = st.selectbox(
-            "选择商品查看计划动作",
-            options=list(task_choices.index),
-            format_func=lambda idx: (
-                f"{task_choices.at[idx, '宝贝ID']}｜"
-                f"{task_choices.at[idx, '货号']}｜"
-                f"{task_choices.at[idx, '计划执行摘要']}"
-            ),
-            key='ai_task_plan_detail_product',
-        )
-        selected_task = task_choices.iloc[selected_task_index]
-        st.caption(
-            f"动作对象：{selected_task['动作对象']}｜{selected_task['计划数据说明']}｜"
-            f"计划覆盖率：{selected_task['计划覆盖率']}"
-        )
-        with st.expander("AI可信度说明", expanded=False):
-            st.markdown(f"**AI可信度：{selected_task['AI可信度']}**")
-            for confidence_item in selected_task['AI可信度说明'].splitlines():
-                st.write(confidence_item)
-        selected_plan_details = parse_plan_execution_details(selected_task['计划执行明细'])
-        if selected_plan_details.empty:
-            st.info(selected_task['计划执行摘要'])
-        else:
+                '角色闸门': st.column_config.TextColumn(
+                    '角色闸门',
+                    help='放行加投=可加；禁止加投=本轮归零；测试封顶=最多500元/周',
+                ),
+                '决策角色依据': st.column_config.TextColumn('决策角色依据', width='large'),
+                '角色闸门依据': st.column_config.TextColumn('角色闸门依据', width='large'),
+                '风险命中': st.column_config.TextColumn(
+                    '风险命中',
+                    help='退款类风险命中时，放行/封顶一律降级为只降不增',
+                ),
+                '角色闸门命中': st.column_config.TextColumn(
+                    '角色闸门命中',
+                    help='本轮实际被闸门改动过的行才会显示',
+                ),
+                '库存提醒': st.column_config.TextColumn(
+                    '库存提醒（只提醒不判定）',
+                    help='库存只生成运营提醒，不参与预算分配判定',
+                ),
+                '销售占比': st.column_config.PercentColumn('销售占比'),
+                '花费占比': st.column_config.PercentColumn('花费占比'),
+                'GMV': st.column_config.NumberColumn('GMV', format='¥%.2f'),
+                '付费': st.column_config.NumberColumn('付费', format='¥%.2f'),
+                '周期GMV': st.column_config.NumberColumn('周期GMV', format='¥%.2f'),
+                '周期花费': st.column_config.NumberColumn('周期花费', format='¥%.2f'),
+                '待回收金额': st.column_config.NumberColumn('待回收金额', format='¥%.2f'),
+                '建议增加金额': st.column_config.NumberColumn('建议增加金额', format='¥%.2f'),
+                '零GMV消耗': st.column_config.NumberColumn('零GMV消耗', format='¥%.2f'),
+                '基准应得花费': st.column_config.NumberColumn('基准应得花费', format='¥%.2f'),
+                '预算错配金额': st.column_config.NumberColumn('预算错配金额', format='¥%.2f'),
+                '未来7日花费基线': st.column_config.NumberColumn('未来7日花费基线', format='¥%.2f'),
+                '未来7日建议调整金额': st.column_config.NumberColumn('未来7日建议调整金额', format='¥%.2f'),
+                '未来7日建议花费': st.column_config.NumberColumn('未来7日建议花费', format='¥%.2f'),
+                '未来7日GMV': st.column_config.NumberColumn('未来7日GMV', format='¥%.2f'),
+                '未来7日花费': st.column_config.NumberColumn('未来7日花费', format='¥%.2f'),
+                '占比差(pp)': st.column_config.NumberColumn(
+                    '占比差（百分点）',
+                    format='%.2f',
+                    help='花费占比-销售占比，正数为超投',
+                ),
+                '占比差（百分点）': st.column_config.NumberColumn(
+                    '占比差（百分点）',
+                    format='%.1f',
+                    help='花费占比-销售占比，正数为超投',
+                ),
+            }
             st.dataframe(
-                selected_plan_details,
+                product_table,
                 width="stretch",
                 hide_index=True,
-                height=min(420, 72 + 36 * len(selected_plan_details)),
+                height=650,
+                column_config={
+                    column: config
+                    for column, config in product_column_config.items()
+                    if column in product_table.columns
+                },
             )
 
-        st.markdown("#### 大模型复核与人工反馈")
+    with tier_tab:
         st.caption(
-            "可选能力：把当前任务的最小必要字段发送给所选模型，结合相同类目、相同任务类型的历史反馈复核建议。"
-            "模型不读取商品名称、密钥或操作人信息，不会自动执行预算调整。"
+            "显著错配口径：abs占比差>5个百分点 且 abs错配金额>=500；"
+            "排名档为Top1-5、Top6-10、Top11-20、Top21-50、Top51-100、Top101-尾部、零GMV回收池。"
         )
-        provider_keys = list(PROVIDER_SPECS)
-        llm_col1, llm_col2 = st.columns(2)
-        with llm_col1:
-            llm_provider = st.selectbox(
-                "模型服务",
-                provider_keys,
-                format_func=lambda value: PROVIDER_SPECS[value].label,
-                key="llm_advisor_provider",
+        if tiers.empty:
+            st.info("暂无排名档对齐数据。")
+        else:
+            tier_label_column = next(
+                (column for column in ('排名档', '销售梯队', '梯队', '层级') if column in tiers.columns),
+                None,
             )
-        provider_spec = PROVIDER_SPECS[llm_provider]
-        with llm_col2:
-            llm_model = st.selectbox(
-                "模型",
-                provider_spec.models,
-                index=provider_spec.models.index(provider_spec.default_model),
-                key=f"llm_advisor_model_{llm_provider}",
+            if tier_label_column and {'销售占比', '花费占比'}.issubset(tiers.columns):
+                tier_chart = tiers[[tier_label_column, '销售占比', '花费占比']].copy()
+                tier_chart = tier_chart[
+                    ~tier_chart[tier_label_column].astype(str).str.contains(
+                        '零GMV回收池|零GMV|零成交|零销售',
+                        regex=True,
+                        na=False,
+                    )
+                ]
+                if tier_chart.empty:
+                    st.info("排名档暂无可绘制结构占比。")
+                else:
+                    st.bar_chart(
+                        tier_chart,
+                        x=tier_label_column,
+                        y=['销售占比', '花费占比'],
+                        height=260,
+                    )
+            else:
+                st.info("缺少销售占比或花费占比，暂不绘制结构对齐图。")
+            tier_columns = [
+                column for column in (
+                    '排名档', '商品数', 'GMV', '销售占比', '付费', '花费占比',
+                    '占比差', '占比差(pp)', '预算错配金额', 'ROI', '未来7日建议调整金额',
+                    '待回收金额', '建议增加金额', '零GMV消耗', '显著错配',
+                )
+                if column in tiers.columns
+            ]
+            tier_columns.extend(
+                column for column in tiers.columns if column not in tier_columns
+            )
+            tier_table = tiers[tier_columns] if tier_columns else tiers
+            tier_column_config = {
+                '销售占比': st.column_config.PercentColumn('销售占比'),
+                '花费占比': st.column_config.PercentColumn('花费占比'),
+                'GMV': st.column_config.NumberColumn('GMV', format='¥%.2f'),
+                '付费': st.column_config.NumberColumn('付费', format='¥%.2f'),
+                '占比差': st.column_config.PercentColumn(
+                    '占比差',
+                    help='花费占比-销售占比，正数为超投',
+                ),
+                '占比差(pp)': st.column_config.NumberColumn(
+                    '占比差（百分点）',
+                    format='%.2f',
+                    help='花费占比-销售占比，正数为超投',
+                ),
+                '预算错配金额': st.column_config.NumberColumn('预算错配金额', format='¥%.2f'),
+                'ROI': st.column_config.NumberColumn('ROI', format='%.2f'),
+                '未来7日建议调整金额': st.column_config.NumberColumn('未来7日建议调整金额', format='¥%.2f'),
+                '待回收金额': st.column_config.NumberColumn('待回收金额', format='¥%.2f'),
+                '建议增加金额': st.column_config.NumberColumn('建议增加金额', format='¥%.2f'),
+                '零GMV消耗': st.column_config.NumberColumn('零GMV消耗', format='¥%.2f'),
+            }
+            st.dataframe(
+                tier_table,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    column: config
+                    for column, config in tier_column_config.items()
+                    if column in tier_table.columns
+                },
             )
 
-        llm_context = {
-            "店铺": shop,
-            "周期": (st.session_state.get('cat_ctx') or {}).get('period_choice', period_choice),
-            "数据日期": st.session_state.get('cur_date'),
-            "版本": APP_VERSION,
-        }
-        llm_task_payload = build_task_payload(selected_task.to_dict(), context=llm_context)
-        llm_store = FeedbackStore()
-        llm_learning_context = llm_store.build_learning_context(llm_task_payload)
+    with plan_tab:
         st.caption(
-            f"历史反馈匹配：{llm_learning_context['matched_count']} 条｜"
-            f"本地反馈目录：{llm_store.root}｜密钥仅从环境变量 {provider_spec.api_key_env} 读取"
+            "合集计划只给父级诊断，勿把商品建议重复落成预算；"
+            "不得推断计划名称/计划组/预算/出价。"
         )
-
-        llm_config_error = ""
-        try:
-            llm_key_ready = provider_key_available(llm_provider)
-        except LLMAdvisorError as exc:
-            llm_key_ready = False
-            llm_config_error = str(exc)
-        if llm_config_error:
-            st.error(llm_config_error)
-        elif not llm_key_ready:
-            st.info(f"尚未配置 {provider_spec.api_key_env}，配置后即可调用；现有MetoX规则任务不受影响。")
-
-        llm_cache_key = f"{llm_task_payload['task_key']}|{llm_provider}|{llm_model}"
-        if st.button(
-            "生成 / 刷新大模型建议",
-            type="primary",
-            disabled=not llm_key_ready,
-            key=f"llm_generate_{llm_task_payload['task_key']}",
-        ):
-            try:
-                with st.spinner("正在复核当前任务……"):
-                    llm_recommendation = call_advisor(
-                        provider=llm_provider,
-                        model=llm_model,
-                        task=selected_task.to_dict(),
-                        context=llm_context,
-                        feedback_context=llm_learning_context,
-                    )
-                    llm_store.record_recommendation(
-                        llm_recommendation,
-                        llm_recommendation["task_payload"],
-                    )
-                st.session_state["llm_recommendations"][llm_cache_key] = llm_recommendation
-                st.success("建议已生成并保存到本地反馈记录；尚未执行任何推广动作。")
-            except (LLMAdvisorError, FeedbackValidationError, OSError) as exc:
-                st.error(f"大模型建议生成失败：{exc}")
-
-        llm_recommendation = st.session_state["llm_recommendations"].get(llm_cache_key)
-        if llm_recommendation:
-            advice_col1, advice_col2, advice_col3 = st.columns(3)
-            advice_col1.metric("模型建议", llm_recommendation["recommendation"])
-            advice_col2.metric(
-                "预算动作",
-                llm_recommendation["budget_action"],
-                f"{llm_recommendation['budget_change_percent']:+.1f}%",
-            )
-            advice_col3.metric("可信度", llm_recommendation["confidence"])
-            st.write(f"**理由：** {llm_recommendation['reason']}")
-            st.write("**证据：** " + "；".join(llm_recommendation["evidence"]))
-            if llm_recommendation["risks"]:
-                st.write("**风险：** " + "；".join(llm_recommendation["risks"]))
-            st.write(
-                f"**观察期：** {llm_recommendation['observation_days']} 天｜"
-                f"**成功标准：** {llm_recommendation['success_criteria']}｜"
-                f"**停止条件：** {llm_recommendation['stop_conditions']}"
-            )
-            if llm_recommendation["needs_manual_review"]:
-                st.warning("该建议必须人工复核。" + "；".join(llm_recommendation["guardrail_notes"]))
-
-            with st.expander("一键反馈给MetoX", expanded=True):
-                st.caption("直接点击“采纳/驳回/暂缓”即可；只有修改后采纳时建议补充实际动作和预算。")
-                feedback_action = st.text_input(
-                    "实际执行动作（可选）",
-                    value="",
-                    key=f"llm_actual_action_{llm_recommendation['recommendation_id']}",
+        if plans.empty:
+            st.info("暂无推广计划管理数据。")
+        else:
+            plan_columns = [
+                column for column in (
+                    '序号', '计划ID', '所属渠道', '商品数', '计划类型', '计划经营结构',
+                    '周期花费', '归因成交', 'ROI', '方向证据', '计划管理建议',
                 )
-                feedback_budget_cols = st.columns(2)
-                with feedback_budget_cols[0]:
-                    feedback_budget_before = st.text_input(
-                        "调整前预算（可选）",
-                        value="",
-                        key=f"llm_budget_before_{llm_recommendation['recommendation_id']}",
-                    )
-                with feedback_budget_cols[1]:
-                    feedback_budget_after = st.text_input(
-                        "调整后预算（可选）",
-                        value="",
-                        key=f"llm_budget_after_{llm_recommendation['recommendation_id']}",
-                    )
-                feedback_reason = st.text_area(
-                    "修改或驳回原因（对应情形建议填写）",
-                    value="",
-                    height=80,
-                    key=f"llm_feedback_reason_{llm_recommendation['recommendation_id']}",
-                )
-                feedback_buttons = st.columns(4)
-                feedback_decision = None
-                for button_col, decision in zip(feedback_buttons, ("采纳", "修改后采纳", "驳回", "暂缓")):
-                    if button_col.button(
-                        decision,
-                        width="stretch",
-                        key=f"llm_feedback_{decision}_{llm_recommendation['recommendation_id']}",
-                    ):
-                        feedback_decision = decision
-                if feedback_decision:
-                    if feedback_decision in ("修改后采纳", "驳回") and not feedback_reason.strip():
-                        st.warning("为便于后续学习，修改后采纳或驳回时请填写原因。")
-                    else:
-                        try:
-                            feedback_record = llm_store.record_feedback(
-                                llm_recommendation,
-                                llm_recommendation["task_payload"],
-                                decision=feedback_decision,
-                                actual_action=feedback_action,
-                                budget_before=feedback_budget_before,
-                                budget_after=feedback_budget_after,
-                                reason=feedback_reason,
-                            )
-                            st.session_state["llm_feedback_status"][
-                                llm_recommendation["recommendation_id"]
-                            ] = feedback_record
-                            st.success(
-                                f"已反馈：{feedback_decision}｜反馈ID：{feedback_record['feedback_id']}"
-                            )
-                        except (FeedbackValidationError, OSError) as exc:
-                            st.error(f"反馈保存失败：{exc}")
-
-            saved_feedback = st.session_state["llm_feedback_status"].get(
-                llm_recommendation["recommendation_id"]
-            )
-            if saved_feedback:
-                with st.expander("回填后续结果（可选）", expanded=False):
-                    outcome_days = st.number_input(
-                        "观察天数",
-                        min_value=1,
-                        max_value=90,
-                        value=int(llm_recommendation["observation_days"]),
-                        step=1,
-                        key=f"llm_outcome_days_{saved_feedback['feedback_id']}",
-                    )
-                    outcome_cols = st.columns(3)
-                    with outcome_cols[0]:
-                        outcome_gmv = st.text_input(
-                            "观察期GMV（可选）",
-                            key=f"llm_outcome_gmv_{saved_feedback['feedback_id']}",
-                        )
-                    with outcome_cols[1]:
-                        outcome_spend = st.text_input(
-                            "观察期花费（可选）",
-                            key=f"llm_outcome_spend_{saved_feedback['feedback_id']}",
-                        )
-                    with outcome_cols[2]:
-                        outcome_roi = st.text_input(
-                            "观察期投产（可选）",
-                            key=f"llm_outcome_roi_{saved_feedback['feedback_id']}",
-                        )
-                    outcome_note = st.text_input(
-                        "结果备注（可选）",
-                        key=f"llm_outcome_note_{saved_feedback['feedback_id']}",
-                    )
-                    if st.button(
-                        "保存后续结果",
-                        key=f"llm_outcome_save_{saved_feedback['feedback_id']}",
-                    ):
-                        try:
-                            raw_metrics = {
-                                "gmv": outcome_gmv.strip(),
-                                "spend": outcome_spend.strip(),
-                                "roi": outcome_roi.strip(),
-                            }
-                            outcome_metrics = {
-                                key: float(value)
-                                for key, value in raw_metrics.items()
-                                if value
-                            }
-                            if not outcome_metrics:
-                                st.warning("至少填写一个后续结果指标。")
-                            else:
-                                outcome_record = llm_store.record_outcome(
-                                    feedback_id=saved_feedback["feedback_id"],
-                                    recommendation_id=llm_recommendation["recommendation_id"],
-                                    horizon_days=int(outcome_days),
-                                    metrics=outcome_metrics,
-                                    note=outcome_note,
-                                )
-                                st.success(f"后续结果已保存：{outcome_record['outcome_id']}")
-                        except (ValueError, FeedbackValidationError, OSError) as exc:
-                            st.error(f"后续结果保存失败：{exc}")
-
-        feedback_records = llm_store.list_feedback()
-        if feedback_records:
-            feedback_export = pd.DataFrame(feedback_records).to_csv(index=False).encode("utf-8-sig")
-            st.download_button(
-                "导出全部人工反馈 CSV",
-                data=feedback_export,
-                file_name=f"MetoX人工反馈_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-                key="llm_feedback_download",
+                if column in plans.columns
+            ] or list(plans.columns)
+            plan_table = plans[plan_columns]
+            plan_column_config = {
+                '序号': st.column_config.NumberColumn('序号', format='%d'),
+                '商品数': st.column_config.NumberColumn('商品数', format='%d'),
+                '周期花费': st.column_config.NumberColumn('周期花费', format='¥%.2f'),
+                '归因成交': st.column_config.NumberColumn('归因成交', format='¥%.2f'),
+                'ROI': st.column_config.NumberColumn('ROI', format='%.2f'),
+            }
+            st.dataframe(
+                plan_table,
+                width="stretch",
+                hide_index=True,
+                height=560,
+                column_config={
+                    column: config
+                    for column, config in plan_column_config.items()
+                    if column in plan_table.columns
+                },
             )
 
 # ── Tab 4: 执行表 ────────────────────────────────────────
@@ -3600,8 +4103,10 @@ with tab4:
     with ce1:
         if st.button("📥 生成执行表 Excel", key="export_exec"):
             with st.spinner(f"生成中({len(filtered)} 行，含品类投放表)..."):
-                st.session_state["exec_xlsx"] = export_execution_table(
-                    filtered, cat_ctx=export_cat_ctx, ranking_df=execution_df
+                st.session_state["exec_xlsx"] = _call_export_execution_table(
+                    filtered,
+                    cat_ctx=export_cat_ctx,
+                    ranking_df=execution_df,
                 )
                 st.session_state["exec_xlsx_meta"] = \
                     f"{len(filtered)}行 {datetime.now().strftime('%H:%M:%S')}"
@@ -3615,7 +4120,7 @@ with tab4:
         st.session_state.pop("all_xlsx", None)
         st.session_state.pop("all_xlsx_meta", None)
         all_sheets_download = partial(
-            export_all_sheets,
+            _call_export_all_sheets_with_budget_context,
             filtered,
             cat_ctx=export_cat_ctx,
             ranking_df=execution_df,

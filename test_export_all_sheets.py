@@ -6,54 +6,387 @@ import unittest
 
 import pandas as pd
 
-from core.exporter import export_all_sheets, export_execution_table
-from core.plan_metrics import summarize_plan_records
+from core.budget_decision import (
+    PRODUCT_COLUMNS,
+    build_budget_decision_context,
+    is_removed_budget_column,
+)
+from core.exporter import (
+    BUDGET_DECISION_PRODUCT_COLUMNS,
+    BUDGET_DECISION_PLAN_COLUMNS,
+    BUDGET_DECISION_PLAN_SHEET,
+    BUDGET_DECISION_PRODUCT_SHEET,
+    BUDGET_DECISION_REQUIRED_PRODUCT_COLUMNS,
+    BUDGET_DECISION_TIER_COLUMNS,
+    BUDGET_DECISION_TIER_SHEET,
+    EXECUTION_SHEET,
+    budget_decision_product_columns,
+    export_all_sheets,
+    export_execution_table,
+)
+from core.plan_metrics import (
+    FULL_PLAN_DETAIL_COLUMN,
+    summarize_plan_records,
+    serialize_full_plan_details,
+)
+
+
+BUDGET_DECISION_FORBIDDEN_PRODUCT_COLUMNS = [
+    '预算角色',
+    '预算动作',
+    '角色候选',
+    '角色状态',
+    '角色原因',
+    '角色风险',
+    '预算角色候选',
+    '预算角色状态',
+    '预算角色判定依据',
+    '人工业务标记',
+    '人工标记',
+    '本月主推',
+    '应季状态',
+    '季节状态',
+    '人工清仓',
+    'manual_marks',
+    'manual_state',
+    '推广商品定位',
+    '销售梯队',
+    '候选',
+    '状态',
+    '判定依据',
+    '风险',
+]
+
+
+def _plan_payload(records, period_days=7, actual_days=7):
+    payload = summarize_plan_records(
+        records,
+        period_days=period_days,
+        actual_days=actual_days,
+    )
+    payload[FULL_PLAN_DETAIL_COLUMN] = serialize_full_plan_details(records)
+    return payload
+
+
+def _budget_decision_source():
+    high_spend_plan = [{
+        '计划ID': 'P1001',
+        '计划名称': '关键词冲刺',
+        '计划类型': '关键词标准计划',
+        '所属渠道': '关键词',
+        '当前花费': 800,
+        '归因成交': 1200,
+        '加购': 20,
+        '点击': 100,
+        '当前状态': '投放中',
+    }]
+    low_spend_plan = [{
+        '计划ID': 'P2001',
+        '计划名称': '全站补量',
+        '计划类型': '全站推广',
+        '所属渠道': '全站',
+        '当前花费': 200,
+        '归因成交': 800,
+        '加购': 10,
+        '点击': 80,
+        '当前状态': '投放中',
+    }]
+    return pd.DataFrame([
+        {
+            '宝贝ID': '1001',
+            '款式主图': 'https://img.example/style-1001.jpg',
+            '货号': 'SKU-1001',
+            '淘宝类目': '连衣裙',
+            '商品定位': '冲刺款',
+            '综合等级': 'A',
+            '商品周期': '成长期',
+            '推广动作': '增加预算验证',
+            'GMV': 1000.0,
+            '付费': 800.0,
+            '商品访客数': 80,
+            '关键词': 800.0,
+            '人群': 0.0,
+            '全站': 0.0,
+            **_plan_payload(high_spend_plan),
+        },
+        {
+            '宝贝ID': '2001',
+            '款式主图': 'https://img.example/style-2001.jpg',
+            '货号': 'SKU-2001',
+            '淘宝类目': '半身裙',
+            '商品定位': '承接款',
+            '综合等级': 'B',
+            '商品周期': '成熟期',
+            '推广动作': '维持预算',
+            'GMV': 1000.0,
+            '付费': 200.0,
+            '商品访客数': 120,
+            '关键词': 0.0,
+            '人群': 0.0,
+            '全站': 200.0,
+            **_plan_payload(low_spend_plan),
+        },
+    ])
+
+
+def _context_frame(context, key):
+    value = context.get(key)
+    if isinstance(value, pd.DataFrame):
+        return value.copy()
+    return pd.DataFrame(value)
+
+
+def _by_clean_id(frame, column):
+    work = frame.copy()
+    work[column] = (
+        work[column]
+        .astype(str)
+        .str.replace(r'\.0$', '', regex=True)
+        .str.strip()
+    )
+    return work.set_index(column, drop=False)
+
+
+def _assert_excel_value(testcase, actual, expected):
+    if pd.isna(expected):
+        testcase.assertTrue(pd.isna(actual))
+        return
+    try:
+        expected_num = float(expected)
+        actual_num = float(actual)
+    except (TypeError, ValueError):
+        testcase.assertEqual(str(actual), str(expected))
+    else:
+        testcase.assertAlmostEqual(actual_num, expected_num, places=6)
+
+
+def _assert_no_removed_budget_columns(testcase, frame):
+    for column in frame.columns:
+        testcase.assertFalse(is_removed_budget_column(column), column)
+    for column in BUDGET_DECISION_FORBIDDEN_PRODUCT_COLUMNS:
+        testcase.assertNotIn(column, frame.columns)
 
 
 class ExportAllSheetsTests(unittest.TestCase):
-    def test_ai_task_view_sheet_is_exported_with_image_url(self):
-        image_url = "https://img.example/style-1001.jpg"
-        plan = summarize_plan_records([{
-            '计划ID': 'P1001', '当前花费': 100, '归因成交': 200,
-            '加购': 10, '点击': 50, '所属渠道': '关键词',
-        }], period_days=1, actual_days=1)
-        source = pd.DataFrame([{
-            '宝贝ID': '1001',
-            '款式主图': image_url,
-            '货号': 'SKU-1001',
-            '商品名称': '测试商品',
-            '淘宝类目': '连衣裙',
-            '综合等级': 'A',
-            '商品定位': '冲刺款',
-            '商品周期': '成长期',
-            'MetoX算法命中': '保护持有',
-            'MetoX算法分': 15,
-            'GMV': 1000,
-            '付费': 100,
-            '商品访客数': 40,
-            '关键词': 60,
-            '人群': 25,
-            '全站': 15,
-            **plan,
-        }])
+    def test_budget_product_export_reuses_canonical_product_columns(self):
+        expected = []
+        for column in PRODUCT_COLUMNS:
+            if column == '销售梯队':
+                column = '排名档'
+            if is_removed_budget_column(column):
+                continue
+            if column not in expected:
+                expected.append(column)
+        if '排名档' in expected:
+            expected.remove('排名档')
+        expected[expected.index('淘宝类目') + 1:expected.index('淘宝类目') + 1] = [
+            '排名档',
+        ]
 
-        workbook = export_all_sheets(source)
+        self.assertEqual(budget_decision_product_columns(), expected)
+        self.assertEqual(BUDGET_DECISION_PRODUCT_COLUMNS, expected)
+        for column in BUDGET_DECISION_REQUIRED_PRODUCT_COLUMNS:
+            self.assertIn(column, expected)
+        for column in BUDGET_DECISION_FORBIDDEN_PRODUCT_COLUMNS:
+            self.assertNotIn(column, expected)
+        for column in expected:
+            self.assertFalse(is_removed_budget_column(column), column)
+
+    def test_budget_decision_sheets_are_exported_from_context(self):
+        source = _budget_decision_source()
+        context = build_budget_decision_context(source)
+
+        workbook = export_all_sheets(source, budget_decision_context=context)
         excel = pd.ExcelFile(io.BytesIO(workbook))
 
-        self.assertIn('AI任务视图', excel.sheet_names)
-        tasks = pd.read_excel(io.BytesIO(workbook), sheet_name='AI任务视图')
-        self.assertEqual(len(tasks), 1)
-        self.assertEqual(tasks.loc[0, '款式主图'], image_url)
-        self.assertIn('AI任务类型', tasks.columns)
-        self.assertEqual(tasks.loc[0, '优先级'], 'P3')
-        self.assertEqual(
-            tasks.columns.get_loc('优先级'),
-            tasks.columns.get_loc('MetoX算法命中') + 1,
-        )
-        self.assertNotIn('商品名称', tasks.columns)
-        self.assertTrue(str(tasks.loc[0, 'AI任务类型']).strip())
+        self.assertIn(BUDGET_DECISION_PRODUCT_SHEET, excel.sheet_names)
+        self.assertIn(BUDGET_DECISION_TIER_SHEET, excel.sheet_names)
+        self.assertIn(BUDGET_DECISION_PLAN_SHEET, excel.sheet_names)
+        self.assertNotIn('AI任务视图', excel.sheet_names)
 
-    def test_no_paid_no_plan_completeness_is_exported_as_not_applicable(self):
+        products = pd.read_excel(
+            io.BytesIO(workbook), sheet_name=BUDGET_DECISION_PRODUCT_SHEET
+        )
+        expected_products = _context_frame(context, 'products')
+        exported_products = _by_clean_id(products, '宝贝ID')
+        context_products = _by_clean_id(expected_products, '宝贝ID')
+
+        for column in BUDGET_DECISION_REQUIRED_PRODUCT_COLUMNS:
+            self.assertIn(column, products.columns)
+        _assert_no_removed_budget_columns(self, products)
+
+        for exported_column, context_column in (
+            ('销售占比', '销售占比'),
+            ('花费占比', '花费占比'),
+            ('占比差(pp)', '占比差(pp)'),
+            ('预算错配金额', '预算错配金额'),
+            ('未来7日建议调整金额', '未来7日建议调整金额'),
+            ('预算匹配状态', '预算匹配状态'),
+            ('动作依据', '动作依据'),
+        ):
+            self.assertIn(exported_column, products.columns)
+            self.assertIn(context_column, expected_products.columns)
+            _assert_excel_value(
+                self,
+                exported_products.loc['1001', exported_column],
+                context_products.loc['1001', context_column],
+            )
+
+        self.assertEqual(exported_products.loc['1001', '排名档'], 'Top1-5')
+        self.assertNotIn('销售梯队', products.columns)
+        self.assertEqual(
+            products.columns.get_loc('排名档'),
+            products.columns.get_loc('淘宝类目') + 1,
+        )
+
+        tiers = pd.read_excel(io.BytesIO(workbook), sheet_name=BUDGET_DECISION_TIER_SHEET)
+        _assert_no_removed_budget_columns(self, tiers)
+        self.assertEqual(
+            tiers.columns.tolist()[:len(BUDGET_DECISION_TIER_COLUMNS)],
+            BUDGET_DECISION_TIER_COLUMNS,
+        )
+        self.assertEqual(
+            BUDGET_DECISION_TIER_COLUMNS.index('ROI'),
+            BUDGET_DECISION_TIER_COLUMNS.index('预算错配金额') + 1,
+        )
+
+        plans = pd.read_excel(io.BytesIO(workbook), sheet_name=BUDGET_DECISION_PLAN_SHEET)
+        _assert_no_removed_budget_columns(self, plans)
+        self.assertEqual(BUDGET_DECISION_PLAN_COLUMNS[0], '序号')
+        self.assertEqual(
+            plans.columns.tolist()[:len(BUDGET_DECISION_PLAN_COLUMNS)],
+            BUDGET_DECISION_PLAN_COLUMNS,
+        )
+        expected_plans = _context_frame(context, 'plans')
+        exported_plans = _by_clean_id(plans, '计划ID')
+        context_plans = _by_clean_id(expected_plans, '计划ID')
+        self.assertEqual(exported_plans.loc['P1001', '计划ID'], 'P1001')
+        expected_plan_type_column = (
+            '计划类型' if '计划类型' in expected_plans.columns else '计划商品类型'
+        )
+        self.assertEqual(
+            exported_plans.loc['P1001', '计划类型'],
+            context_plans.loc['P1001', expected_plan_type_column],
+        )
+
+    def test_budget_decision_export_preserves_passed_context_and_drops_legacy_aliases(self):
+        source = pd.DataFrame([{
+            '宝贝ID': 'CTX1',
+            '淘宝类目': '连衣裙',
+            'GMV': 0.0,
+            '付费': 0.0,
+            '商品访客数': 0,
+        }])
+        context = {
+            'products': pd.DataFrame([{
+                '宝贝ID': 'CTX1',
+                '推广商品定位': '旧字段不应导出',
+                '销售梯队': 'S1',
+                '预算角色': 'ZT',
+                '预算动作': '保持',
+                '角色候选': 'ZT',
+                '角色状态': '人工确认冻结',
+                '角色原因': '运营手工标记',
+                '候选': '是',
+                '预算匹配状态': '冻结透传状态',
+                '状态': '人工确认冻结',
+                '动作依据': '冻结透传依据',
+                '判定依据': '运营手工标记',
+                '风险': '极高退款',
+                '人工业务标记': '本月主推',
+                '人工标记': '人工清仓',
+                'manual_marks': 'manual-a',
+                '近7日日均GMV': 123.45,
+                '上一7日日均GMV': 100.0,
+                'GMV趋势率': 0.2345,
+                'TH_MAIN': 120.0,
+                'TH_MID': 80.0,
+                '阈值版本': 'store-freeze-v1',
+            }]),
+            'tiers': pd.DataFrame([{
+                '销售梯队': 'S1',
+                '商品数': 1,
+                '错配金额': 999,
+                '预算错配金额': 123,
+                'ROI': 2.5,
+                '预算角色': 'ZT',
+                '预算动作': '保持',
+                '角色原因': '旧角色依据',
+                '人工业务标记': '本月主推',
+            }]),
+            'plans': pd.DataFrame([{
+                '序号': 1,
+                '计划ID': 'PCTX1',
+                '计划名称': '关键词测试',
+                '所属渠道': '关键词',
+                '商品数': 1,
+                '计划类型': '单商品计划',
+                '周期花费': 100,
+                '归因成交': 250,
+                'ROI': 2.5,
+                '方向证据': '测试',
+                '计划管理建议': '按商品预算动作复核；不补充计划预算或出价',
+                '预算角色': 'ZT',
+                '预算动作': '保持',
+                '角色状态': '旧状态',
+                '人工标记': '人工清仓',
+            }]),
+        }
+
+        workbook = export_all_sheets(source, budget_decision_context=context)
+
+        products = pd.read_excel(
+            io.BytesIO(workbook), sheet_name=BUDGET_DECISION_PRODUCT_SHEET
+        )
+        _assert_no_removed_budget_columns(self, products)
+        for column in BUDGET_DECISION_REQUIRED_PRODUCT_COLUMNS:
+            self.assertIn(column, products.columns)
+        self.assertEqual(products.loc[0, '排名档'], 'Top1-5')
+        self.assertEqual(
+            products.columns.get_loc('排名档'),
+            products.columns.get_loc('淘宝类目') + 1,
+        )
+        self.assertEqual(products.loc[0, '预算匹配状态'], '冻结透传状态')
+        self.assertEqual(products.loc[0, '动作依据'], '冻结透传依据')
+        self.assertEqual(products.loc[0, '预算风险'], '极高退款')
+        self.assertEqual(products.loc[0, '近7日日均GMV'], 123.45)
+        self.assertEqual(products.loc[0, '上一7日日均GMV'], 100.0)
+        self.assertEqual(products.loc[0, 'GMV趋势率'], 0.2345)
+        self.assertEqual(products.loc[0, 'TH_MAIN'], 120)
+        self.assertEqual(products.loc[0, 'TH_MID'], 80)
+        self.assertEqual(products.loc[0, '阈值版本'], 'store-freeze-v1')
+
+        tiers = pd.read_excel(io.BytesIO(workbook), sheet_name=BUDGET_DECISION_TIER_SHEET)
+        _assert_no_removed_budget_columns(self, tiers)
+        self.assertEqual(
+            tiers.columns.tolist()[:len(BUDGET_DECISION_TIER_COLUMNS)],
+            BUDGET_DECISION_TIER_COLUMNS,
+        )
+        self.assertEqual(
+            tiers.columns.get_loc('ROI'),
+            tiers.columns.get_loc('预算错配金额') + 1,
+        )
+        self.assertIn('预算错配金额', tiers.columns)
+        self.assertNotIn('错配金额', tiers.columns)
+        self.assertNotIn('销售梯队', tiers.columns)
+        self.assertEqual(tiers.loc[0, '排名档'], 'Top1-5')
+        self.assertEqual(tiers.loc[0, '预算错配金额'], 123)
+        self.assertEqual(tiers.loc[0, 'ROI'], 2.5)
+
+        plans = pd.read_excel(io.BytesIO(workbook), sheet_name=BUDGET_DECISION_PLAN_SHEET)
+        _assert_no_removed_budget_columns(self, plans)
+        self.assertEqual(
+            plans.columns.tolist()[:len(BUDGET_DECISION_PLAN_COLUMNS)],
+            BUDGET_DECISION_PLAN_COLUMNS,
+        )
+        self.assertEqual(plans.columns[0], '序号')
+        self.assertEqual(plans.loc[0, '序号'], 1)
+        self.assertEqual(plans.loc[0, '计划ID'], 'PCTX1')
+        self.assertEqual(plans.loc[0, 'ROI'], 2.5)
+        self.assertNotIn('预算动作', plans.loc[0, '计划管理建议'])
+        self.assertIn('商品调整方向', plans.loc[0, '计划管理建议'])
+
+    def test_no_paid_no_plan_exports_budget_tabs_without_ai_task_view(self):
         source = pd.DataFrame([{
             '宝贝ID': '1002',
             '款式主图': 'https://img.example/style-1002.jpg',
@@ -79,15 +412,19 @@ class ExportAllSheetsTests(unittest.TestCase):
         }])
 
         workbook = export_all_sheets(source)
-        tasks = pd.read_excel(io.BytesIO(workbook), sheet_name='AI任务视图')
+        excel = pd.ExcelFile(io.BytesIO(workbook))
 
-        self.assertEqual(tasks.loc[0, '计划覆盖率'], '无计划')
-        self.assertEqual(tasks.loc[0, '计划数据完整度'], '无计划')
+        self.assertEqual(excel.sheet_names[0], EXECUTION_SHEET)
+        self.assertIn(BUDGET_DECISION_PRODUCT_SHEET, excel.sheet_names)
+        self.assertIn(BUDGET_DECISION_TIER_SHEET, excel.sheet_names)
+        self.assertIn(BUDGET_DECISION_PLAN_SHEET, excel.sheet_names)
+        self.assertNotIn('AI任务视图', excel.sheet_names)
 
     def test_category_investment_and_roi_sheet_is_in_both_downloads(self):
-        plan = summarize_plan_records([{
+        plan = _plan_payload([{
             '计划ID': 'P1003', '当前花费': 100, '归因成交': 200,
             '加购': 10, '点击': 50, '所属渠道': '关键词',
+            '计划类型': '关键词标准计划',
         }], period_days=7, actual_days=7)
         source = pd.DataFrame([{
             '宝贝ID': '1003',
