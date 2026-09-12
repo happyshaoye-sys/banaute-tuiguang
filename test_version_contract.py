@@ -16,8 +16,8 @@ class VersionContractTests(unittest.TestCase):
     def test_version_json_is_the_application_identity(self):
         info = json.loads((ROOT / "VERSION.json").read_text(encoding="utf-8"))
         self.assertEqual(info["product"], "MetoX")
-        self.assertEqual(info["version"], "2.52")
-        self.assertEqual(info["release_date"], "2026-09-11")
+        self.assertEqual(info["version"], "2.53")
+        self.assertEqual(info["release_date"], "2026-09-12")
         self.assertEqual(info["external_strategy_version"], "v9.3")
         self.assertEqual(info["rule_versions"]["refund_risk"], "2026-08-02")
         self.assertEqual(info["rule_versions"]["startup_launcher"], "2026-08-02")
@@ -71,7 +71,7 @@ class VersionContractTests(unittest.TestCase):
         self.assertEqual(info["rule_versions"]["budget_role_rules"], "2026-09-09")
         self.assertEqual(info["rule_versions"]["budget_threshold_coverage"], "2026-09-09")
         self.assertEqual(version.VERSION_INFO, info)
-        self.assertEqual(version.DISPLAY_VERSION, "MetoX v2.52")
+        self.assertEqual(version.DISPLAY_VERSION, "MetoX v2.53")
 
     def test_app_imports_version_instead_of_assigning_one(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
@@ -106,12 +106,12 @@ class VersionContractTests(unittest.TestCase):
 
     def test_current_operator_documents_show_v2_contract(self):
         documents = {
-            "README.md": "MetoX v2.52",
-            "README_离线使用说明.txt": "MetoX v2.52",
-            "第三方使用说明_先看这个.txt": "MetoX v2.52",
-            "半自动推广工具_数据源与指标说明.md": "MetoX v2.52",
-            "MetoX2.52_使用说明与运营操作顺序.md": "MetoX v2.52",
-            "MetoX2.52_新运营培训手册.html": "MetoX2.52",
+            "README.md": "MetoX v2.53",
+            "README_离线使用说明.txt": "MetoX v2.53",
+            "第三方使用说明_先看这个.txt": "MetoX v2.53",
+            "半自动推广工具_数据源与指标说明.md": "MetoX v2.53",
+            "MetoX2.53_使用说明与运营操作顺序.md": "MetoX v2.53",
+            "MetoX2.53_新运营培训手册.html": "MetoX2.53",
         }
         for relative, marker in documents.items():
             with self.subTest(relative=relative):

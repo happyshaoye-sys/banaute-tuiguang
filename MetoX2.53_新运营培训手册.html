@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>MetoX2.53 新运营培训手册</title>
+<style>
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; margin: 0; background: #f5f6f8; color: #1f2329; }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 24px 64px; background: #fff; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 32px 0 10px; padding-left: 10px; border-left: 4px solid #2f6feb; }
+  h3 { font-size: 16px; margin: 20px 0 8px; color: #2f6feb; }
+  p, li, td, th { font-size: 14px; line-height: 1.75; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 6px; }
+  th, td { border: 1px solid #dfe3e8; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f0f4fb; font-weight: 600; }
+  code { background: #f2f3f5; padding: 1px 5px; border-radius: 3px; font-family: Consolas, monospace; }
+  .note { background: #fff8e6; border-left: 4px solid #f0a020; padding: 8px 12px; margin: 10px 0; }
+  .warn { background: #fdecec; border-left: 4px solid #d64545; padding: 8px 12px; margin: 10px 0; }
+  header { border-bottom: 1px solid #e5e8ee; padding-bottom: 14px; }
+</style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>MetoX2.53 新运营培训手册</h1>
+      <p>版本：MetoX v2.53 ｜ 发布日期：2026-09-12 ｜ 外部策略：v9.3（未变更）</p>
+    </header>
+
+    <section>
+      <h2>一、v2.53 本次变化：新品视图</h2>
+
+      <h3>1. 新增两列“日均”指标</h3>
+      <table>
+        <thead><tr><th>字段</th><th>算 法</th><th>怎么读</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>日均访客</code></td>
+            <td><code>D1_D30_商品访客数 ÷ 新品年龄</code></td>
+            <td>从 D1 累计到分析日的总访客，摊到每天是多少。用于判断“这款一天能拿到多少流量”。</td>
+          </tr>
+          <tr>
+            <td><code>日均GMV</code></td>
+            <td><code>D1_D30_GMV ÷ 新品年龄</code></td>
+            <td>从 D1 累计到分析日的 GMV，摊到每天是多少。用于判断“这款一天能卖多少钱”。</td>
+          </tr>
+        </tbody>
+      </table>
+      <p><code>新品年龄</code> = 分析日 − 首次在线发现日 + 1。<strong>新品年龄为 0（当天刚发现）时两列留空</strong>，不按 0 计算。</p>
+      <p class="note">留空 = “还没有一天数据”，不等于“日均 0”。看到空白不要当成卖不动，先看 <code>首次在线发现日</code> 是否就是分析日当天。</p>
+
+      <h3>2. 前 14 列固定顺序</h3>
+      <p><code>款式主图 → 图片 → 货号 → 关联宝贝ID → 淘宝类目 → ERP建档时间 → 首次在线发现日 → 新品年龄 → D1_D30_商品访客数 → D1_D30_商品加购件数 → D1_D30_GMV → D1_D30_商品加购率 → 日均访客 → 日均GMV</code>，其余列顺延。</p>
+      <ul>
+        <li><code>图片</code> 取 <code>款式主图</code> 同一地址，页面上以缩略图渲染，只为肉眼核对款式，不参与任何判定。</li>
+        <li>页面显示格式：日均访客 2 位小数、日均GMV 2 位小数带 ¥、<code>D1_D30_商品加购率</code> 为百分比。</li>
+        <li><strong>看板与导出的列顺序完全一致</strong>，页面列偏好只影响页面显示，不影响导出。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>二、预算决策看板（v2.50 起，v2.52 列序变更）</h2>
+      <p>看板表按固定 40 列输出，其中前三段最常用：</p>
+      <table>
+        <thead><tr><th>列</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td><code>决策角色</code></td><td><code>ZT主推 / ZT趋势预警 / TC投产 / TD梯队 / TD候选 / CS测试 / QC回收 / 清理 / 观察</code></td></tr>
+          <tr><td><code>角色闸门</code></td><td><code>放行加投 / 禁止加投 / 测试封顶</code>——<strong>闸门只做减法</strong>：禁止加投→本轮加投归零；测试封顶→测试期加投最多 500 元/周；放行加投→按既有错配规则原样执行。回收金额不受角色层影响。</td></tr>
+          <tr><td><code>未来7日建议调整金额</code></td><td>在既有错配规则基础上，再乘角色系数。<code>0</code> 往往是“付费样本不足 100 元”或“占比差在 ±5pp 内”，属正常结论，不是漏算。</td></tr>
+          <tr><td><code>链接投产</code></td><td>口径 = 全链接 GMV ÷ 付费（含自然流量）。与纯广告归因口径的 <code>推广投产</code> 并列对照。</td></tr>
+        </tbody>
+      </table>
+      <p>判定基准固定为<strong>近 7 日</strong>（<code>近7日日均GMV = 近7日窗口GMV ÷ 7</code>），与左侧“时间周期”无关：换周期只改看数口径，不改角色结论。</p>
+
+      <h3>阈值由运营手工冻结，引擎只给建议</h3>
+      <ul>
+        <li><code>TH_MAIN</code> = 50% GMV 覆盖分界；<code>TH_MID</code> = 80% GMV 覆盖分界；单位元/天，由 7 天窗口 × 8 个窗口的覆盖法取中位数得到建议值。</li>
+        <li>看板内展开 <code>🔒 阈值冻结（由运营确认）</code>：填运营口径 → 点 <code>🔒 冻结 / 更新</code>；也可 <code>✅ 采纳引擎建议并冻结</code> 或 <code>↩ 清除冻结</code>。</li>
+        <li>冻结后角色结论立即重算，无需重新加载数据；冻结值与建议值偏离超过 ±30% 时只给复核提示，不自动改。</li>
+      </ul>
+      <p class="warn">首次使用请先冻结一次阈值，否则会一直显示“未冻结”，角色层整体按“未判定 + 放行加投”返回（不影响既有预算决策，但角色列没有指导意义）。</p>
+    </section>
+
+    <section>
+      <h2>三、操作顺序</h2>
+      <ol>
+        <li>侧边栏选择分析日期与时间周期，点击“加载并处理数据”。</li>
+        <li>进 <code>💰 预算决策看板</code>：先看摘要（周期GMV/花费、待回收、建议增加、零GMV消耗）。</li>
+        <li>展开 <code>🔒 阈值冻结</code>，确认或冻结本期阈值。</li>
+        <li>看 <code>🎯 决策角色分布</code> 掌握结构，再按 <code>决策角色 + 角色闸门 + 未来7日建议调整金额</code> 逐款执行。</li>
+        <li>进新品视图：进 Tab 后先点“加载新品历史 / 刷新新品历史”，再按前 14 列看款式与日均表现。</li>
+        <li>交付用页面下载按钮；“导出全部Sheet”包含 <code>预算决策看板 / 排名档对齐 / 推广计划管理</code> 三张表。</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>四、边界（本次没改的事）</h2>
+      <ul>
+        <li>不改 MetoX 算法、36宫格商品定位/商品周期标签、动作逻辑、退款规则与外部 v9.3 策略。</li>
+        <li>不改新品判定门槛（D15/D30/D45、累计访客 300、加购率基准），本次只加展示列与列序。</li>
+        <li>库存与盈亏平衡线只做提示，不参与角色与预算判定；<code>TH_MAIN / TH_MID</code> 是店铺级常量，页面默认隐藏，导出保留供审计。</li>
+        <li>角色层关闭时角色列仍存在但取值为空，表的形状不随开关变化。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>五、启动</h2>
+      <ol>
+        <li>完整解压交付 ZIP，不要直接在压缩包内运行。</li>
+        <li>双击 <code>启动MetoX半自动推广工具.bat</code>。</li>
+        <li>浏览器会自动打开；实际地址以启动窗口中的 <code>METOX_URL=</code> 为准。</li>
+        <li>使用结束后关闭启动窗口即可停止服务。</li>
+      </ol>
+    </section>
+  </main>
+</body>
+</html>

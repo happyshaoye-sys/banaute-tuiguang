@@ -226,8 +226,11 @@ NEW_PRODUCT_HISTORY_DAYS = 90
 NEW_PRODUCT_CREATIVE_HISTORY_DAYS = 45
 NEW_PRODUCT_BUSINESS_HISTORY_DAYS = 45
 NEW_PRODUCT_LIFECYCLE_COLUMNS = [
-    '款式主图', '货号', '关联宝贝ID', '淘宝类目', 'ERP建档时间',
-    '首次在线发现日', '新品年龄', '判定轮次', 'D15结果', 'D30结果', '当前结果',
+    '款式主图', '图片', '货号', '关联宝贝ID', '淘宝类目', 'ERP建档时间',
+    '首次在线发现日', '新品年龄',
+    'D1_D30_商品访客数', 'D1_D30_商品加购件数', 'D1_D30_GMV', 'D1_D30_商品加购率',
+    '日均访客', '日均GMV',
+    '判定轮次', 'D15结果', 'D30结果', '当前结果',
     '动作可执行', '库存提示', '保护状态', '保护证据', '流量验证', '本轮成交',
     '判定原因', '下架阻断原因', '样本充分性',
     '保护因素', '风险因素', '预测日期',
@@ -2596,6 +2599,12 @@ def _render_new_product_view(new_product_ctx):
                 height=620,
                 column_config={
                     '款式主图': st.column_config.LinkColumn('款式主图链接'),
+                    '图片': st.column_config.ImageColumn('图片'),
+                    '日均访客': st.column_config.NumberColumn('日均访客', format='%.2f'),
+                    '日均GMV': st.column_config.NumberColumn('日均GMV', format='¥%.2f'),
+                    'D1_D30_商品加购率': st.column_config.NumberColumn(
+                        'D1_D30加购率', format='percent',
+                    ),
                     'W2_商品加购率': st.column_config.NumberColumn('W2加购率', format="percent"),
                     'W4_商品加购率': st.column_config.NumberColumn('W4加购率', format="percent"),
                 },

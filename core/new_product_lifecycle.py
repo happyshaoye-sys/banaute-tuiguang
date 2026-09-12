@@ -233,6 +233,8 @@ def aggregate_lifecycle_windows(
         for column in DIMENSION_COLUMNS:
             if column in part.columns:
                 row[column] = _last_non_empty(part[column])
+        # 图片：与款式主图同源（页面按图片渲染，导出保留链接文本）
+        row["图片"] = row.get("款式主图", "")
         if "价格段" not in row or not row.get("价格段"):
             price = 0.0
             if "件单价" in part.columns and float(part["件单价"].max()) > 0:
@@ -253,6 +255,8 @@ def aggregate_lifecycle_windows(
             _write_window_metrics(row, label, window_part)
         for label, source_windows in CUMULATIVE_SPECS.items():
             _write_cumulative_metrics(row, label, source_windows)
+        # 日均访客 / 日均GMV = D1_D30 累计值 ÷ 新品年龄（年龄为 0 时留空，避免除零）
+        _write_daily_averages(row)
         current_end_age = max(0, min(int(age), 45))
         current_part = part[
             (part["新品年龄"] >= 1)
@@ -292,6 +296,18 @@ def _write_cart_rate(row: dict, prefix: str) -> None:
     row[f"{prefix}_商品加购率"] = (
         float(row.get(f"{prefix}_商品加购件数", 0.0)) / visitors if visitors > 0 else np.nan
     )
+
+
+def _write_daily_averages(row: dict) -> None:
+    """日均访客 = D1_D30_商品访客数 ÷ 新品年龄；日均GMV = D1_D30_GMV ÷ 新品年龄。"""
+    raw_age = pd.to_numeric(row.get("新品年龄", 0.0), errors="coerce")
+    age = 0 if pd.isna(raw_age) else int(raw_age)
+    if age <= 0:
+        row["日均访客"] = np.nan
+        row["日均GMV"] = np.nan
+        return
+    row["日均访客"] = float(row.get("D1_D30_商品访客数", 0.0)) / age
+    row["日均GMV"] = float(row.get("D1_D30_GMV", 0.0)) / age
 
 
 def _write_checkpoint_state(row: dict, part: pd.DataFrame, checkpoint: str, max_age: int) -> None:

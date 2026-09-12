@@ -146,5 +146,65 @@ class NewProductLifecycleAggregationTests(unittest.TestCase):
         self.assertEqual(row["D1_D30_GMV"], 0.0)
 
 
+class NewProductDailyAverageTests(unittest.TestCase):
+    def test_daily_average_fields_and_image_column(self):
+        facts = pd.DataFrame([
+            _day(1, "1001", "SKU-A", 10, 1, gmv=100),
+            _day(2, "1001", "SKU-A", 20, 3, gmv=200),
+        ]).assign(款式主图="https://img.example/1001.jpg")
+
+        row = aggregate_lifecycle_windows(
+            facts,
+            _first_seen(("SKU-A", "1001")),
+            as_of_date="2026-08-02",
+        ).iloc[0]
+
+        self.assertEqual(int(row["新品年龄"]), 2)
+        self.assertEqual(row["D1_D30_商品访客数"], 30.0)
+        self.assertEqual(row["D1_D30_GMV"], 300.0)
+        # 日均访客 = D1_D30_商品访客数 ÷ 新品年龄；日均GMV = D1_D30_GMV ÷ 新品年龄
+        self.assertAlmostEqual(row["日均访客"], 15.0)
+        self.assertAlmostEqual(row["日均GMV"], 150.0)
+        self.assertAlmostEqual(row["日均访客"], row["D1_D30_商品访客数"] / row["新品年龄"])
+        self.assertAlmostEqual(row["日均GMV"], row["D1_D30_GMV"] / row["新品年龄"])
+        # 图片与款式主图同源（页面按图片渲染）
+        self.assertEqual(row["图片"], "https://img.example/1001.jpg")
+
+    def test_daily_average_is_blank_when_age_is_zero(self):
+        from core.new_product_lifecycle import _write_daily_averages
+
+        row = {"新品年龄": 0, "D1_D30_商品访客数": 10.0, "D1_D30_GMV": 100.0}
+        _write_daily_averages(row)
+
+        self.assertTrue(pd.isna(row["日均访客"]))
+        self.assertTrue(pd.isna(row["日均GMV"]))
+
+    def test_new_product_view_column_order_contract(self):
+        import ast
+        from pathlib import Path
+
+        from core.exporter import NEW_PRODUCT_LIFECYCLE_COLUMNS as export_columns
+
+        expected_head = [
+            '款式主图', '图片', '货号', '关联宝贝ID', '淘宝类目', 'ERP建档时间',
+            '首次在线发现日', '新品年龄',
+            'D1_D30_商品访客数', 'D1_D30_商品加购件数', 'D1_D30_GMV', 'D1_D30_商品加购率',
+            '日均访客', '日均GMV',
+        ]
+        self.assertEqual(list(export_columns[:len(expected_head)]), expected_head)
+
+        # app.py 的清单用 AST 读取（不执行 Streamlit 顶层代码），前置列必须与导出一致
+        app_source = (Path(__file__).resolve().parent / 'app.py').read_text(encoding='utf-8-sig')
+        app_columns = None
+        for node in ast.parse(app_source).body:
+            if isinstance(node, ast.Assign) and any(
+                getattr(target, 'id', '') == 'NEW_PRODUCT_LIFECYCLE_COLUMNS'
+                for target in node.targets
+            ):
+                app_columns = ast.literal_eval(node.value)
+        self.assertIsNotNone(app_columns)
+        self.assertEqual(list(app_columns[:len(expected_head)]), expected_head)
+
+
 if __name__ == "__main__":
     unittest.main()
