@@ -60,8 +60,10 @@ class LauncherTests(unittest.TestCase):
                 root = Path(temp_dir)
                 try:
                     launcher.prepare_application_environment(root)
-                    self.assertEqual(Path.cwd(), root)
-                    self.assertEqual(Path(sys.path[0]), root)
+                    # 用 resolve 归一化比较：本机 TEMP 可能是 8.3 短路径（ADMINI~1），
+                    # 而 launcher 写入 sys.path 的是 resolve() 后的长路径。
+                    self.assertEqual(Path.cwd().resolve(), root.resolve())
+                    self.assertEqual(Path(sys.path[0]).resolve(), root.resolve())
                 finally:
                     os.chdir(original_cwd)
         finally:

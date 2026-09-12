@@ -14,6 +14,7 @@ import pandas as pd
 
 from core.budget_decision import (
     BUDGET_DECISION_ROLE_COLUMNS,
+    PRODUCT_COLUMNS,
     build_budget_decision_context,
     is_removed_budget_column,
 )
@@ -533,8 +534,10 @@ class BudgetDecisionRoleLayerTests(unittest.TestCase):
         explicit_off = build_budget_decision_context(source, roles=False)
 
         rows = {item['宝贝ID']: item for item in default['products']}
+        # 列顺序固定（含角色列与阈值列），角色层关闭时角色列存在但取值为空
+        self.assertEqual(list(rows['A'].keys()), list(PRODUCT_COLUMNS))
         for column in BUDGET_DECISION_ROLE_COLUMNS:
-            self.assertNotIn(column, rows['A'])
+            self.assertEqual(rows['A'][column], '')
         self.assertEqual(default['products'], explicit_off['products'])
         self.assertGreater(rows['A']['未来7日建议调整金额'], 0)
 

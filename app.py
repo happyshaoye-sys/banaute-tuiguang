@@ -2402,9 +2402,9 @@ BUDGET_RANK_BAND_VALUE_MAP = {
     "Top101后": "Top101-尾部",
     "Top101以上": "Top101-尾部",
 }
-BUDGET_DECISION_LEADING_COLUMNS = [
-    "宝贝ID", "款式主图", "货号", "淘宝类目", BUDGET_RANK_BAND_COLUMN, "决策角色",
-]
+# 展示前置列留空：商品预算决策的完整列顺序由 core.budget_decision.PRODUCT_COLUMNS 统一决定，
+# 避免两处各写一份顺序导致漂移。保持普通赋值（测试的 app 助手加载器按 ast.Assign 提取常量）。
+BUDGET_DECISION_LEADING_COLUMNS = []
 BUDGET_DECISION_HIDDEN_COLUMNS = {
     "预算风险", "阈值状态", "阈值窗口", "阈值周数", "阈值版本",
     # TH_MAIN / TH_MID 是店铺级常量（每行都一样），不必在列里重复展现；导出仍保留供审计
@@ -3825,6 +3825,11 @@ with tab3:
                     width='medium',
                     help='仅显示链接，不预加载图片',
                 ),
+                '链接投产': st.column_config.NumberColumn(
+                    '链接投产', format='%.4f',
+                    help='全链接口径：执行表 GMV ÷ 付费（含自然流量）；推广投产为纯广告归因口径',
+                ),
+                '推广投产': st.column_config.NumberColumn('推广投产', format='%.4f'),
                 '排名档': st.column_config.TextColumn('排名档'),
                 '决策角色': st.column_config.TextColumn(
                     '决策角色',

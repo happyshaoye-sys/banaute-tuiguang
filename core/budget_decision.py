@@ -52,13 +52,21 @@ PASSTHROUGH_PRODUCT_COLUMNS = [
     '阈值版本',
 ]
 
+#: 商品预算决策表的**规范列顺序**（看板与导出共用这一份，运营指定顺序）。
+#: 角色层列（决策角色/角色闸门/决策角色依据/角色闸门依据/风险命中/角色闸门命中）
+#: 与阈值列（TH_MAIN/TH_MID/阈值版本）都在这份顺序里占固定位置；
+#: 角色层关闭时这些列仍存在，只是取值为空（表的形状不随开关变化）。
 PRODUCT_COLUMNS = [
-    '宝贝ID', '款式主图', '货号', '淘宝类目', '销售排名',
-    '排名档', *PASSTHROUGH_PRODUCT_COLUMNS,
-    'GMV', '销售占比', '付费', '花费占比', '占比差(pp)', '基准应得花费', '预算错配金额',
-    '未来7日花费基线', '未来7日建议调整金额', '未来7日建议花费',
-    '预算匹配状态', '动作依据', '推广投产', '综合等级', '商品周期',
-    '商品定位', '推广动作', 'MetoX算法命中', '当前有效投放计划数', '库存提醒',
+    '宝贝ID', '款式主图', '货号', '淘宝类目', '排名档', '销售排名',
+    '预算风险', '决策角色', '角色闸门', '当前有效投放计划数',
+    '未来7日建议调整金额', '预算错配金额', '库存提醒',
+    '近7日日均GMV', '上一7日日均GMV', 'GMV趋势率',
+    '链接投产', '推广投产',
+    'GMV', '付费', '销售占比', '花费占比', '占比差(pp)', '基准应得花费',
+    '未来7日花费基线', '未来7日建议花费', '预算匹配状态', '动作依据',
+    '综合等级', '商品周期', '商品定位', '推广动作', 'MetoX算法命中',
+    '决策角色依据', '角色闸门依据', '风险命中', '角色闸门命中',
+    'TH_MAIN', 'TH_MID', '阈值版本',
 ]
 
 BUDGET_DECISION_MAIN_COLUMNS = list(PRODUCT_COLUMNS)
@@ -221,6 +229,15 @@ def _aggregate_product_rows(source: pd.DataFrame) -> list[dict]:
             row[PLAN_ACTUAL_DAYS_COLUMN] = 1
         for field in PASSTHROUGH_PRODUCT_COLUMNS:
             row[field] = _first_nonblank(group[field]) if field in group.columns else ''
+        # 链接投产：直接从执行表取（口径 = 全链接GMV ÷ 付费，含自然流量；见 core/merge.py）
+        # 同一宝贝ID多行时取第一个非空值，不做加总（比率不能相加）
+        if '链接投产' in group.columns:
+            row['链接投产'] = next(
+                (value for value in (to_num(item) for item in group['链接投产']) if value),
+                0.0,
+            )
+        else:
+            row['链接投产'] = 0.0
 
         spend = row['付费']
         has_promotion_gmv = bool(group['_budget_has_promotion_gmv'].any())
@@ -421,7 +438,6 @@ def _build_product_budget_decisions(
         })
         enriched.append(row)
 
-    role_columns: list[str] = []
     if _roles_enabled(roles):
         # 角色层只做减法：拦截 / 封顶加投，回收与硬风险仍由上面的既有规则负责。
         enriched = gate_budget_decisions(
@@ -430,7 +446,6 @@ def _build_product_budget_decisions(
             days=actual_days or 7,
             today=_reference_date(source),
         )
-        role_columns = list(BUDGET_DECISION_ROLE_COLUMNS)
 
     decisions: list[dict] = []
     for row in enriched:
@@ -454,6 +469,8 @@ def _build_product_budget_decisions(
             '未来7日建议花费': _round_money(row['未来7日建议花费']),
             '预算匹配状态': row['预算匹配状态'],
             '动作依据': row['动作依据'],
+            # 链接投产：直接从执行表提取（全链接GMV÷付费），排在推广投产之前
+            '链接投产': _round_rate(row.get('链接投产', 0.0)),
             '推广投产': _round_rate(row['推广投产']),
             '综合等级': row.get('综合等级', ''),
             '商品周期': row.get('商品周期', ''),
@@ -463,12 +480,16 @@ def _build_product_budget_decisions(
             '当前有效投放计划数': row.get(CURRENT_ACTIVE_PLAN_COUNT_COLUMN, 0),
             '库存提醒': row['库存提醒'],
         }
-        if role_columns:
-            decision.update({field: row.get(field, '') for field in role_columns})
+        # 角色层列：无论开关是否打开都建键（关闭时为空值），保证列顺序稳定
+        decision.update({field: row.get(field, '') for field in BUDGET_DECISION_ROLE_COLUMNS})
+        internal: dict = {}
         if include_internal:
-            decision['_budget_direction'] = row['_budget_direction']
-            decision['_plan_detail_values'] = row.get('_plan_detail_values', [])
-        decisions.append(decision)
+            internal['_budget_direction'] = row['_budget_direction']
+            internal['_plan_detail_values'] = row.get('_plan_detail_values', [])
+        # 按 PRODUCT_COLUMNS 的规范顺序输出
+        decisions.append({
+            field: decision.get(field, '') for field in PRODUCT_COLUMNS
+        } | internal)
     return decisions
 
 
@@ -658,13 +679,10 @@ def build_budget_decision_context(df: pd.DataFrame, roles=None) -> dict:
     source = pd.DataFrame() if df is None else df.copy(deep=True)
     source_columns = set(source.columns)
     actual_days = _actual_days_from_source(source)
-    enabled = _roles_enabled(roles)
     internal_products = _build_product_budget_decisions(source, include_internal=True, roles=roles)
-    product_columns = list(PRODUCT_COLUMNS)
-    if enabled:
-        product_columns += list(BUDGET_DECISION_ROLE_COLUMNS)
+    # 列顺序固定按 PRODUCT_COLUMNS（含角色列与阈值列），不随角色层开关变化
     products = [
-        {field: item.get(field, '') for field in product_columns}
+        {field: item.get(field, '') for field in PRODUCT_COLUMNS}
         for item in internal_products
     ]
     summary = _store_summary(_aggregate_product_rows(source), source_columns, actual_days)

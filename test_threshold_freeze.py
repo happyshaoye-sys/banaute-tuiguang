@@ -223,8 +223,9 @@ class ThresholdFreezeGitTests(unittest.TestCase):
 
     def test_default_root_prefers_repo_config_directory(self):
         root = default_freeze_root(app_dir=self.repo)
-        self.assertEqual(root, self.repo / TRACKED_DIR_NAME)
-        self.assertEqual(root.name, 'config')
+        # 用 resolve 归一化：本机 TEMP 可能是 8.3 短路径（ADMINI~1），直接比字符串会假失败
+        self.assertEqual(Path(root).resolve(), (self.repo / TRACKED_DIR_NAME).resolve())
+        self.assertEqual(Path(root).name, 'config')
 
     def test_root_falls_back_to_local_cache_without_repository(self):
         import os

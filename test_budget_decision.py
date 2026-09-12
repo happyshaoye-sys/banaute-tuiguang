@@ -9,6 +9,7 @@ from pandas.testing import assert_frame_equal
 
 from core.budget_decision import (
     BUDGET_DECISION_REMOVED_COLUMNS,
+    PRODUCT_COLUMNS,
     RANK_BAND_ORDER,
     build_budget_decision_context,
     build_plan_management,
@@ -140,7 +141,12 @@ class BudgetDecisionContextTests(unittest.TestCase):
 
         product_keys = list(context['products'][0])
         band_index = product_keys.index('排名档')
-        self.assertEqual(product_keys[band_index:band_index + 3], ['排名档', '预算风险', '近7日日均GMV'])
+        self.assertEqual(product_keys[band_index:band_index + 3], ['排名档', '销售排名', '预算风险'])
+        # 运营指定的规范列顺序：链接投产紧跟 GMV趋势率，排在推广投产之前
+        self.assertEqual(list(context['products'][0]), list(PRODUCT_COLUMNS))
+        self.assertEqual(
+            product_keys[product_keys.index('链接投产') + 1], '推广投产',
+        )
 
         tier = {item['排名档']: item for item in context['tiers']}
         self.assertEqual(list(tier), RANK_BAND_ORDER)
@@ -471,6 +477,43 @@ class BudgetDecisionContextTests(unittest.TestCase):
 
         no_details = build_plan_management(pd.DataFrame([_row('1001', 100, 100, 200)]))
         self.assertEqual(no_details, [])
+
+
+#: 运营指定的规范列顺序（看板与导出共用；改动必须同步这里）
+BUDGET_PRODUCT_COLUMN_ORDER_SPEC = [
+    '宝贝ID', '款式主图', '货号', '淘宝类目', '排名档', '销售排名',
+    '预算风险', '决策角色', '角色闸门', '当前有效投放计划数',
+    '未来7日建议调整金额', '预算错配金额', '库存提醒',
+    '近7日日均GMV', '上一7日日均GMV', 'GMV趋势率',
+    '链接投产', '推广投产',
+    'GMV', '付费', '销售占比', '花费占比', '占比差(pp)', '基准应得花费',
+    '未来7日花费基线', '未来7日建议花费', '预算匹配状态', '动作依据',
+    '综合等级', '商品周期', '商品定位', '推广动作', 'MetoX算法命中',
+    '决策角色依据', '角色闸门依据', '风险命中', '角色闸门命中',
+    'TH_MAIN', 'TH_MID', '阈值版本',
+]
+
+
+class BudgetProductColumnOrderTests(unittest.TestCase):
+    def test_product_columns_follow_operator_spec(self):
+        self.assertEqual(PRODUCT_COLUMNS, BUDGET_PRODUCT_COLUMN_ORDER_SPEC)
+        self.assertEqual(PRODUCT_COLUMNS.index('链接投产') + 1, PRODUCT_COLUMNS.index('推广投产'))
+        self.assertEqual(PRODUCT_COLUMNS[:2], ['宝贝ID', '款式主图'])
+        self.assertEqual(PRODUCT_COLUMNS[-3:], ['TH_MAIN', 'TH_MID', '阈值版本'])
+
+    def test_link_roi_is_taken_from_execution_table(self):
+        source = pd.DataFrame([_row('1001', 600, 300, 900, 链接投产=2.5)])
+        product = _by_id(build_budget_decision_context(source))['1001']
+
+        self.assertAlmostEqual(product['链接投产'], 2.5)
+        self.assertEqual(list(product), list(PRODUCT_COLUMNS))
+        self.assertLess(
+            list(product).index('链接投产'), list(product).index('推广投产'),
+        )
+
+    def test_link_roi_defaults_to_zero_when_column_missing(self):
+        product = _by_id(build_budget_decision_context(pd.DataFrame([_row('1001', 600, 300, 900)])))['1001']
+        self.assertEqual(product['链接投产'], 0.0)
 
 
 if __name__ == '__main__':
