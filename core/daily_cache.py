@@ -13,7 +13,11 @@ from typing import Iterable
 import pandas as pd
 
 
-DAILY_FACT_CACHE_VERSION = "metox2.39-daily-facts-v3"
+#: 日事实缓存版本。口径/取数白名单变化时必须自增，否则旧缓存（按源文件指纹命中）
+#: 会继续返回旧口径的日事实。
+#: v4：无界-商品主体放行「计划名字」；v5：v4 是在解析层缓存尚未换代时重建的
+#: （仍取自缺列的老帧），必须再换代一次才能真正吃到新列。
+DAILY_FACT_CACHE_VERSION = "metox2.55-daily-facts-v5"
 SHARED_DIMENSION_CACHE_VERSION = "metox2.30-shared-dimensions-v2"
 
 

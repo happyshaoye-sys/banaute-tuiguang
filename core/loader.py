@@ -1,4 +1,4 @@
-﻿"""文件读取与列名标准化"""
+"""文件读取与列名标准化"""
 import csv
 import hashlib
 import os
@@ -24,7 +24,10 @@ XLSX_NS = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
 RELS_NS = '{http://schemas.openxmlformats.org/package/2006/relationships}'
 OFFICE_RELS_NS = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
 COL_REF_RE = re.compile(r'([A-Z]+)')
-PARSED_CACHE_VERSION = 'v11'  # v11: 新品商品整体/无界创意源字段契约
+#: 解析层缓存版本。**改动列白名单/标准化口径时必须自增**：解析缓存按
+#: 版本+路径+源类型+大小+mtime 命中，白名单变了但版本没变会继续返回旧列集合的帧。
+#: v12：无界-商品主体 放行「计划名字」（计划明细/推广计划管理需要计划名称）。
+PARSED_CACHE_VERSION = 'v12'  # v11: 新品商品整体/无界创意源字段契约
 
 
 SOURCE_ALLOWED_FIELDS = {
@@ -42,6 +45,9 @@ SOURCE_ALLOWED_FIELDS = {
         '宝贝ID', '付费', '计划ID', '商品支付转化率', '投入产出比',
         '直接购物车数', '场景名字', '转化周期',
         '展现', '点击', '点击率', '转化率', '商品加购件数',
+        # v2.55：计划名字此前被白名单丢掉，导致「推广计划管理 / 推广明细」只有计划ID；
+        # 源文件（无界-商品主体）确实带这一列，放行后由 merge 汇总到计划明细记录里。
+        '计划名字',
         '主体类型',  # P0-1: 供 merge 剔除"店铺"主体假商品(店铺首页混入商品池)
     },
     SOURCE_PRODUCT_OVERALL: {

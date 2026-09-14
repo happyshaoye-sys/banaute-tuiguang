@@ -11,6 +11,33 @@ from core.schema import SOURCE_WUJIE_SUBJECT
 
 
 class DirectPurchaseMetricTests(unittest.TestCase):
+    def test_wujie_subject_keeps_plan_name_for_plan_detail(self):
+        """v2.55：无界-商品主体的「计划名字」必须在白名单里，否则计划明细只有计划ID。"""
+        raw = pd.DataFrame({
+            "宝贝ID": ["1001", "1001"],
+            "主体类型": ["商品", "商品"],
+            "转化周期": ["15天", "15天"],
+            "计划ID": ["P1", "P2"],
+            "计划名字": ["连衣裙-主推-精准", "连衣裙-腰线-放量"],
+            "场景名字": ["关键词推广", "人群推广"],
+            "付费": [100.0, 50.0],
+            "总成交金额": [800.0, 300.0],
+            "展现量": [1000, 500],
+            "点击量": [100, 50],
+        })
+        filtered = _filter_source_columns(raw, SOURCE_WUJIE_SUBJECT)
+        self.assertIn("计划名字", filtered.columns)
+        self.assertNotIn("总成交成本", filtered.columns)
+
+        prepared = prepare_source(filtered, SOURCE_WUJIE_SUBJECT)
+        self.assertIn("计划名字", prepared.columns)
+
+        merged, _ = merge_sources({SOURCE_WUJIE_SUBJECT: [("wujie.xlsx", prepared)]})
+        detail = str(merged.loc[merged["宝贝ID"] == "1001"].iloc[0]["推广计划全量明细"])
+        self.assertIn("连衣裙-主推-精准", detail)
+        self.assertIn("连衣裙-腰线-放量", detail)
+        self.assertIn("计划名:连衣裙-主推-精准", str(merged.iloc[0]["推广明细"]))
+
     def test_wujie_direct_cart_count_is_the_quantity_source(self):
         raw = pd.DataFrame({
             "宝贝ID": ["1001"],

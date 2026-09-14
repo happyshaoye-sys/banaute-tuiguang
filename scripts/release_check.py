@@ -256,8 +256,10 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("direct-purchase quantity must map from 直接购物车数")
     if "'直接成交笔数':'直购数量'" in schema:
         errors.append("direct-purchase quantity must not map from 直接成交笔数")
-    if "PARSED_CACHE_VERSION = 'v11'" not in loader:
-        errors.append("source-schema validation requires parsed cache v11")
+    if "PARSED_CACHE_VERSION = 'v12'" not in loader:
+        errors.append("source-schema validation requires parsed cache v12")
+    if "'计划名字'" not in loader:
+        errors.append("无界-商品主体 whitelist must keep 计划名字 for plan detail")
     for snippet in (
         "SOURCE_PRODUCT_OVERALL",
         "SOURCE_WUJIE_CREATIVE",
@@ -278,7 +280,7 @@ def check_release(require_release_branch: bool = False) -> list[str]:
     if 'grouped["直购成本"] = _ratio_series(spend, grouped["直购数量"])' not in periods:
         errors.append("period direct-purchase cost must be recalculated from period totals")
     for snippet in (
-        "metox2.39-daily-facts-v3",
+        "metox2.55-daily-facts-v5",
         "metox2.30-shared-dimensions-v2",
         "os.replace(tmp_path, cache_path)",
         "verified_fingerprint",
