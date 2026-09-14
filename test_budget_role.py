@@ -19,6 +19,7 @@ from core.budget_decision import (
     is_removed_budget_column,
 )
 from core.budget_role import (
+    CLEAROUT_GUARD_KEY,
     DRIFT_BANDS,
     GATE_ALLOW,
     GATE_BLOCK,
@@ -259,6 +260,64 @@ class RoleWaterfallTests(unittest.TestCase):
         self.assertEqual(new_product.role, 'CS测试')
         self.assertEqual(new_product.gate, GATE_CAP)
         self.assertEqual(new_product.evidence['角色_上架天数'], 5)
+
+    # ── 清仓护栏（v2.54）────────────────────────────────────
+    def test_clearout_guard_releases_decline_warning_still_above_threshold(self):
+        """衰退预警但仍在线上的款不能被锁成清理。
+
+        真实样本：集团店 2026-09-11 宝贝ID 1026876223060——日销7 1384.3857
+        （TH_MAIN 的 2.78 倍）、环比 +75.51%，原逻辑却判「清理 + 禁止加投」。
+        """
+        row = _product(
+            'R2G', 9690.70, 822.48, 9000,
+            商品周期='衰退预警', 商品定位='潜力款',
+            近7日日均GMV=1384.3857142857141,
+            上一7日日均GMV=788.7771428571428,
+            GMV趋势率=0.7551037410530584,
+        )
+        decision = self._role(row)
+        self.assertEqual(decision.role, 'ZT主推')
+        self.assertEqual(decision.gate, GATE_ALLOW)
+        self.assertIn('清仓护栏放行', decision.reason)
+        self.assertIn('日销7 1384.3857', decision.evidence[CLEAROUT_GUARD_KEY])
+
+    def test_clearout_guard_releases_decline_warning_above_mid_line_when_falling(self):
+        """跌破主推线但在腰线以上且环比下跌 → 放行给瀑布，按趋势破位只拦加投。"""
+        row = _product(
+            'R2H', 5968.08, 453.79, 5900,
+            商品周期='衰退预警', 商品定位='潜力款',
+            近7日日均GMV=852.58, 上一7日日均GMV=1347.87, GMV趋势率=-0.3672,
+        )
+        decision = self._role(row)
+        self.assertEqual(decision.role, 'ZT趋势预警')
+        self.assertEqual(decision.gate, GATE_BLOCK)
+        self.assertIn('清仓护栏放行', decision.reason)
+
+    def test_clearout_guard_keeps_weak_decline_warning_below_mid_line(self):
+        """腰线以下且环比下跌：衰退预警照旧判清理（护栏不放行）。"""
+        row = _product(
+            'R2I', 200.0, 30.0, 100,
+            商品周期='衰退预警', 商品定位='滞销款',
+            近7日日均GMV=20.0, 上一7日日均GMV=40.0, GMV趋势率=-0.5,
+        )
+        decision = self._role(row)
+        self.assertEqual(decision.role, '清理')
+        self.assertEqual(decision.gate, GATE_BLOCK)
+        self.assertNotIn(CLEAROUT_GUARD_KEY, decision.evidence)
+
+    def test_clearout_guard_never_applies_to_real_clearout_labels(self):
+        """清退期 / 淘汰 / 观察期 等强标记不受护栏影响，量级再大也判清理。"""
+        for label in ('清退期', '淘汰', '观察期'):
+            with self.subTest(label=label):
+                row = _product(
+                    f'R2-{label}', 5000, 100, 9000,
+                    商品周期=label, 商品定位='潜力款',
+                    近7日日均GMV=1384.3857142857141, GMV趋势率=0.7551,
+                )
+                decision = self._role(row)
+                self.assertEqual(decision.role, '清理')
+                self.assertEqual(decision.gate, GATE_BLOCK)
+                self.assertNotIn(CLEAROUT_GUARD_KEY, decision.evidence)
 
     def test_main_bucket_trend_alert_blocks_increase(self):
         alert = self._role(_product('R4', 5000, 100, 9000, GMV趋势率=-0.2))
@@ -505,10 +564,20 @@ class BudgetDecisionRoleLayerTests(unittest.TestCase):
         app_source = (Path(__file__).resolve().parent / 'app.py').read_text(encoding='utf-8-sig')
         self.assertEqual(app_source.count('build_budget_decision_context(df, roles=True)'), 2)
         self.assertIn('def _attach_budget_role_basis(', app_source)
-        self.assertIn('_attach_budget_role_basis(df, day_map, date_str)', app_source)
+        self.assertIn('_attach_budget_role_basis(', app_source)
+        self.assertIn('date_str, year=year, shop=shop, cache_root=cache_root,', app_source)
         self.assertIn('inject_rolling_daily_gmv', app_source)
         self.assertIn('compute_coverage_thresholds_from_day_map', app_source)
         self.assertIn('budget_decision_context_v3_roles', app_source)
+        # v2.54：冻结后按轻量 GMV 缓存算引擎建议 + 复核入口
+        self.assertIn('def _resolve_engine_thresholds(', app_source)
+        self.assertIn('compute_coverage_thresholds_from_gmv_daily', app_source)
+        self.assertIn('def _render_threshold_review_block(', app_source)
+        # 覆盖判定是独立函数，必须自己 import period_windows（否则运行时 NameError，
+        # 而 NameError 会被"角色层不介入"的兜底吞掉，页面只表现为角色列缺失）
+        helper = app_source.split('def _day_map_covers_role_history(')[1].split('\ndef ')[0]
+        self.assertIn('from core.budget_role import period_windows', helper)
+        self.assertIn('period_windows(', helper)
 
     def _source(self):
         return pd.DataFrame([

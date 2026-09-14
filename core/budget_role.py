@@ -41,7 +41,7 @@ from .schema import safe_div, to_num
 #: 回滚 = 把这两处传参去掉（或传 False），不需要回退数据或表结构。
 ROLE_LAYER_ENABLED = False
 
-ROLE_ALGORITHM_VERSION = 'role-waterfall-v3'
+ROLE_ALGORITHM_VERSION = 'role-waterfall-v4'
 
 #: 阈值默认口径：7 天窗口，**固定**，不随工具侧边栏「时间周期」变化。
 #: 界面上的 当日/3天/7天/15天/30天 只是看数口径；角色判定与预算决策
@@ -137,6 +137,12 @@ ROLE_DAYS_KEY = '_角色周期天数'
 
 _MATURE_TOKENS = ('成熟', '稳定', '承接', '日常')
 _CLEAROUT_TOKENS = ('清退', '清仓', '衰退', '淘汰', '观察期', '清退期')
+#: 清仓护栏（v2.54）：`衰退预警` 是 36 宫格位置变化产生的**弱信号**，单独命中不足以
+#: 判定清仓。款若仍在腰线以上、或环比没有下跌，就放行给正常瀑布判定——否则会出现
+#: 「日销7 是主推线 2.8 倍、环比 +75% 」的款被判清仓并禁止加投的误杀。
+#: 只对 `衰退预警` 生效；`清退/清仓/衰退期/淘汰/观察期` 等强标记仍然直接判清仓。
+CLEAROUT_GUARD_TOKEN = '衰退预警'
+CLEAROUT_GUARD_KEY = '角色_清仓护栏'
 _REFUND_RISK_TOKENS = ('退款', '退货', '品质')
 _RISK_FIELDS = ('风险标签', '退款风险', '风控标签', '预算风险')
 
@@ -450,18 +456,15 @@ def period_window_gmv_from_day_map(
         for day in pd.date_range(start=start, end=window_end, freq='D'):
             entry = day_map.get(day.strftime('%Y-%m-%d')) if hasattr(day_map, 'get') else None
             frame = entry[0] if isinstance(entry, (tuple, list)) and entry else entry
-            if frame is None or len(frame) == 0:
-                continue
-            if product_column not in frame.columns or gmv_column not in frame.columns:
-                continue
-            subset = frame
-            if trading_period_column in frame.columns:
-                mask = frame[trading_period_column].astype(str).str.strip() == trading_period_value
-                if mask.any():
-                    subset = frame.loc[mask]
-            for product_id, value in subset.groupby(product_column, sort=False)[gmv_column].sum().items():
-                key = str(product_id)
-                totals[key] = totals.get(key, 0.0) + to_num(value)
+            values = gmv_by_product(
+                frame,
+                product_column=product_column,
+                gmv_column=gmv_column,
+                trading_period_column=trading_period_column,
+                trading_period_value=trading_period_value,
+            )
+            for product_id, value in values.items():
+                totals[product_id] = totals.get(product_id, 0.0) + to_num(value)
         divisor = float(max(int(window_days), 1))
         out.append({
             'label': f'W{index}',
@@ -508,6 +511,110 @@ def _clean_id(value) -> str:
     return text
 
 
+def gmv_by_product(
+    frame,
+    *,
+    product_column: str = '宝贝ID',
+    gmv_column: str = 'GMV',
+    trading_period_column: str = '转化周期',
+    trading_period_value: str = '15天转化',
+) -> dict[str, float]:
+    """单日日帧 → ``{宝贝ID: GMV}``（阈值口径唯一入口）。
+
+    与复盘口径一致：当日帧含 ``转化周期`` 列时，只取 15 天转化行，避免花费翻倍。
+    ``day_map`` 入口与轻量 GMV 缓存入口都走这里，保证两条路径逐位一致。
+    """
+    if frame is None or len(frame) == 0:
+        return {}
+    if product_column not in frame.columns or gmv_column not in frame.columns:
+        return {}
+    subset = frame
+    if trading_period_column in frame.columns:
+        mask = frame[trading_period_column].astype(str).str.strip() == trading_period_value
+        if mask.any():
+            subset = frame.loc[mask]
+    totals: dict[str, float] = {}
+    for product_id, value in subset.groupby(product_column, sort=False)[gmv_column].sum().items():
+        key = _clean_id(product_id)
+        totals[key] = totals.get(key, 0.0) + to_num(value)
+    return totals
+
+
+def gmv_daily_from_day_map(day_map, *, dates=None) -> dict[str, dict[str, float]]:
+    """``day_map`` → ``{日期: {宝贝ID: GMV}}``（轻量历史缓存的存储形态）。
+
+    ``dates`` 给了就只取这些日期（用于只沉淀本次真正加载过的天）。
+    """
+    out: dict[str, dict[str, float]] = {}
+    if not hasattr(day_map, 'get'):
+        return out
+    wanted = list(dates) if dates is not None else sorted(day_map.keys())
+    for day in wanted:
+        key = str(day)[:10]
+        entry = day_map.get(key)
+        if entry is None:
+            entry = day_map.get(str(day))
+        frame = entry[0] if isinstance(entry, (tuple, list)) and entry else entry
+        values = gmv_by_product(frame)
+        if values:
+            out[key] = values
+    return out
+
+
+def period_window_gmv_from_gmv_daily(
+    gmv_daily,
+    *,
+    end_date,
+    window_days: int = THRESHOLD_WINDOW_DAYS,
+    windows: int = THRESHOLD_WINDOWS,
+) -> list[dict]:
+    """轻量 GMV 缓存（``{日期: {宝贝ID: GMV}}``）→ 每个窗口的宝贝 GMV。"""
+    anchor = _to_date(end_date)
+    if anchor is None:
+        return []
+    getter = gmv_daily.get if hasattr(gmv_daily, 'get') else (lambda _key: None)
+    out: list[dict] = []
+    for index, (start, window_end) in enumerate(period_windows(anchor, window_days, windows)):
+        totals: dict[str, float] = {}
+        for day in pd.date_range(start=start, end=window_end, freq='D'):
+            values = getter(day.strftime('%Y-%m-%d'))
+            if not values:
+                continue
+            for product_id, value in values.items():
+                key = _clean_id(product_id)
+                totals[key] = totals.get(key, 0.0) + to_num(value)
+        divisor = float(max(int(window_days), 1))
+        out.append({
+            'label': f'W{index}',
+            'start': start,
+            'end': window_end,
+            'values': [value / divisor for value in totals.values() if value > 0],
+        })
+    return out
+
+
+def compute_coverage_thresholds_from_gmv_daily(
+    gmv_daily,
+    *,
+    end_date,
+    window_days: int = THRESHOLD_WINDOW_DAYS,
+    windows: int = THRESHOLD_WINDOWS,
+    main_share: float = TH_MAIN_SHARE,
+    mid_share: float = TH_MID_SHARE,
+) -> ThresholdResult:
+    """轻量 GMV 缓存入口：与 ``compute_coverage_thresholds_from_day_map`` 同口径同结果。"""
+    return compute_coverage_thresholds_from_windows(
+        period_window_gmv_from_gmv_daily(
+            gmv_daily, end_date=end_date, window_days=window_days, windows=windows,
+        ),
+        window_days=window_days,
+        windows=windows,
+        end_date=end_date,
+        main_share=main_share,
+        mid_share=mid_share,
+    )
+
+
 def _sum_window_gmv(
     day_map,
     start: date,
@@ -522,19 +629,16 @@ def _sum_window_gmv(
     for day in pd.date_range(start=start, end=end, freq='D'):
         entry = day_map.get(day.strftime('%Y-%m-%d')) if hasattr(day_map, 'get') else None
         frame = entry[0] if isinstance(entry, (tuple, list)) and entry else entry
-        if frame is None or len(frame) == 0:
-            continue
-        if product_column not in frame.columns or gmv_column not in frame.columns:
-            continue
-        subset = frame
-        # day_map 已在 merge 阶段按 15 天转化过滤；这里再兜一次，避免花费/成交翻倍。
-        if trading_period_column in frame.columns:
-            mask = frame[trading_period_column].astype(str).str.strip() == trading_period_value
-            if mask.any():
-                subset = frame.loc[mask]
-        for product_id, value in subset.groupby(product_column, sort=False)[gmv_column].sum().items():
-            key = _clean_id(product_id)
-            totals[key] = totals.get(key, 0.0) + to_num(value)
+        # day_map 已在 merge 阶段按 15 天转化过滤；gmv_by_product 里再兜一次，避免花费/成交翻倍。
+        values = gmv_by_product(
+            frame,
+            product_column=product_column,
+            gmv_column=gmv_column,
+            trading_period_column=trading_period_column,
+            trading_period_value=trading_period_value,
+        )
+        for product_id, value in values.items():
+            totals[product_id] = totals.get(product_id, 0.0) + to_num(value)
     return totals
 
 
@@ -848,6 +952,33 @@ def _is_clearout(row: dict) -> bool:
     return any(token in text for token in _CLEAROUT_TOKENS)
 
 
+def _clearout_guard_release(row: dict, *, daily7: float, trend: float | None,
+                            th_mid: float) -> str:
+    """清仓护栏（v2.54）：衰退预警款的放行条件，返回放行依据（空串 = 不放行）。
+
+    放行条件（任一成立即放行，因为两条都说明"这款还在卖或还在涨"）：
+
+    * 近7日日均GMV ≥ TH_MID（仍在腰线以上）；
+    * GMV趋势率 ≥ 0（环比没有下跌）。
+    """
+    if CLEAROUT_GUARD_TOKEN not in _lifecycle_text(row):
+        return ''
+    reasons = []
+    if th_mid > 0 and daily7 >= th_mid:
+        reasons.append(f'日销7 {daily7:.4f} ≥ TH_MID {th_mid:.4f}')
+    if trend is not None and trend >= 0:
+        reasons.append(f'趋势 {trend:.4f} ≥ 0')
+    return '；'.join(reasons)
+
+
+def _append_clearout_guard_note(decision: RoleDecision) -> RoleDecision:
+    """把清仓护栏的放行依据并回角色理由（``columns()`` 不展开 evidence）。"""
+    note = _text(decision.evidence.get(CLEAROUT_GUARD_KEY))
+    if not note:
+        return decision
+    return replace(decision, reason=f'{decision.reason}（清仓护栏放行：{note}）')
+
+
 def _launch_days(row: dict, today: date | None) -> int | None:
     launch = _mature_launch_date(row)
     if launch is None or today is None:
@@ -873,7 +1004,7 @@ def assign_budget_role(
     不参与判定。阈值缺失时直接返回「未判定 + 放行加投」，风险闸门也不介入，
     以保证「没有阈值就不改变既有决策」。
     """
-    decision = _waterfall_decision(
+    decision = _append_clearout_guard_note(_waterfall_decision(
         row,
         th_main=th_main,
         th_mid=th_mid,
@@ -883,7 +1014,7 @@ def assign_budget_role(
         today=today,
         min_uv=min_uv,
         new_days=new_days,
-    )
+    ))
     if decision.role == '未判定':
         return decision
     risk = _text(decision.evidence.get('角色_风险命中'))
@@ -968,15 +1099,20 @@ def _waterfall_decision(
             {**evidence, '角色_硬风险档': tier},
         )
 
-    # 2) 清仓/衰退标记
+    # 2) 清仓/衰退标记（v2.54 起「衰退预警」带护栏：仍在腰线以上或环比未跌则放行）
     if _is_clearout(row):
-        return RoleDecision(
-            '清理',
-            f'生命周期标记命中清仓/衰退：{_lifecycle_text(row)}',
-            GATE_BLOCK,
-            '清仓方向只做回收，不新增预算',
-            evidence,
+        release = _clearout_guard_release(
+            row, daily7=daily7, trend=trend, th_mid=th_mid,
         )
+        if not release:
+            return RoleDecision(
+                '清理',
+                f'生命周期标记命中清仓/衰退：{_lifecycle_text(row)}',
+                GATE_BLOCK,
+                '清仓方向只做回收，不新增预算',
+                evidence,
+            )
+        evidence = {**evidence, CLEAROUT_GUARD_KEY: release}
 
     # 3) CS 测试：新品（上架不超过 new_days 天）
     launch_days = _launch_days(row, today)
@@ -1477,6 +1613,8 @@ def role_summary(products) -> list[dict]:
 __all__ = [
     'ROLE_LAYER_ENABLED',
     'ROLE_ALGORITHM_VERSION',
+    'CLEAROUT_GUARD_TOKEN',
+    'CLEAROUT_GUARD_KEY',
     'THRESHOLD_VERSION',
     'THRESHOLD_WINDOW_DAYS',
     'THRESHOLD_WINDOWS',

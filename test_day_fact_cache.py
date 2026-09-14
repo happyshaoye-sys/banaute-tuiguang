@@ -20,6 +20,7 @@ from core.daily_cache import (
     source_fingerprint,
 )
 from core.merge import (
+    FULL_PLAN_DETAIL_COLUMN,
     _numeric_series as merge_numeric_series,
     build_daily_facts,
     build_shared_dimensions,
@@ -72,6 +73,7 @@ def _daily_sources(include_dimensions: bool = True) -> dict[str, list[tuple[str,
             "转化周期": "15天",
             "场景名字": "关键词推广",
             "计划ID": "P1001",
+            "计划名字": "连衣裙-主推-精准",
             "付费": 100.0,
             "GMV": 80.0,
             "推广投产": 0.8,
@@ -198,6 +200,9 @@ class DailyFactPipelineContractTests(unittest.TestCase):
         self.assertEqual(row["成本价（含税）"], 50.0)
         self.assertIn("计划ID:P1001", row["推广明细"])
         self.assertIn("计划ID:P1002", row["推广明细"])
+        # v2.54：明细记录带出计划名称（此前只有计划ID），推广计划管理/全量明细才有名称
+        self.assertIn("计划名:连衣裙-主推-精准", row["推广明细"])
+        self.assertIn("连衣裙-主推-精准", str(row[FULL_PLAN_DETAIL_COLUMN]))
 
     def test_cached_facts_use_latest_shared_dimensions_on_each_merge(self):
         daily_sources = _daily_sources(include_dimensions=False)

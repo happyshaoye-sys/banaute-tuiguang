@@ -237,12 +237,17 @@ def _format_number(value) -> str:
 
 
 def format_top_plan_details(records: list[dict]) -> str:
-    """把周期累计后的展示计划格式化为执行表可读文本。"""
+    """把周期累计后的展示计划格式化为执行表可读文本。
+
+    v2.54 起带出计划名称（源数据缺 `计划名字` 时留空，不影响既有格式）。
+    """
     lines = []
     for index, record in enumerate(records, start=1):
         channel = _text(record.get('所属渠道')) or '执行表未提供'
+        name = _text(record.get('计划名称'))
+        name_text = f" 计划名:{name}" if name else ''
         lines.append(
-            f"{index}. 计划ID:{record['计划ID']} 所属渠道:{channel} "
+            f"{index}. 计划ID:{record['计划ID']}{name_text} 所属渠道:{channel} "
             f"花费:{to_num(record.get('当前花费')):.2f} "
             f"归因成交:{to_num(record.get('归因成交')):.2f} "
             f"投产:{to_num(record.get('ROI')):.2f} "

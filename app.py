@@ -118,6 +118,8 @@ def _render_kpi_metric_with_trend(column, label, value, delta, *, trend_key,
             missing_days = int(chart_data[trend_label].isna().sum())
             missing_note = f" · 缺失 {missing_days} 天（折线断开）" if missing_days else ""
             st.caption(f"{start} 至 {end} · 日维度{missing_note}")
+            # X 轴按运营口径显示年月日（避免图表自动格式化成 “Sep 11” 这类）
+            chart_data['日期'] = chart_data['日期'].dt.strftime('%Y-%m-%d')
             st.line_chart(
                 chart_data,
                 x='日期',
@@ -924,6 +926,7 @@ def _load_new_product_history(base_root, year, shop, date_str, cache_root,
         'requested_history_start_date': requested_history_start,
         'history_end_date': dates[-1] if dates else date_str,
         'first_seen_index_path': str(_first_seen_index_path(cache_root, year, shop)),
+        'new_product_snapshot_path': str(_new_product_snapshot_path(cache_root, year, shop)),
         'product_overall_daily': product_daily,
         'creative_daily': creative_daily,
         'business_day_map': business_day_map,
@@ -945,6 +948,13 @@ def _safe_cache_token(value):
 def _first_seen_index_path(cache_root, year, shop):
     cache_base = Path(cache_root)
     return cache_base / f"new_product_first_seen_{_safe_cache_token(year)}_{_safe_cache_token(shop)}.pkl"
+
+
+def _new_product_snapshot_path(cache_root, year, shop):
+    """新品变化区快照（v2.54）：与首次发现索引同目录，按 年|店 分键。"""
+    from core.new_product_change import snapshot_path
+
+    return snapshot_path(Path(cache_root), year, shop)
 
 
 def _load_first_seen_index(path):
@@ -1744,6 +1754,10 @@ def _build_new_product_context_from_sources(df, day_map, date_str, history_sourc
         message = (message + '；' if message else '') + persist_warning
     if len(facts) == 0:
         message = (message + '；' if message else '') + '当前仅加载到新品源，缺少可聚合的经营日事实。'
+    change_meta = _build_new_product_change(
+        lifecycle_view, first_seen, product_daily, date_str,
+        history_sources.get('new_product_snapshot_path'),
+    )
     return {
         'status': history_sources.get('status', 'complete'),
         'message': message,
@@ -1754,7 +1768,59 @@ def _build_new_product_context_from_sources(df, day_map, date_str, history_sourc
         'source_status': history_sources.get('source_status', pd.DataFrame()),
         'coverage': history_sources.get('coverage', pd.DataFrame()),
         'first_seen_index': first_seen,
+        'change_summary': change_meta.get('汇总', {}),
+        'change_meta': change_meta,
     }
+
+
+def _build_new_product_change(lifecycle_view, first_seen, product_daily, date_str, snapshot_path):
+    """生成/更新新品变化快照，并算好默认（对比上次运行）的变化汇总（v2.54）。
+
+    只写快照与汇总；具体变化表在页面上按所选基线现算，方便切换"上次运行 / N 天前 / 上周同期"。
+    """
+    from core import new_product_change as change_core
+
+    meta = {
+        '状态': '未生成',
+        '说明': '',
+        '上次快照日': '',
+        '本次快照日': str(date_str)[:10],
+        '快照路径': str(snapshot_path or ''),
+        '快照写入': {},
+        '快照数': 0,
+        '源可用': False,
+        '汇总': {},
+    }
+    if not snapshot_path:
+        meta['说明'] = '缺少快照路径，本次不做变化判定。'
+        return meta
+    try:
+        online = change_core.build_online_status(product_daily, date_str)
+        snapshot = change_core.build_snapshot(lifecycle_view, first_seen, online, date_str)
+        meta['源可用'] = bool(snapshot.get('源可用'))
+        written = change_core.append_snapshot(snapshot_path, snapshot)
+        meta['快照写入'] = written
+        snapshots = change_core.load_snapshots(snapshot_path)
+        meta['快照数'] = len(snapshots)
+        baseline = change_core.select_baseline(snapshots, date_str)
+        result = change_core.diff_snapshot(baseline, snapshot)
+        meta.update({
+            '状态': result['状态'],
+            '说明': result['说明'],
+            '上次快照日': result['上次快照日'],
+            '汇总': result['summary'],
+            '变化行数': len(result['rows']),
+            '当前快照': snapshot,
+        })
+        if written.get('历史回算'):
+            meta['说明'] = f"{result['说明']}｜本次为历史回算：{written.get('原因', '')}"
+        elif not written.get('写入'):
+            meta['说明'] = f"{result['说明']}｜{written.get('原因', '')}"
+    except Exception as exc:  # pragma: no cover - 兜底，不影响新品判定
+        meta['状态'] = '生成失败'
+        meta['说明'] = f'新品变化区生成失败：{str(exc)[:160]}'
+        print(f"[新品变化] 生成失败：{exc}")
+    return meta
 
 
 def _load_shared_dimensions(product_folder, cache_root, jst_entry=None,
@@ -2034,44 +2100,6 @@ def _cat_sum(frame, col):
     return w.groupby("淘宝类目")[col].sum().to_dict()
 
 
-def _attach_budget_role_basis(df, day_map, date_str):
-    """把「固定近7日判定基准 + 覆盖法阈值」写进执行表，供预算决策的角色层使用。
-
-    * 判定基准固定近 7 日，与左侧「时间周期」（当日/3天/7天/15天/30天）无关；
-    * 阈值 = 7 天窗口 × 8 个窗口的覆盖法分界中位数（50% / 80%）；
-    * 写入的列：近7日日均GMV、上一7日日均GMV、GMV趋势率、
-      TH_MAIN、TH_MID、阈值版本、阈值窗口、阈值周数、阈值状态、阈值参照日。
-      阈值* 列在预算决策视图里默认隐藏，也不会进入执行表（执行表按 EXPORT_COLS 白名单展示）。
-
-    任何一步失败都只回退到"没有阈值"，由角色层返回「未判定 + 放行加投」，
-    不影响既有预算决策结果。
-    """
-    if df is None or len(df) == 0:
-        return df
-    try:
-        from core.budget_role import (
-            compute_coverage_thresholds_from_day_map,
-            inject_rolling_daily_gmv,
-            role_input_check,
-        )
-
-        work = inject_rolling_daily_gmv(df, day_map, end_date=date_str)
-        result = compute_coverage_thresholds_from_day_map(day_map, end_date=date_str)
-        payload = result.as_dict()
-        warnings = payload.pop('阈值警告', '')
-        for column, value in payload.items():
-            work[column] = value
-        check = role_input_check(work)
-        if warnings:
-            print(f"[角色层] 阈值提示：{warnings}")
-        if not check.get('ready'):
-            print(f"[角色层] 输入自检警告：{'；'.join(check.get('warnings', ()))}")
-        return work
-    except Exception as exc:  # pragma: no cover - 兜底，绝不阻断主流程
-        print(f"[WARNING] 角色层基准/阈值计算失败，已跳过（角色层将不介入）：{exc}")
-        return df
-
-
 def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_dir=None,
                         jst_snap_dir=None, jst_refund_dir=None, period_choice="当日"):
     """读取当前日，并按日/3日/7日/15日/30日生成周期累计环比。一次扫描全部日期，不重复读文件。
@@ -2139,16 +2167,30 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
     baseline_start = (pd.Timestamp(date_str) - pd.Timedelta(days=27)).date().isoformat()
     for d in iter_dates(baseline_start, date_str):
         all_needed_dates.add(d)
-    # 预算决策角色层：固定近7日基准 + 覆盖法阈值需要 8 个完整 7 天窗口（=56 天），
-    # 与左侧时间周期无关，所以这里显式补齐，避免只有 28 天导致阈值只能用 4 个窗口。
+    # 预算决策角色层：固定近7日基准 + 覆盖法阈值需要 8 个完整 7 天窗口（=56 天）。
+    # v2.54：阈值已由运营冻结时，本轮不需要现场算引擎建议值——引擎建议改由
+    # 「🔒 阈值冻结 → 🔍 主推线复核」按钮读轻量 GMV 缓存现算（毫秒级），
+    # 所以这里不再补 56 天，只保留同层基准需要的 28 天（判定基准 14 天已在其内）。
     from core.budget_role import THRESHOLD_WINDOW_DAYS, THRESHOLD_WINDOWS
 
     role_history_days = int(THRESHOLD_WINDOW_DAYS) * int(THRESHOLD_WINDOWS)
-    role_history_start = (
-        pd.Timestamp(date_str) - pd.Timedelta(days=role_history_days - 1)
-    ).date().isoformat()
-    for d in iter_dates(role_history_start, date_str):
-        all_needed_dates.add(d)
+    frozen_thresholds = None
+    if year is not None and shop:
+        try:
+            frozen_thresholds = _threshold_freeze_store().get(year, shop)
+        except Exception as exc:  # pragma: no cover - 登记读失败按未冻结处理
+            print(f"[角色层] 阈值冻结登记读取失败，按未冻结加载 56 天：{exc}")
+    role_history_note = f"阈值历史 {role_history_days} 天（未冻结，需现场算引擎建议）"
+    if frozen_thresholds:
+        role_history_note = (
+            f"阈值已冻结 → 跳过 {role_history_days} 天历史（复核走轻量 GMV 缓存）"
+        )
+    else:
+        role_history_start = (
+            pd.Timestamp(date_str) - pd.Timedelta(days=role_history_days - 1)
+        ).date().isoformat()
+        for d in iter_dates(role_history_start, date_str):
+            all_needed_dates.add(d)
     rolling_start = periods.get("15日环比", {}).get("current_start", date_str)
     for d in iter_dates(rolling_start, date_str):
         all_needed_dates.add(d)
@@ -2158,7 +2200,8 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
             all_needed_dates.add(d)
         for d in iter_dates(p['prev_start'], p['prev_end']):
             all_needed_dates.add(d)
-    _log_time(timings, "收集所有日期", t0, f"{len(all_needed_dates)} 个不同日期")
+    _log_time(timings, "收集所有日期", t0,
+              f"{len(all_needed_dates)} 个不同日期 | {role_history_note}")
 
     # ── 2. 一次性加载每个日期的数据（仅 include_product=True 的首日）──
     t0 = time.perf_counter()
@@ -2188,6 +2231,22 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
         timings, "批量加载所有日期", t0,
         f"{len(day_map)} 天 | 日事实缓存命中 {day_cache_stats['hits']} / 未命中 {day_cache_stats['misses']}",
     )
+
+    # ── 2b. 沉淀角色层轻量历史缓存（阈值引擎与看板趋势用；失败不阻断）──
+    t0 = time.perf_counter()
+    if cache_root is not None and year is not None and shop:
+        try:
+            from core.role_history_cache import update_gmv_daily
+
+            gmv_cache_stats = update_gmv_daily(cache_root, year, shop, day_map)
+            _log_time(
+                timings, "角色层轻量GMV缓存", t0,
+                f"本次更新 {gmv_cache_stats['本次新增/更新天数']} 天 | "
+                f"缓存共 {gmv_cache_stats['缓存总天数']} 天 "
+                f"({gmv_cache_stats['缓存最早日']}~{gmv_cache_stats['缓存最新日']})",
+            )
+        except Exception as exc:  # pragma: no cover - 缓存失败不影响主流程
+            print(f"[角色层] 轻量 GMV 缓存写入失败（不影响本次结果）：{exc}")
 
     # ── 3. 本期当天 ──
     current_days = list(iter_dates(date_str, date_str))
@@ -2254,7 +2313,9 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
     _log_time(timings, "MetoX算法打标", t_step, f"{len(df)} 行")
     # 预算决策角色层：固定近7日判定基准 + 覆盖法阈值（失败自动跳过，不影响既有结果）
     t_step = time.perf_counter()
-    df = _attach_budget_role_basis(df, day_map, date_str, year=year, shop=shop)
+    df = _attach_budget_role_basis(
+        df, day_map, date_str, year=year, shop=shop, cache_root=cache_root,
+    )
     _log_time(timings, "角色层基准+阈值", t_step, "固定近7日 + 覆盖法(7天×8窗)")
     # 链接数:当前表内同一货号(款式)的链接个数——多链接共享同一款式库存池,
     # 该列标出分流规模;货号为空的行留空(无法判定款式归属)
@@ -2309,6 +2370,15 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
         'h7_prev_omni': h7_previous['全站'],
     }
     kpi_trends = build_daily_kpi_trends(day_map, end_date=date_str)
+    # v2.54：冻结后主流程只加载 28 天，看板日趋势图靠逐日 KPI 缓存补回历史 56 天。
+    if cache_root is not None and year is not None and shop and not kpi_trends.empty:
+        try:
+            from core.role_history_cache import merge_kpi_trend, update_kpi_daily
+
+            update_kpi_daily(cache_root, year, shop, kpi_trends)
+            kpi_trends = merge_kpi_trend(kpi_trends, cache_root, year, shop)
+        except Exception as exc:  # pragma: no cover - 趋势缓存失败不影响主流程
+            print(f"[看板] 日趋势缓存读写失败（不影响本次结果）：{exc}")
     current_sources = first_day_sources[5] if first_day_sources and len(first_day_sources) > 5 else {}
     new_product_load_state = _build_new_product_load_state(
         base_root=base_root,
@@ -2535,7 +2605,9 @@ def _render_new_product_view(new_product_ctx):
         ctx, ('methodology', '口径说明'), ['主题', '口径', '说明']
     )
 
-    view_tab1, view_tab2, view_tab3 = st.tabs(["生命周期判定", "素材表现", "历史回放"])
+    view_tab1, view_tab2, view_tab3, view_tab4 = st.tabs(
+        ["生命周期判定", "素材表现", "历史回放", "新品变化"]
+    )
 
     with view_tab1:
         c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -2656,6 +2728,127 @@ def _render_new_product_view(new_product_ctx):
         if not methodology.empty:
             with st.expander("新品口径说明", expanded=False):
                 st.dataframe(methodology, width="stretch", hide_index=True)
+
+    with view_tab4:
+        _render_new_product_change(ctx)
+
+
+_CHANGE_BASELINE_OPTIONS = {
+    '上次运行': None,
+    '3 天前': 3,
+    '7 天前（上周同期）': 7,
+    '14 天前': 14,
+}
+
+
+def _render_new_product_change(ctx):
+    """新品变化区（v2.54）：快照 + 差分，只展示有变化的款。"""
+    from core import new_product_change as change_core
+
+    meta = (ctx or {}).get('change_meta') or {}
+    if not meta:
+        st.info("暂无新品变化数据：请先点「加载新品历史」生成快照。")
+        return
+    if meta.get('状态') == '未生成' or meta.get('状态') == '生成失败':
+        st.info(f"暂无新品变化数据：{meta.get('说明') or '快照尚未生成'}")
+        return
+
+    st.caption(
+        "口径：新增发现拆「真上新 / 历史补发现」；消失＝上次在线且本次非在线或不再出现、"
+        f"**连续 {change_core.GONE_CONFIRM_DAYS} 个自然日**；恢复在线＝以前发现过、上次不在线、本次重新在线"
+        "（不算全新款）；判定结果（下架/继续观察）翻转不作为变化列。"
+    )
+    if meta.get('源可用') is False:
+        st.warning(meta.get('说明') or '本次分析日的商品-整体源缺失，无法做变化判定（缺失不算消失）。')
+
+    snapshots = change_core.load_snapshots(meta.get('快照路径'))
+    current = meta.get('当前快照')
+    if current is None and snapshots:
+        current = snapshots[-1]
+    if current is None:
+        st.info(f"暂无新品变化数据：{meta.get('说明') or '快照尚未生成'}")
+        return
+
+    pick_cols = st.columns([1.4, 1.6, 3.6])
+    with pick_cols[0]:
+        baseline_label = st.selectbox(
+            "对比基线", list(_CHANGE_BASELINE_OPTIONS), index=0,
+            key='new_product_change_baseline',
+        )
+    baseline = change_core.select_baseline(
+        snapshots, current.get('分析日'),
+        days_back=_CHANGE_BASELINE_OPTIONS.get(baseline_label),
+    )
+    result = change_core.diff_snapshot(baseline, current)
+    summary = result['summary']
+    with pick_cols[1]:
+        st.metric("对比区间", f"{result['上次快照日'] or '—'} → {result['本次快照日']}")
+    with pick_cols[2]:
+        st.caption(result['说明'])
+        written = meta.get('快照写入') or {}
+        st.caption(
+            f"快照：共 {meta.get('快照数', 0)} 份（保留最近 {change_core.SNAPSHOT_KEEP} 份）｜"
+            f"{'已写入本次' if written.get('写入') else '未写入本次'}：{written.get('原因', '')}"
+        )
+
+    metric_cols = st.columns(5)
+    for column, kind in zip(metric_cols, (
+        change_core.CHANGE_NEW, change_core.CHANGE_BACKFILL, change_core.CHANGE_GONE,
+        change_core.CHANGE_BACK_ONLINE, change_core.CHANGE_WATCH,
+    )):
+        column.metric(kind, int(summary.get(kind, 0)))
+
+    frame = change_core.change_frame(result['rows'])
+    if frame.empty:
+        st.info("本次没有新增/消失/恢复在线/观察中的变化款。")
+        st.download_button(
+            "下载新品变化CSV",
+            data=_frame_to_csv_bytes(frame),
+            file_name=f"新品变化_{st.session_state.get('cur_date', '')}.csv",
+            mime="text/csv",
+            key="download_new_product_change_csv",
+        )
+        return
+
+    filter_cols = st.columns([2.4, 2.0])
+    with filter_cols[0]:
+        type_filter = st.multiselect(
+            "变化类型",
+            [kind for kind in change_core.CHANGE_TYPES if int(summary.get(kind, 0)) > 0],
+            default=[kind for kind in change_core.CHANGE_TYPES
+                     if kind != change_core.CHANGE_WATCH and int(summary.get(kind, 0)) > 0],
+            key='new_product_change_type_filter',
+        )
+    with filter_cols[1]:
+        category_filter = st.multiselect(
+            "淘宝类目",
+            sorted(frame['淘宝类目'].dropna().astype(str).unique()),
+            key='new_product_change_category_filter',
+        )
+    display = frame.copy()
+    if type_filter:
+        display = display[display['变化类型'].isin(type_filter)]
+    if category_filter:
+        display = display[display['淘宝类目'].astype(str).isin(category_filter)]
+    st.caption(f"筛选结果：{len(display)} / {len(frame)} 个变化款")
+    st.dataframe(
+        display, width="stretch", hide_index=True, height=620,
+        column_config={
+            '款式主图': st.column_config.LinkColumn('款式主图链接'),
+            '图片': st.column_config.ImageColumn('图片'),
+            '离线天数': st.column_config.NumberColumn('离线天数', format='%d'),
+            '新品年龄': st.column_config.NumberColumn('新品年龄', format='%d'),
+            '快照间隔天数': st.column_config.NumberColumn('快照间隔天数', format='%d'),
+            '说明': st.column_config.TextColumn('说明', width='large'),
+        },
+    )
+    st.download_button(
+        "下载新品变化CSV",
+        data=_frame_to_csv_bytes(display),
+        file_name=f"新品变化_{st.session_state.get('cur_date', '')}.csv",
+        mime="text/csv",
+        key="download_new_product_change_csv",
+    )
 
 
 def _first_existing_dir(*candidates):
@@ -2830,12 +3023,15 @@ def _threshold_freeze_after_change(current, *, action='冻结', commit: bool, pu
     return f"登记未提交 git：{result.get('detail', '')}"
 
 
-def _attach_budget_role_basis(df, day_map, date_str, year=None, shop=None):
+def _attach_budget_role_basis(df, day_map, date_str, year=None, shop=None, cache_root=None):
     """把「固定近7日判定基准 + 生效阈值」写进执行表，供预算决策的角色层使用。
 
     * 判定基准固定近 7 日，与左侧「时间周期」（当日/3天/7天/15天/30天）无关；
     * 阈值由**运营人员冻结**：登记里冻结值优先；没有冻结时用引擎建议值并标记未冻结；
-    * 引擎每次仍照算建议值（7天窗口 × 8窗中位数），只用于对照与漂移监控；
+    * 引擎建议值（7天窗口 × 8窗中位数）的取数优先级（v2.54）：
+      1. 本次已加载满 56 天 → 直接用本次日事实；
+      2. 否则读轻量 GMV 缓存（冻结后主流程只加载 28 天，复核与漂移监控走缓存）；
+      3. 两者都不可用 → 引擎无效（`阈值状态=数据不足`），由面板提示去复核。
     * 写入的列：近7日日均GMV、上一7日日均GMV、GMV趋势率，以及 阈值* / TH_MAIN / TH_MID。
       阈值* 列在预算决策视图里默认隐藏，也不会进入执行表（执行表按 EXPORT_COLS 白名单展示）。
 
@@ -2846,15 +3042,22 @@ def _attach_budget_role_basis(df, day_map, date_str, year=None, shop=None):
         return df
     try:
         from core.budget_role import (
+            THRESHOLD_WINDOW_DAYS,
+            THRESHOLD_WINDOWS,
             compute_coverage_thresholds_from_day_map,
+            compute_coverage_thresholds_from_gmv_daily,
             inject_rolling_daily_gmv,
+            period_windows,
             resolve_thresholds,
             role_input_check,
             threshold_columns_from_payload,
         )
 
         work = inject_rolling_daily_gmv(df, day_map, end_date=date_str)
-        engine = compute_coverage_thresholds_from_day_map(day_map, end_date=date_str)
+        engine, engine_source, coverage = _resolve_engine_thresholds(
+            day_map, date_str, year, shop, cache_root,
+            window_days=int(THRESHOLD_WINDOW_DAYS), windows=int(THRESHOLD_WINDOWS),
+        )
         frozen = None
         if year is not None and shop:
             try:
@@ -2872,6 +3075,8 @@ def _attach_budget_role_basis(df, day_map, date_str, year=None, shop=None):
             '阈值周数': engine.weeks,
             '阈值状态': engine.state,
             '阈值版本': engine.version,
+            '引擎建议来源': engine_source,
+            '轻量缓存覆盖': coverage,
             '参考日窗口分界': [
                 {'周次': row.get('周次'), '起始日': row.get('起始日'), '结束日': row.get('结束日'),
                  'TH_MAIN': row.get('TH_MAIN'), 'TH_MID': row.get('TH_MID')}
@@ -2890,6 +3095,254 @@ def _attach_budget_role_basis(df, day_map, date_str, year=None, shop=None):
     except Exception as exc:  # pragma: no cover - 兜底，绝不阻断主流程
         print(f"[WARNING] 角色层基准/阈值计算失败，已跳过（角色层将不介入）：{exc}")
         return df
+
+
+def _day_map_covers_role_history(day_map, date_str, *, window_days, windows) -> bool:
+    """本次加载的日事实是否已覆盖 8 个完整窗口（缺一天就为 False）。"""
+    from core.budget_role import period_windows
+
+    if not day_map:
+        return False
+    try:
+        anchor = pd.Timestamp(str(date_str)[:10]).date()
+    except Exception:
+        return False
+    for start, end in period_windows(anchor, window_days, windows):
+        for day in iter_dates(start.isoformat(), end.isoformat()):
+            entry = day_map.get(day)
+            frame = entry[0] if isinstance(entry, (tuple, list)) and entry else entry
+            if frame is None or len(frame) == 0:
+                return False
+    return True
+
+
+def _resolve_engine_thresholds(day_map, date_str, year, shop, cache_root, *,
+                               window_days, windows):
+    """按「本次日事实 → 轻量 GMV 缓存 → 不可用」的顺序解析引擎建议阈值。"""
+    from core.budget_role import (
+        compute_coverage_thresholds_from_day_map,
+        compute_coverage_thresholds_from_gmv_daily,
+    )
+
+    if _day_map_covers_role_history(
+        day_map, date_str, window_days=window_days, windows=windows,
+    ):
+        return (
+            compute_coverage_thresholds_from_day_map(
+                day_map, end_date=date_str, window_days=window_days, windows=windows,
+            ),
+            f'本次加载的 {window_days * windows} 天日事实',
+            {},
+        )
+    coverage = {}
+    if cache_root is not None and year is not None and shop:
+        try:
+            from core.role_history_cache import gmv_daily_coverage, load_gmv_daily
+
+            gmv_daily = load_gmv_daily(cache_root, year, shop)
+            coverage = gmv_daily_coverage(
+                gmv_daily, date_str, window_days=window_days, windows=windows,
+            )
+            if gmv_daily:
+                engine = compute_coverage_thresholds_from_gmv_daily(
+                    gmv_daily, end_date=date_str,
+                    window_days=window_days, windows=windows,
+                )
+                label = '轻量GMV缓存' if coverage.get('可用') else (
+                    f"轻量GMV缓存（缺 {len(coverage.get('缺失天数') or [])} 天）"
+                )
+                return engine, label, coverage
+        except Exception as exc:  # pragma: no cover - 缓存读失败退回不可用
+            print(f"[角色层] 轻量 GMV 缓存读取失败：{exc}")
+    return (
+        compute_coverage_thresholds_from_day_map(
+            day_map, end_date=date_str, window_days=window_days, windows=windows,
+        ),
+        '本次加载的日事实（不足 56 天，引擎建议可能不完整）',
+        coverage,
+    )
+
+
+def _threshold_freeze_days(frozen: dict | None) -> int | None:
+    """冻结已过天数（按「生效日」yyyymmdd，缺失时用「冻结时间」）。"""
+    if not frozen:
+        return None
+    raw = str(frozen.get('生效日') or '').strip()
+    stamp = None
+    if len(raw) == 8 and raw.isdigit():
+        stamp = pd.Timestamp(f'{raw[:4]}-{raw[4:6]}-{raw[6:]}')
+    else:
+        text = str(frozen.get('冻结时间') or '').strip()[:10]
+        try:
+            stamp = pd.Timestamp(text)
+        except Exception:
+            stamp = None
+    if stamp is None or pd.isna(stamp):
+        return None
+    return max(0, int((pd.Timestamp.today().normalize() - stamp.normalize()).days))
+
+
+def _role_counts_for_thresholds(products, *, th_main, th_mid, store_roi, days=7.0, today=None):
+    """按给定阈值重跑角色层，返回角色 → 款数（只用于复核影响预演）。"""
+    from core.budget_role import apply_budget_roles
+
+    rows = apply_budget_roles(
+        products, th_main=th_main, th_mid=th_mid, store_roi=store_roi,
+        days=days, today=today,
+    )
+    counts: dict[str, int] = {}
+    for row in rows:
+        role = str(row.get('决策角色') or '')
+        counts[role] = counts.get(role, 0) + 1
+    return counts
+
+
+THRESHOLD_REVIEW_REMIND_DAYS = 14
+
+
+def _render_threshold_review_block(snapshot, frozen, engine_main, engine_mid, year, shop):
+    """「🔍 主推线复核」：引擎建议按需重算（读轻量 GMV 缓存），并预演采纳后的角色结构。"""
+    from core.budget_role import THRESHOLD_WINDOW_DAYS, THRESHOLD_WINDOWS
+
+    st.markdown("##### 🔍 主推线复核")
+    source = str(snapshot.get('引擎建议来源') or '未知')
+    coverage = snapshot.get('轻量缓存覆盖') or {}
+    info_cols = st.columns(3)
+    info_cols[0].metric("引擎建议来源", source)
+    if coverage:
+        info_cols[1].metric(
+            "轻量缓存覆盖",
+            f"{coverage.get('覆盖天数', 0)} / {coverage.get('需要天数', 0)} 天",
+        )
+        missing = coverage.get('缺失天数') or []
+        info_cols[2].metric("缓存缺口", f"{len(missing)} 天")
+    else:
+        info_cols[1].metric("引擎建议参照日", snapshot.get('阈值参照日', ''))
+        info_cols[2].metric("窗口数", f"{snapshot.get('阈值周数', 0)} × {int(THRESHOLD_WINDOW_DAYS)}天")
+
+    days_frozen = _threshold_freeze_days(frozen)
+    if frozen and days_frozen is not None:
+        if days_frozen >= THRESHOLD_REVIEW_REMIND_DAYS:
+            st.warning(
+                f"当前冻结值已使用 **{days_frozen} 天**（超过 {THRESHOLD_REVIEW_REMIND_DAYS} 天），"
+                "建议点下面的「重算引擎建议」做一次主推线复核。"
+            )
+        else:
+            st.caption(f"当前冻结值已使用 {days_frozen} 天（建议每 {THRESHOLD_REVIEW_REMIND_DAYS} 天复核一次）。")
+
+    if st.button("🔍 重算引擎建议（读轻量 GMV 缓存）", key='threshold_review_button'):
+        cache_root = st.session_state.get('role_cache_root') or CACHE_DIR
+        date_str = st.session_state.get('cur_date') or ''
+        try:
+            engine, new_source, new_coverage = _resolve_engine_thresholds(
+                {}, date_str, year, shop, cache_root,
+                window_days=int(THRESHOLD_WINDOW_DAYS), windows=int(THRESHOLD_WINDOWS),
+            )
+        except Exception as exc:  # pragma: no cover
+            st.error(f"引擎建议重算失败：{exc}")
+            engine = None
+        if engine is not None:
+            fresh = dict(snapshot)
+            fresh.update({
+                'TH_MAIN': engine.th_main,
+                'TH_MID': engine.th_mid,
+                '阈值参照日': engine.end_date,
+                '阈值周数': engine.weeks,
+                '阈值状态': engine.state,
+                '阈值版本': engine.version,
+                '引擎建议来源': new_source,
+                '轻量缓存覆盖': new_coverage,
+                '参考日窗口分界': [
+                    {'周次': row.get('周次'), '起始日': row.get('起始日'), '结束日': row.get('结束日'),
+                     'TH_MAIN': row.get('TH_MAIN'), 'TH_MID': row.get('TH_MID')}
+                    for row in engine.weekly
+                ],
+                '警告': list(engine.warnings),
+            })
+            st.session_state['threshold_engine_snapshot'] = fresh
+            _refresh_budget_threshold_columns()
+            st.session_state['threshold_review_preview'] = _build_threshold_review_preview(
+                engine, frozen, snapshot,
+            )
+            st.success(f"引擎建议已重算（来源：{new_source}）："
+                       f"TH_MAIN={engine.th_main:.4f}、TH_MID={engine.th_mid:.4f}")
+
+    preview = st.session_state.get('threshold_review_preview')
+    if preview:
+        st.caption(
+            f"影响预演（{preview['参照日']}，共 {preview['款数']:,} 款）："
+            "同一批商品、只换阈值时的角色结构变化；**采纳建议需回到上面点「🔒 冻结 / 更新」**。"
+        )
+        st.dataframe(
+            preview['frame'], width="stretch", hide_index=True,
+            column_config={
+                '冻结核角色': st.column_config.TextColumn('角色'),
+                '冻结值款数': st.column_config.NumberColumn('按冻结值'),
+                '建议值款数': st.column_config.NumberColumn('按引擎建议'),
+                '变化': st.column_config.NumberColumn('变化', format='%+d'),
+            },
+        )
+
+
+def _build_threshold_review_preview(engine, frozen, snapshot):
+    """按「冻结值 vs 引擎建议值」各跑一次角色层，给出角色款数对照。"""
+    df = st.session_state.get('df')
+    if df is None or len(df) == 0:
+        return None
+    products = df.to_dict('records')
+    date_str = str(snapshot.get('阈值参照日') or st.session_state.get('cur_date') or '')
+    try:
+        today = pd.Timestamp(date_str).date() if date_str else None
+    except Exception:
+        today = None
+    store_roi = 0.0
+    try:
+        spend = pd.to_numeric(df.get('付费'), errors='coerce')
+        total_spend = float(spend.sum()) if spend is not None else 0.0
+        if total_spend > 0:
+            promotion = pd.to_numeric(df.get('推广成交金额'), errors='coerce') \
+                if '推广成交金额' in df.columns else None
+            if promotion is not None and promotion.notna().any():
+                store_roi = float(promotion.sum()) / total_spend
+            else:
+                store_roi = float(pd.to_numeric(df.get('GMV'), errors='coerce').sum()) / total_spend
+    except Exception:
+        store_roi = 0.0
+    frozen_main = float((frozen or {}).get('TH_MAIN') or 0.0)
+    frozen_mid = float((frozen or {}).get('TH_MID') or 0.0)
+    if not frozen_main and not frozen_mid:
+        frozen_main, frozen_mid = float(engine.th_main), float(engine.th_mid)
+    try:
+        frozen_counts = _role_counts_for_thresholds(
+            products, th_main=frozen_main, th_mid=frozen_mid,
+            store_roi=store_roi, today=today,
+        )
+        engine_counts = _role_counts_for_thresholds(
+            products, th_main=float(engine.th_main), th_mid=float(engine.th_mid),
+            store_roi=store_roi, today=today,
+        )
+    except Exception as exc:  # pragma: no cover
+        print(f"[角色层] 影响预演失败：{exc}")
+        return None
+    roles = [role for role in
+             ('ZT主推', 'ZT趋势预警', 'TC投产', 'TD梯队', 'TD候选', 'CS测试', 'QC回收', '清理', '观察', '未判定')
+             if role in frozen_counts or role in engine_counts]
+    frame = pd.DataFrame([
+        {
+            '冻结核角色': role,
+            '冻结值款数': int(frozen_counts.get(role, 0)),
+            '建议值款数': int(engine_counts.get(role, 0)),
+            '变化': int(engine_counts.get(role, 0)) - int(frozen_counts.get(role, 0)),
+        }
+        for role in roles
+    ])
+    return {
+        '参照日': engine.end_date,
+        '款数': len(products),
+        'frame': frame,
+        '冻结值': (frozen_main, frozen_mid),
+        '建议值': (float(engine.th_main), float(engine.th_mid)),
+    }
 
 
 def _refresh_budget_threshold_columns():
@@ -2988,6 +3441,8 @@ def _render_threshold_freeze_panel():
                 st.caption(hint)
             if frozen.get('备注'):
                 st.caption(f"冻结备注：{frozen['备注']}")
+
+        _render_threshold_review_block(snapshot, frozen, engine_main, engine_mid, year, shop)
 
         default_main = float((frozen or {}).get('TH_MAIN', engine_main) or 0.0)
         default_mid = float((frozen or {}).get('TH_MID', engine_mid) or 0.0)
@@ -3592,6 +4047,8 @@ with st.sidebar:
                     st.session_state.sources_info = files_info
                     st.session_state.cat_ctx = cat_ctx
                     st.session_state.kpi_trends = kpi_trends
+                    # v2.54：角色层轻量历史缓存的根目录，供「主推线复核」按钮读缓存
+                    st.session_state.role_cache_root = str(file_cache_dir)
                     st.session_state.new_product_ctx = new_product_ctx
                     st.session_state.new_product_load_state = new_product_load_state
                     st.session_state.new_product_history = None
@@ -3987,7 +4444,7 @@ with tab3:
         else:
             plan_columns = [
                 column for column in (
-                    '序号', '计划ID', '所属渠道', '商品数', '计划类型', '计划经营结构',
+                    '序号', '计划ID', '计划名称', '所属渠道', '商品数', '计划类型', '计划经营结构',
                     '周期花费', '归因成交', 'ROI', '方向证据', '计划管理建议',
                 )
                 if column in plans.columns

@@ -87,7 +87,12 @@ def default_freeze_root(
     environ: Mapping[str, str] | None = None,
     app_dir: str | os.PathLike[str] | None = None,
 ) -> Path:
-    """登记目录：优先仓库内 config/，其次环境变量，最后工具目录 cache/。"""
+    """登记目录：优先仓库内 config/，其次随包分发的 config/，最后工具目录 cache/。
+
+    v2.54 起，第三方打包版（没有 `.git`）若自带随包分发的
+    `config/threshold_freeze.json`，就直接读它——这样"别人发来的已冻结阈值"
+    能被继承，而不是被忽略后重新冻结一套。
+    """
     env = os.environ if environ is None else environ
     explicit = str(env.get('METOX_THRESHOLD_DIR', '') or '').strip()
     if explicit:
@@ -96,6 +101,9 @@ def default_freeze_root(
     repo = find_repository(base)
     if repo is not None:
         return Path(repo) / TRACKED_DIR_NAME
+    packaged = Path(base) / TRACKED_DIR_NAME
+    if (packaged / FREEZE_FILE_NAME).exists():
+        return packaged
     configured_app_dir = str(env.get('METOX_APP_DIR', '') or '').strip()
     if configured_app_dir:
         return Path(configured_app_dir) / FALLBACK_DIR_NAME

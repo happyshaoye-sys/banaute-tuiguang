@@ -1,4 +1,4 @@
-﻿"""数据合并管线。"""
+"""数据合并管线。"""
 import pandas as pd
 
 from .schema import (
@@ -299,6 +299,14 @@ def _promotion_detail_agg(work):
     detail['attributed'] = raw_gmv.where(raw_gmv > 0, detail['spend'] * detail['roi'])
     detail['add_cart'] = _numeric_series(detail['商品加购件数']) if '商品加购件数' in detail.columns else 0.0
     detail['clicks'] = _numeric_series(detail['点击']) if '点击' in detail.columns else 0.0
+    # v2.54：计划名字此前没带进明细记录，导致「推广计划管理 / 推广明细」只有计划ID 没有名称。
+    # 源标准列名是「计划名字」（schema 兼容「计划名称」→ 标准化后统一为「计划名字」）。
+    for name_col in ('计划名字', '计划名称'):
+        if name_col in detail.columns:
+            detail['plan_name'] = detail[name_col].fillna('').astype(str).str.strip()
+            break
+    else:
+        detail['plan_name'] = ''
     scene = detail['场景名字'] if '场景名字' in detail.columns else pd.Series('', index=detail.index)
     detail['channel'] = scene.map(classify_channel)
     detail = detail[(detail['_pid'].ne('')) & (detail['plan_id'].ne('')) & (detail['spend'] > 0)]
@@ -313,6 +321,7 @@ def _promotion_detail_agg(work):
             add_cart=('add_cart', 'sum'),
             clicks=('clicks', 'sum'),
             channel=('channel', _first_non_empty),
+            plan_name=('plan_name', _first_non_empty),
         )
     )
     grouped = grouped.sort_values(['_pid', 'spend', 'plan_id'], ascending=[True, False, True])
@@ -322,6 +331,7 @@ def _promotion_detail_agg(work):
         records = [
             {
                 '计划ID': row['plan_id'],
+                '计划名称': row.get('plan_name') or '',
                 '所属渠道': row['channel'],
                 '当前花费': row['spend'],
                 '归因成交': row['attributed'],

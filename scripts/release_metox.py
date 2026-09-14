@@ -40,6 +40,8 @@ OVERLAY_FILES = (
     "启动半自动推广工具.bat",
     "生成日更库存快照.py",
 )
+#: 目录级随包分发（v2.54）：阈值冻结登记 config/threshold_freeze.json
+OVERLAY_CONFIG_DIR = "config"
 REQUIRED_PATHS = (
     "TuiGuangTool.exe",
     "_internal",
@@ -233,6 +235,16 @@ def build_release(baseline: Path, launcher_runtime: Path, output_root: Path) -> 
             target = stage / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
+
+        # v2.54：随包分发已冻结的阈值登记（config/threshold_freeze.json）。
+        # 第三方包没有 .git，core.threshold_store 会优先读随包的 config/，
+        # 这样"发来的已冻结阈值"能被直接继承，不需要在对方机器上重新冻结一套。
+        source_config = ROOT / OVERLAY_CONFIG_DIR
+        if source_config.is_dir():
+            packaged_config = stage / OVERLAY_CONFIG_DIR
+            if packaged_config.exists():
+                shutil.rmtree(packaged_config)
+            shutil.copytree(source_config, packaged_config, ignore=_ignore)
 
         for old_manual in stage.glob("MetoX*_使用说明与运营操作顺序.md"):
             old_manual.unlink()

@@ -368,13 +368,20 @@ class ThresholdFreezeAppWiringTests(unittest.TestCase):
         self.assertIn('_render_threshold_freeze_panel()', source)
         self.assertIn('ThresholdFreezeStore', source)
         self.assertIn('_refresh_budget_threshold_columns', source)
-        self.assertIn('_attach_budget_role_basis(df, day_map, date_str, year=year, shop=shop)', source)
+        self.assertIn(
+            'date_str, year=year, shop=shop, cache_root=cache_root,', source,
+        )
         # 冻结/采纳/清除三个动作都要写登记并刷新阈值列（+1 是函数定义本身）
         self.assertEqual(source.count('_threshold_freeze_store().save('), 2)
         self.assertEqual(source.count('_threshold_freeze_store().clear('), 1)
-        self.assertEqual(source.count('_refresh_budget_threshold_columns()'), 4)
+        # 冻结 / 采纳 / 清除 / 主推线复核（v2.54 新增）四处刷新阈值列
+        self.assertEqual(source.count('_refresh_budget_threshold_columns()'), 5)
         self.assertIn('cur_year', source)
         self.assertIn('cur_shop', source)
+        # v2.54：冻结后跳过 56 天历史 + 复核入口 + 逐日 KPI 缓存
+        self.assertIn('role_history_note', source)
+        self.assertIn('_render_threshold_review_block(', source)
+        self.assertIn('merge_kpi_trend', source)
 
 
 if __name__ == '__main__':

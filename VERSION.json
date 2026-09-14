@@ -1,7 +1,7 @@
 {
   "product": "MetoX",
-  "version": "2.53",
-  "release_date": "2026-09-12",
+  "version": "2.54",
+  "release_date": "2026-09-14",
   "external_strategy_version": "v9.3",
   "rule_versions": {
     "refund_risk": "2026-08-02",
@@ -50,7 +50,13 @@
     "llm_advisor": "2026-09-02",
     "llm_feedback_learning": "2026-09-02",
     "current_active_plan_count": "2026-09-05",
-    "budget_role_rules": "2026-09-09",
-    "budget_threshold_coverage": "2026-09-09"
+    "budget_role_rules": "2026-09-14",
+    "budget_threshold_coverage": "2026-09-09",
+    "budget_role_clearout_guard": "2026-09-14",
+    "role_history_cache": "2026-09-14",
+    "threshold_review": "2026-09-14",
+    "new_product_change": "2026-09-14",
+    "promotion_plan_name": "2026-09-14",
+    "kpi_trend_date_format": "2026-09-14"
   }
 }
