@@ -1,6 +1,14 @@
-# MetoX v2.55
+# MetoX v2.56
 
 - 发布日期：2026-09-14
+- **缓存自动失效（运营界面与口径不变）**：新增 `core/schema.py: schema_fingerprint()`（源分类规则 / 列名别名 / `WUJIE_REMAP` 的内容哈希）与 `core/loader.py: source_schema_fingerprint()`（再加「源类型→允许列」白名单）。
+- 解析层缓存键变为 `版本|schema指纹|路径|源类型|大小|mtime`；日事实缓存与共享维度缓存载荷新增 `schema_fingerprint` 并在读取时校验，不一致即未命中 → 改白名单/别名**自动失效**，不再依赖人工记得升版本常量。
+- 旧载荷没有该字段时按**兼容命中**（不与版本换代叠加），因此 2.55 已付过的重建成本不会重复发生；从本版起写入的载荷都带指纹。
+- 门禁新增三条契约：解析层缓存键必须含 schema 指纹、日事实缓存必须校验 `schema_fingerprint`、`core/schema.py` 必须提供 `schema_fingerprint()`。
+- 全量单测 363 项（新增 3 项）。
+
+## 历史 v2.55 核心变更
+
 - **修复「计划名称」为空**（2.54 的修复没生效）：根因在取数白名单——`core/loader.py` 的「无界-商品主体」白名单缺 `计划名字`，源文件其实带这一列，读文件时即被丢弃，导致汇总层拿不到值。
 - 修复三处：① `SOURCE_ALLOWED_FIELDS[SOURCE_WUJIE_SUBJECT]` 放行 `计划名字`；② 解析层缓存 `PARSED_CACHE_VERSION 'v11' → 'v12'`；③ 日事实缓存 `DAILY_FACT_CACHE_VERSION 'metox2.39-daily-facts-v3' → 'metox2.55-daily-facts-v5'`。
 - **两层缓存都必须换代**：解析层与日事实缓存只按「版本 + 路径 + 大小 + mtime」命中，源文件不变即命中；日事实缓存存的是合并结果，解析层未换代时重建出的仍是缺列老帧，因此日事实直接跳到 v5。

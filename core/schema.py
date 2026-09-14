@@ -1,4 +1,6 @@
-﻿"""半自动推广工具 — 数据字典与常量配置"""
+"""半自动推广工具 — 数据字典与常量配置"""
+import hashlib
+import json
 import re
 import numpy as np
 
@@ -101,6 +103,46 @@ WUJIE_REMAP = {
 
 # ── 6档分层标签 ──────────────────────────────────────────
 TIER_LABELS = ['滞销款','待改善','潜力款','冲刺款','金牛款','明星款']
+
+
+# ── 取数 schema 指纹（v2.56）──────────────────────────────
+#: 影响「源文件 → 标准化列集合」的解析层规则。改动任何一项都必须让两层缓存失效：
+#: 解析层缓存（loader._parsed）与日事实缓存（daily_cache）都只按
+#: 「版本 + 文件路径 + 大小 + mtime」命中，源文件不变就一直命中，
+#: 于是"改了白名单/别名却没换缓存版本"会表现为改完没生效（v2.55 踩过一次）。
+#: 现在把这张指纹编进缓存键与缓存载荷校验里，改规则即自动失效，不再依赖人工记得升版本。
+_PARSE_SCHEMA_TABLES = (
+    'FILE_CLASSIFIERS',
+    'NEW_PRODUCT_DAILY_FILE_CLASSIFIERS',
+    'ALLOWED_SOURCE_TYPES',
+    'FIELD_ALIASES',
+    'WUJIE_REMAP',
+)
+
+
+def _normalize_for_hash(value):
+    """把正则/集合/映射统一成可排序、可比对的纯文本结构。"""
+    if isinstance(value, re.Pattern):
+        return {'pattern': value.pattern, 'flags': value.flags}
+    if isinstance(value, (set, frozenset)):
+        return sorted(_normalize_for_hash(item) for item in value)
+    if isinstance(value, dict):
+        return {str(key): _normalize_for_hash(item) for key, item in sorted(value.items())}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_for_hash(item) for item in value]
+    return value
+
+
+def schema_fingerprint() -> str:
+    """解析层 schema 指纹（内容哈希，不含时间戳，跨进程稳定）。"""
+    module = globals()
+    payload = {
+        name: _normalize_for_hash(module.get(name))
+        for name in _PARSE_SCHEMA_TABLES
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.md5(raw.encode('utf-8')).hexdigest()[:16]
+
 
 # ── 36宫格矩阵 ────────────────────────────────────────────
 MATRIX_36 = {}

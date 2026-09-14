@@ -85,6 +85,20 @@ def _atomic_pickle_dump(cache_path: Path, payload: dict, prefix: str) -> Path:
         raise
 
 
+def schema_fingerprint():
+    """取数 schema 指纹（v2.56）：白名单/别名一改，两层缓存自动失效。
+
+    函数内延迟导入，避免 loader <-> daily_cache 的导入环；导入失败时返回空串
+    （退回"只看版本号"的老行为，不让缓存机制本身把主流程弄挂）。
+    """
+    try:
+        from .loader import source_schema_fingerprint
+
+        return source_schema_fingerprint()
+    except Exception:  # pragma: no cover - 理论上不会发生
+        return ""
+
+
 def load_daily_fact_cache(cache_root, day, entries, expected_fingerprint=None):
     """Return a cached daily fact payload, or None when stale/unreadable."""
     try:
@@ -101,6 +115,12 @@ def load_daily_fact_cache(cache_root, day, entries, expected_fingerprint=None):
         if payload.get("version") != DAILY_FACT_CACHE_VERSION:
             return None
         if payload.get("source_fingerprint") != expected_fingerprint:
+            return None
+        # v2.56：schema/白名单指纹不一致 → 视为未命中。
+        # 旧载荷没有这个字段时按**兼容命中**处理（不与版本换代叠加，避免用户重复付一次重建成本）；
+        # 从 v2.56 起写入的载荷都带指纹，之后任何白名单/别名改动都会自动失效。
+        stored_schema = payload.get("schema_fingerprint")
+        if stored_schema is not None and stored_schema != schema_fingerprint():
             return None
 
         base_df = payload.get("base_df")
@@ -140,6 +160,7 @@ def save_daily_fact_cache(
     payload = {
         "version": DAILY_FACT_CACHE_VERSION,
         "source_fingerprint": str(verified_fingerprint),
+        "schema_fingerprint": schema_fingerprint(),
         "base_df": base_df.copy(deep=True) if isinstance(base_df, pd.DataFrame) else base_df,
         "plan_ids": sorted(str(plan_id) for plan_id in (plan_ids or set())),
         "files_info": list(files_info or []),
@@ -162,6 +183,10 @@ def load_shared_dimension_cache(cache_root, entries, expected_fingerprint=None):
         if payload.get("version") != SHARED_DIMENSION_CACHE_VERSION:
             return None
         if payload.get("source_fingerprint") != expected_fingerprint:
+            return None
+        # v2.56：schema/白名单指纹不一致 → 视为未命中（旧载荷缺字段时兼容命中，同日报事实缓存）
+        stored_schema = payload.get("schema_fingerprint")
+        if stored_schema is not None and stored_schema != schema_fingerprint():
             return None
         dimensions = payload.get("dimensions")
         files_info = payload.get("files_info")
@@ -197,6 +222,7 @@ def save_shared_dimension_cache(
     payload = {
         "version": SHARED_DIMENSION_CACHE_VERSION,
         "source_fingerprint": str(verified_fingerprint),
+        "schema_fingerprint": schema_fingerprint(),
         "dimensions": {
             key: value.copy(deep=True) if isinstance(value, pd.DataFrame) else value
             for key, value in dimensions.items()
@@ -215,6 +241,7 @@ __all__ = [
     "SHARED_DIMENSION_CACHE_VERSION",
     "dataset_cache_key",
     "source_fingerprint",
+    "schema_fingerprint",
     "load_daily_fact_cache",
     "save_daily_fact_cache",
     "load_shared_dimension_cache",

@@ -1,6 +1,7 @@
 """文件读取与列名标准化"""
 import csv
 import hashlib
+import json
 import os
 import re
 import zipfile
@@ -13,6 +14,7 @@ from .schema import (
     ALLOWED_SOURCE_TYPES, FIELD_ALIASES, SOURCE_WUJIE_SUBJECT,
     WUJIE_REMAP, classify_file, SOURCE_PRODUCT_ROI, SOURCE_STOCK,
     SOURCE_PRODUCT_INFO, SOURCE_PRODUCT_OVERALL, SOURCE_WUJIE_CREATIVE,
+    schema_fingerprint,
 )
 from .data_validation import (
     SOURCE_REQUIRED_FIELDS,
@@ -298,10 +300,29 @@ def read_table(filepath, source_type=None):
 def _parsed_cache_path(filepath, source_type, parsed_cache_dir=None):
     path = Path(filepath)
     stat = path.stat()
-    raw = f"{PARSED_CACHE_VERSION}|{path.resolve()}|{source_type}|{stat.st_size}|{stat.st_mtime_ns}"
+    raw = (f"{PARSED_CACHE_VERSION}|{source_schema_fingerprint()}|"
+           f"{path.resolve()}|{source_type}|{stat.st_size}|{stat.st_mtime_ns}")
     key = hashlib.md5(raw.encode('utf-8')).hexdigest()
     cache_dir = Path(parsed_cache_dir) if parsed_cache_dir else path.parent / '_parsed'
     return cache_dir / f'{key}.pkl'
+
+
+def source_schema_fingerprint() -> str:
+    """取数 schema 指纹 = schema 表指纹 + 本模块「源类型→允许列」白名单指纹。
+
+    v2.56：编进解析层缓存键与日事实缓存校验，改动白名单/别名后缓存自动失效，
+    不需要人工记得升 `PARSED_CACHE_VERSION` / `DAILY_FACT_CACHE_VERSION`
+    （v2.55 就是因为漏升一次，出现"改了白名单但结果没变"）。
+    """
+    payload = {
+        'schema': schema_fingerprint(),
+        'allowed': {
+            str(source): sorted(str(column) for column in columns)
+            for source, columns in sorted(SOURCE_ALLOWED_FIELDS.items())
+        },
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.md5(raw.encode('utf-8')).hexdigest()[:16]
 
 
 def read_prepared_source(filepath, source_type, parsed_cache_dir=None):

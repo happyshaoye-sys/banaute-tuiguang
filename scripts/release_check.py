@@ -286,9 +286,15 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         "verified_fingerprint",
         "daily fact sources changed before cache write",
         "shared dimension sources changed before cache write",
+        # v2.56：取数 schema 指纹必须进缓存键/载荷校验，白名单改动自动失效
+        "schema_fingerprint",
     ):
         if snippet not in daily_cache:
             errors.append(f"daily cache safety contract missing: {snippet}")
+    if "source_schema_fingerprint" not in loader or "schema_fingerprint()" not in loader:
+        errors.append("parsed cache key must include the source schema fingerprint")
+    if "def schema_fingerprint(" not in (ROOT / "core" / "schema.py").read_text(encoding="utf-8"):
+        errors.append("core/schema.py must expose schema_fingerprint()")
     for relative in (
         "core/new_product_first_seen.py",
         "core/new_product_lifecycle.py",

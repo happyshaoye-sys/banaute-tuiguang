@@ -17,6 +17,7 @@ from core.daily_cache import (
     load_shared_dimension_cache,
     save_daily_fact_cache,
     save_shared_dimension_cache,
+    schema_fingerprint as cache_schema_fingerprint,
     source_fingerprint,
 )
 from core.merge import (
@@ -203,6 +204,80 @@ class DailyFactPipelineContractTests(unittest.TestCase):
         # v2.54：明细记录带出计划名称（此前只有计划ID），推广计划管理/全量明细才有名称
         self.assertIn("计划名:连衣裙-主推-精准", row["推广明细"])
         self.assertIn("连衣裙-主推-精准", str(row[FULL_PLAN_DETAIL_COLUMN]))
+
+    def test_schema_fingerprint_changes_when_whitelist_changes(self):
+        """v2.56：改白名单必须让 schema 指纹变化 → 两层缓存自动失效。
+
+        背景：两层缓存只按「版本+路径+大小+mtime」命中，v2.55 就是漏升一次版本，
+        导致"白名单放行了 计划名字 但结果没变"。现在指纹进缓存键/载荷校验，不再依赖人工升版本。
+        """
+        import core.loader as loader_module
+        from core.schema import schema_fingerprint as schema_only_fingerprint
+
+        baseline_schema = schema_only_fingerprint()
+        baseline_source = loader_module.source_schema_fingerprint()
+        self.assertTrue(baseline_schema)
+        self.assertEqual(cache_schema_fingerprint(), baseline_source)
+        # 指纹必须稳定（同进程多次调用一致）
+        self.assertEqual(loader_module.source_schema_fingerprint(), baseline_source)
+
+        original = loader_module.SOURCE_ALLOWED_FIELDS[SOURCE_WUJIE_SUBJECT]
+        try:
+            loader_module.SOURCE_ALLOWED_FIELDS[SOURCE_WUJIE_SUBJECT] = original | {"新增测试列"}
+            changed = loader_module.source_schema_fingerprint()
+        finally:
+            loader_module.SOURCE_ALLOWED_FIELDS[SOURCE_WUJIE_SUBJECT] = original
+
+        self.assertNotEqual(changed, baseline_source)
+        self.assertEqual(loader_module.source_schema_fingerprint(), baseline_source)
+
+    def test_parsed_cache_key_includes_schema_fingerprint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "无界-商品主体-2026-09-11.xlsx"
+            path.write_text("source", encoding="utf-8")
+            import core.loader as loader_module
+
+            first = loader_module._parsed_cache_path(path, SOURCE_WUJIE_SUBJECT)
+            original = loader_module.SOURCE_ALLOWED_FIELDS[SOURCE_WUJIE_SUBJECT]
+            try:
+                loader_module.SOURCE_ALLOWED_FIELDS[SOURCE_WUJIE_SUBJECT] = original | {"新增测试列"}
+                second = loader_module._parsed_cache_path(path, SOURCE_WUJIE_SUBJECT)
+            finally:
+                loader_module.SOURCE_ALLOWED_FIELDS[SOURCE_WUJIE_SUBJECT] = original
+            third = loader_module._parsed_cache_path(path, SOURCE_WUJIE_SUBJECT)
+
+            self.assertNotEqual(first.name, second.name)
+            self.assertEqual(first.name, third.name)
+
+    def test_daily_fact_cache_misses_when_schema_fingerprint_differs(self):
+        daily_sources = _daily_sources(include_dimensions=False)
+        base_df, plan_ids = build_daily_facts(daily_sources)
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_root = Path(tmp)
+            source_path = cache_root / "product.xlsx"
+            source_path.write_text("source-v1", encoding="utf-8")
+            entries = [(source_path, SOURCE_PRODUCT_ROI)]
+            save_daily_fact_cache(
+                cache_root, DAY, entries, base_df=base_df, plan_ids=plan_ids,
+                files_info=[], total_files=len(entries),
+                verified_fingerprint=source_fingerprint(entries),
+            )
+            self.assertIsNotNone(load_daily_fact_cache(cache_root, DAY, entries))
+
+            # 模拟旧载荷：把 schema 指纹改坏 → 必须按未命中处理
+            cache_path = next(cache_root.glob("**/*.pkl"))
+            with cache_path.open("rb") as fh:
+                payload = pickle.load(fh)
+            payload["schema_fingerprint"] = "stale-fingerprint"
+            with cache_path.open("wb") as fh:
+                pickle.dump(payload, fh)
+            self.assertIsNone(load_daily_fact_cache(cache_root, DAY, entries))
+
+            # 旧载荷没有这个字段 → 兼容命中（不与版本换代叠加，避免用户重复付一次重建成本）
+            payload.pop("schema_fingerprint", None)
+            with cache_path.open("wb") as fh:
+                pickle.dump(payload, fh)
+            self.assertIsNotNone(load_daily_fact_cache(cache_root, DAY, entries))
 
     def test_cached_facts_use_latest_shared_dimensions_on_each_merge(self):
         daily_sources = _daily_sources(include_dimensions=False)

@@ -1,6 +1,6 @@
 {
   "product": "MetoX",
-  "version": "2.55",
+  "version": "2.56",
   "release_date": "2026-09-14",
   "external_strategy_version": "v9.3",
   "rule_versions": {
@@ -59,6 +59,7 @@
     "promotion_plan_name": "2026-09-14",
     "promotion_plan_name_loader": "2026-09-14",
     "daily_fact_cache_v4": "2026-09-14",
+    "cache_schema_fingerprint": "2026-09-14",
     "kpi_trend_date_format": "2026-09-14"
   }
 }
