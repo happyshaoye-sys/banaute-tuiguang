@@ -347,6 +347,11 @@ ROLLING_SALES_SPECS = [
     (7, "日销7", "支付件数"),
     (15, "日销15", "支付件数"),
 ]
+ROLLING_VISITOR_SPECS = [
+    (3, "日均访客3", "商品访客数"),
+    (7, "日均访客7", "商品访客数"),
+    (15, "日均访客15", "商品访客数"),
+]
 ROLLING_SPEND_SPECS = [
     (3, "花费3", "付费"),
     (7, "花费7", "付费"),
@@ -381,6 +386,7 @@ def apply_rolling_daily_metrics(df, day_map, date_str):
     """挂载滚动日均字段(固定以分析日为终点,不受主表周期口径影响)。
 
     - 日销3/日销7/日销15: 生意参谋04 支付件数, 近 N 日累计 ÷ N
+    - 日均访客3/日均访客7/日均访客15: 生意参谋04 商品访客数, 近 N 日累计 ÷ N
     - 花费3/花费7/花费15: 无界15天转化行 付费, 近 N 日累计 ÷ N
     """
     if df is None or len(df) == 0 or "宝贝ID" not in df.columns:
@@ -388,7 +394,8 @@ def apply_rolling_daily_metrics(df, day_map, date_str):
     out = df.copy()
     out["宝贝ID"] = out["宝贝ID"].astype(str).str.strip()
 
-    for window_days, out_col, metric in ROLLING_SALES_SPECS + ROLLING_SPEND_SPECS:
+    rolling_specs = ROLLING_SALES_SPECS + ROLLING_VISITOR_SPECS + ROLLING_SPEND_SPECS
+    for window_days, out_col, metric in rolling_specs:
         summed = _window_metric_sums(day_map, date_str, window_days, metric)
         if summed.empty:
             out[out_col] = 0.0

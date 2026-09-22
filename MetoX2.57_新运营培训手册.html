@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>MetoX2.57 新运营培训手册</title>
+<style>
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; margin: 0; background: #f5f6f8; color: #1f2329; }
+  main { max-width: 1000px; margin: 0 auto; padding: 32px 24px 64px; background: #fff; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 32px 0 10px; padding-left: 10px; border-left: 4px solid #2f6feb; }
+  h3 { font-size: 16px; margin: 20px 0 8px; color: #2f6feb; }
+  p, li, td, th { font-size: 14px; line-height: 1.75; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 6px; }
+  th, td { border: 1px solid #dfe3e8; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f0f4fb; font-weight: 600; }
+  code { background: #f2f3f5; padding: 1px 5px; border-radius: 3px; font-family: Consolas, monospace; }
+  .note { background: #fff8e6; border-left: 4px solid #f0a020; padding: 8px 12px; margin: 10px 0; }
+  .warn { background: #fdecec; border-left: 4px solid #d64545; padding: 8px 12px; margin: 10px 0; }
+  .ok { background: #eef7ee; border-left: 4px solid #2e9e4f; padding: 8px 12px; margin: 10px 0; }
+  header { border-bottom: 1px solid #e5e8ee; padding-bottom: 14px; }
+</style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>MetoX2.57 新运营培训手册</h1>
+      <p>版本：MetoX v2.57 ｜ 发布日期：2026-09-22 ｜ 外部策略：v9.3（未变更）</p>
+      <p class="ok" style="margin-top:12px"><b>v2.57 新增 3 个滚动日均访客字段</b>：执行表与 Excel 在「日销15」后新增
+      <code>日均访客3</code>、<code>日均访客7</code>、<code>日均访客15</code>，用于对照短、中期流量趋势，统一保留 2 位小数。</p>
+      <p class="note" style="margin-top:8px"><b>口径边界</b>：固定以分析日为终点，近 N 个自然日商品访客数累计÷N；缺失日贡献0且分母不变。
+      三列不随主表周期切换，也不参与36宫格、商品周期、预算角色、新品生命周期或动作判定。</p>
+      <p class="warn" style="margin-top:8px"><b>v2.56 缓存自动失效机制与 v2.55 计划名称修复仍然有效。</b></p>
+    </header>
+      <p class="warn" style="margin-top:12px"><b>v2.55 只修一件事：计划名称。</b>
+      2.54 里"计划名称"仍为空，根因不在汇总层，而在取数白名单——
+      「无界-商品主体」的字段白名单没有 <code>计划名字</code>，源文件其实带这一列，读文件时就被丢掉。
+      本版放行该列，并把<b>解析层缓存（v11→v12）与日事实缓存（v3→v5）一起换代</b>：
+      这两层缓存只按"版本+文件路径+大小+mtime"命中，源文件没变就一直命中旧结果，只改白名单不升版本等于没改。
+      <b>首次运行会慢一次</b>（集团店 56 天实测 批量加载 372.58 秒 / 总计 391.90 秒），之后恢复热缓存速度。
+      修复后：执行表 <code>推广明细</code> 带 <code>计划名:…</code>、看板「推广计划管理」79/79 行计划名称非空、导出同步有值。</p>
+    </header>
+
+    <section>
+      <h2>一、v2.54 五个变化（一句话版）</h2>
+      <table>
+        <thead><tr><th>#</th><th>变化</th><th>对你的影响</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>1</td>
+            <td><b>主推线</b>：冻结阈值后只加载 28 天，引擎建议改由轻量缓存现算</td>
+            <td>加载更快（冷跑省一半时间）；建议值仍随时可算，只是改为点按钮复核</td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td><b>新增「新品变化」子页签</b>：真上新 / 历史补发现 / 消失 / 恢复在线</td>
+            <td>每天或每周一眼看清新品池"进了什么、出了什么"，可导出派活</td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td><b>清理规则护栏</b>：<code>衰退预警</code> 弱信号不再一票判清理</td>
+            <td>还在卖、还在涨的款不会被锁成"禁止加投"</td>
+          </tr>
+          <tr>
+            <td>4</td>
+            <td><b>日趋势横轴</b>改成 年-月-日</td>
+            <td>看趋势不再要猜 "Sep 11" 是哪天</td>
+          </tr>
+          <tr>
+            <td>5</td>
+            <td><b>推广计划管理补回计划名称</b></td>
+            <td>明细里能看到计划名，不再只有计划ID</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>二、主推线复核怎么用</h2>
+      <p>位置：<code>💰 预算决策看板 → 🔒 阈值冻结（由运营确认） → 🔍 主推线复核</code>。</p>
+      <h3>1. 什么时候点</h3>
+      <ul>
+        <li>面板提示"当前冻结值已使用 <b>N 天</b>（超过 14 天）"时；</li>
+        <li>大促前后、季节切换、明显感觉"主推款变多了/变少了"时。</li>
+      </ul>
+      <h3>2. 点了看什么</h3>
+      <ul>
+        <li><b>引擎建议来源</b>：本次 56 天日事实 / 轻量 GMV 缓存；以及缓存覆盖天数（不足会显示缺口）；</li>
+        <li><b>对照表</b>：引擎建议值、最新一周分界、当前生效值（<code>TH_MAIN</code> = 50% 覆盖分界，<code>TH_MID</code> = 80% 覆盖分界，单位元/天）；</li>
+        <li><b>影响预演</b>：同一批商品、只换阈值时各角色款数怎么变（例如"若采纳建议，ZT主推 X→Y 款"）。</li>
+      </ul>
+      <p class="note">复核<b>只算不动登记</b>：想采纳建议，回到上面点 <code>🔒 冻结 / 更新</code> 或 <code>✅ 采纳引擎建议并冻结</code>。</p>
+      <p class="ok"><b>为什么冻结后加载会变快：</b>角色判定只需要近 7 日 + 上一 7 日（14 天），同层基准要 28 天——
+      都在这 28 天里；56 天只是"现场算引擎建议"才需要。所以冻结后主流程读 28 天，引擎建议改用轻量缓存（只存每天 宝贝ID→GMV 与 6 个 KPI 数）。</p>
+    </section>
+
+    <section>
+      <h2>三、新品变化区（新）</h2>
+      <p>位置：<code>🆕 新品视图 → 新品变化</code>（第 4 个子页签）。先点过「加载新品历史」才有数据。</p>
+      <table>
+        <thead><tr><th>变化类型</th><th>口径</th><th>你该做什么</th></tr></thead>
+        <tbody>
+          <tr><td><b>真上新</b></td><td>本次首次进索引，且首次在线发现日<b>晚于</b>上次快照日</td><td>安排测款/上新动作</td></tr>
+          <tr><td><b>历史补发现</b></td><td>本次才进索引，但首现日<b>不晚于</b>上次快照日（换源/补文件造成）</td><td>不用当新上款处理，核对货号映射即可</td></tr>
+          <tr><td><b>消失</b></td><td>上次在线、本次明确非在线或不再出现，且<b>连续 2 个自然日</b></td><td>确认是否需要清退/复活（表里带款式主图，方便认款）</td></tr>
+          <tr><td><b>恢复在线</b></td><td>以前发现过、上次不在线、本次重新在线</td><td><b>不算全新款</b>，按老款继续观察</td></tr>
+          <tr><td><b>观察中（离线1天）</b></td><td>离线 1 天，未达 2 天确认</td><td>默认不占正文，需要时用"变化类型"筛出来看</td></tr>
+        </tbody>
+      </table>
+      <ul>
+        <li><b>对比基线</b>可切换：<code>上次运行</code>（默认）/ <code>3 天前</code> / <code>7 天前（上周同期）</code> / <code>14 天前</code>。</li>
+        <li>顶部 5 个卡片 + 单独「下载新品变化CSV」；快照按"年份|店铺"保留最近 30 份。</li>
+        <li><b>判定结果（下架 / 继续观察）翻转不作为变化列</b>——要看结果变化请回「生命周期判定」用"判定结果"筛选。</li>
+      </ul>
+      <p class="warn"><b>三条边界（必须知道）：</b>
+      ① 源文件缺失的那一天<b>不算消失</b>（整天源不可用时不判定、也不写快照）；
+      ② 回填历史（分析日不晚于上次快照日）<b>不推进快照</b>，页面会标"历史回算"；
+      ③ 粒度是<b>款式键</b>（货号优先，缺失回退宝贝ID）——多链接只要有一条在线就算在线。</p>
+    </section>
+
+    <section>
+      <h2>四、预算决策看板（角色层 + 阈值冻结）</h2>
+      <table>
+        <thead><tr><th>列</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td><code>决策角色</code></td><td><code>ZT主推 / ZT趋势预警 / TC投产 / TD梯队 / TD候选 / CS测试 / QC回收 / 清理 / 观察</code></td></tr>
+          <tr><td><code>角色闸门</code></td><td>只做减法：<code>禁止加投</code>→本轮归零；<code>测试封顶</code>→最多 500 元/周；<code>放行加投</code>→按错配规则原样执行</td></tr>
+          <tr><td><code>决策角色依据</code></td><td>为什么判成这个角色；被护栏放行的会带「清仓护栏放行：日销7 … ≥ TH_MID …」</td></tr>
+          <tr><td><code>未来7日建议调整金额</code></td><td>在错配规则基础上再乘角色系数；<code>0</code> 常见于"付费样本不足 100 元"或"占比差在 ±5pp 内"，属正常结论</td></tr>
+          <tr><td><code>链接投产</code></td><td>全链接 GMV ÷ 付费（含自然流量）；<code>推广投产</code> 为纯广告归因口径</td></tr>
+        </tbody>
+      </table>
+      <p>判定基准固定为<b>近 7 日</b>（<code>近7日日均GMV = 近7日窗口GMV ÷ 7</code>），与左侧"时间周期"无关。</p>
+      <h3>清理护栏（v2.54）</h3>
+      <p><code>衰退预警</code> 是 36 宫格位置变化产生的弱信号：若该款 <b>近7日日均GMV ≥ TH_MID</b> 或 <b>GMV趋势率 ≥ 0</b>，
+      就放行给正常瀑布判定（该是主推就是主推）；<code>清退 / 清仓 / 衰退期 / 淘汰 / 观察期</code> 等强标记照旧判清仓。</p>
+    </section>
+
+    <section>
+      <h2>五、操作顺序</h2>
+      <ol>
+        <li>侧边栏选日期与时间周期 → 点"加载并处理数据"。</li>
+        <li>进 <code>💰 预算决策看板</code>：先看摘要，再看 <code>🔒 阈值冻结</code>（首次使用请先冻结一次）。</li>
+        <li>冻结满 14 天或结构变化明显时，点 <code>🔍 重算引擎建议</code> 看影响预演，再决定是否更新冻结值。</li>
+        <li>按 <code>决策角色 + 角色闸门 + 未来7日建议调整金额</code> 逐款执行。</li>
+        <li>进 <code>🆕 新品视图</code>：点"加载新品历史 / 刷新新品历史" → 看"生命周期判定"（前 14 列含 日均访客/日均GMV）→ 切"新品变化"看进出。</li>
+        <li>交付用页面下载按钮；"导出全部Sheet"包含 <code>预算决策看板 / 排名档对齐 / 推广计划管理</code> 三张表。</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>六、边界（本次没改的事）</h2>
+      <ul>
+        <li>不改 MetoX 算法、36宫格商品定位/商品周期标签、动作逻辑、退款规则与外部 v9.3 策略。</li>
+        <li>不改新品判定门槛（D15/D30/D45、累计访客 300、加购率基准），本次只加"变化"视图。</li>
+        <li>轻量缓存（GMV / KPI）只服务阈值引擎与看板趋势，<b>不参与任何商品判定</b>。</li>
+        <li>30 天周期下仍按该周期自身需要加载（最多 60 天），"冻结后 28 天"只在 当日/3天/7天/15天 成立。</li>
+        <li>库存与盈亏平衡线只做提示，不参与角色与预算判定。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>七、启动</h2>
+      <ol>
+        <li>完整解压交付 ZIP，不要直接在压缩包内运行。</li>
+        <li>双击 <code>启动MetoX半自动推广工具.bat</code>。</li>
+        <li>浏览器会自动打开；实际地址以启动窗口中的 <code>METOX_URL=</code> 为准。</li>
+        <li>使用结束后关闭启动窗口即可停止服务。</li>
+      </ol>
+    </section>
+  </main>
+</body>
+</html>

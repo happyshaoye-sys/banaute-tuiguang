@@ -174,6 +174,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.new_product_view")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("new_product_lazy_history_load"):
         errors.append("VERSION.json must record rule_versions.new_product_lazy_history_load")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("rolling_visitor_metrics"):
+        errors.append("VERSION.json must record rule_versions.rolling_visitor_metrics")
 
     latest_tag, latest_version = _latest_version_tag()
     changed: set[str] = set()
@@ -204,6 +206,14 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("app.py must render DISPLAY_VERSION")
     if "新品视图" not in app_source:
         errors.append("app.py must render the read-only 新品视图 tab")
+    periods_source = (ROOT / "core" / "periods.py").read_text(encoding="utf-8-sig")
+    for snippet in (
+        '(3, "日均访客3", "商品访客数")',
+        '(7, "日均访客7", "商品访客数")',
+        '(15, "日均访客15", "商品访客数")',
+    ):
+        if snippet not in periods_source:
+            errors.append(f"rolling visitor metric contract missing: {snippet}")
     if "加载新品历史" not in app_source or "刷新新品历史" not in app_source:
         errors.append("新品视图 must expose a lazy history load/refresh button")
     load_folder_source = _function_source(app_source, "_load_folder_cached")
