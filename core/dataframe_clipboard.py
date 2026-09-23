@@ -30,6 +30,8 @@ def build_dataframe_copy_button_html(frame: pd.DataFrame, *, button_key: str) ->
 <script>
 (() => {{
   const marker = {marker_json};
+  const owner = marker + "-" + Date.now().toString(36)
+    + "-" + Math.random().toString(36).slice(2);
   const encoded = {payload_json};
   const copyLabel = {copy_label_json};
   const copiedLabel = {copied_label_json};
@@ -143,6 +145,7 @@ def build_dataframe_copy_button_html(frame: pd.DataFrame, *, button_key: str) ->
   function bindCopyButton(button) {{
     button.type = "button";
     button.setAttribute("data-metox-copy", marker);
+    button.setAttribute("data-metox-copy-owner", owner);
     button.setAttribute("aria-label", copyLabel);
     button.setAttribute("title", copyTitle);
     button.setAttribute("data-metox-copy-state", "idle");
@@ -178,7 +181,12 @@ def build_dataframe_copy_button_html(frame: pd.DataFrame, *, button_key: str) ->
     if (!dataframe) return false;
 
     const current = dataframe.querySelector(`[data-metox-copy="${{marker}}"]`);
-    if (current) return true;
+    if (current) {{
+      if (current.getAttribute("data-metox-copy-owner") === owner) return true;
+      const currentSlot = current.closest('[data-metox-copy-slot]');
+      if (currentSlot) currentSlot.remove();
+      else current.remove();
+    }}
     const stale = parentDocument.querySelector(`[data-metox-copy="${{marker}}"]`);
     if (stale) {{
       const staleSlot = stale.closest('[data-metox-copy-slot]');
@@ -204,9 +212,20 @@ def build_dataframe_copy_button_html(frame: pd.DataFrame, *, button_key: str) ->
     if (!copyButton) return false;
     clearDuplicateIds(copySlot);
     copySlot.setAttribute("data-metox-copy-slot", marker);
+    copySlot.setAttribute("data-metox-copy-owner", owner);
     bindCopyButton(copyButton);
     toolbar.insertBefore(copySlot, firstSlot);
     return true;
+  }}
+
+  function removeOwnedButton() {{
+    const owned = parentDocument.querySelector(
+      `[data-metox-copy-owner="${{owner}}"]`
+    );
+    if (!owned) return;
+    const ownedSlot = owned.closest('[data-metox-copy-slot]');
+    if (ownedSlot) ownedSlot.remove();
+    else owned.remove();
   }}
 
   let scheduled = false;
@@ -226,6 +245,11 @@ def build_dataframe_copy_button_html(frame: pd.DataFrame, *, button_key: str) ->
     attempts += 1;
     if (installInNativeToolbar() || attempts >= 100) window.clearInterval(retryTimer);
   }}, 100);
+  window.addEventListener("pagehide", () => {{
+    observer.disconnect();
+    window.clearInterval(retryTimer);
+    removeOwnedButton();
+  }}, {{ once: true }});
   installInNativeToolbar();
 }})();
 </script>

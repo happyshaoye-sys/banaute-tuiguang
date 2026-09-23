@@ -16,7 +16,7 @@ class VersionContractTests(unittest.TestCase):
     def test_version_json_is_the_application_identity(self):
         info = json.loads((ROOT / "VERSION.json").read_text(encoding="utf-8"))
         self.assertEqual(info["product"], "MetoX")
-        self.assertEqual(info["version"], "2.58")
+        self.assertEqual(info["version"], "2.59")
         self.assertEqual(info["release_date"], "2026-09-23")
         self.assertEqual(info["external_strategy_version"], "v9.3")
         self.assertEqual(info["rule_versions"]["refund_risk"], "2026-08-02")
@@ -33,6 +33,7 @@ class VersionContractTests(unittest.TestCase):
         self.assertEqual(info["rule_versions"]["ai_task_plan_pipeline"], "2026-08-03")
         self.assertEqual(info["rule_versions"]["data_contract_validation"], "2026-08-03")
         self.assertEqual(info["rule_versions"]["category_analysis_copy"], "2026-09-23")
+        self.assertEqual(info["rule_versions"]["category_copy_lifecycle"], "2026-09-23")
         self.assertEqual(info["rule_versions"]["execution_column_order"], "2026-08-10")
         self.assertEqual(info["rule_versions"]["metox_cart_burst_label"], "2026-08-06")
         self.assertEqual(info["rule_versions"]["ai_task_metox_priority"], "2026-08-06")
@@ -82,7 +83,7 @@ class VersionContractTests(unittest.TestCase):
         self.assertEqual(info["rule_versions"]["kpi_trend_date_format"], "2026-09-14")
         self.assertEqual(info["rule_versions"]["rolling_visitor_metrics"], "2026-09-22")
         self.assertEqual(version.VERSION_INFO, info)
-        self.assertEqual(version.DISPLAY_VERSION, "MetoX v2.58")
+        self.assertEqual(version.DISPLAY_VERSION, "MetoX v2.59")
 
     def test_app_imports_version_instead_of_assigning_one(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
@@ -117,12 +118,12 @@ class VersionContractTests(unittest.TestCase):
 
     def test_current_operator_documents_show_v2_contract(self):
         documents = {
-            "README.md": "MetoX v2.58",
-            "README_离线使用说明.txt": "MetoX v2.58",
-            "第三方使用说明_先看这个.txt": "MetoX v2.58",
-            "半自动推广工具_数据源与指标说明.md": "MetoX v2.58",
-            "MetoX2.58_使用说明与运营操作顺序.md": "MetoX v2.58",
-            "MetoX2.58_新运营培训手册.html": "MetoX2.58",
+            "README.md": "MetoX v2.59",
+            "README_离线使用说明.txt": "MetoX v2.59",
+            "第三方使用说明_先看这个.txt": "MetoX v2.59",
+            "半自动推广工具_数据源与指标说明.md": "MetoX v2.59",
+            "MetoX2.59_使用说明与运营操作顺序.md": "MetoX v2.59",
+            "MetoX2.59_新运营培训手册.html": "MetoX2.59",
         }
         for relative, marker in documents.items():
             with self.subTest(relative=relative):

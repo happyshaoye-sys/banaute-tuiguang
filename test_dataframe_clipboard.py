@@ -61,6 +61,17 @@ class DataframeClipboardTests(unittest.TestCase):
         self.assertIn('data-metox-copy-state", "copied"', html)
         self.assertIn('data-metox-copy-state", "failed"', html)
 
+    def test_copy_component_reclaims_stale_button_after_rerun(self):
+        frame = pd.DataFrame([{"category": "dress"}])
+
+        html = build_dataframe_copy_button_html(frame, button_key="category-basic")
+
+        self.assertIn("const owner =", html)
+        self.assertIn("data-metox-copy-owner", html)
+        self.assertIn('current.getAttribute("data-metox-copy-owner") === owner', html)
+        self.assertIn("removeOwnedButton", html)
+        self.assertIn('window.addEventListener("pagehide"', html)
+
     def test_category_tables_use_distinct_copy_buttons(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
 
