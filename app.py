@@ -8,7 +8,6 @@ from functools import partial
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 from core.loader import read_prepared_source
 from core.data_validation import (
@@ -40,6 +39,7 @@ from core.periods import (
 )
 from core.segmentation import segment_products
 from core.analysis import (
+    CATEGORY_BASIC_COLUMNS, CATEGORY_INVESTMENT_COLUMNS,
     build_daily_kpi_trends, calc_kpis, calc_kpi_mom_percent, grade_distribution, channel_summary,
     segment_summary, category_analysis, refund_risk, channel_top, inventory_actions,
     build_operating_daily_report,
@@ -4602,6 +4602,7 @@ with tab4:
                     filtered,
                     cat_ctx=export_cat_ctx,
                     ranking_df=execution_df,
+                    category_df=df,
                 )
                 st.session_state["exec_xlsx_meta"] = \
                     f"{len(filtered)}行 {datetime.now().strftime('%H:%M:%S')}"
@@ -4619,6 +4620,7 @@ with tab4:
             filtered,
             cat_ctx=export_cat_ctx,
             ranking_df=execution_df,
+            category_df=df,
             new_product_ctx=_filter_new_product_context(
                 st.session_state.get('new_product_ctx'), filtered
             ),
@@ -4658,28 +4660,28 @@ with tab6:
         cat = category_analysis(df, cat_ctx=_ctx)
         if cat['basic']:
             st.subheader("品类基础分析")
-            basic_category_df = pd.DataFrame(cat['basic'])
-            components.html(
+            basic_category_df = pd.DataFrame(cat['basic'], columns=CATEGORY_BASIC_COLUMNS)
+            st.iframe(
                 build_dataframe_copy_button_html(
                     basic_category_df,
                     button_key="category-basic",
                 ),
-                height=0,
-                scrolling=False,
+                height=1,
             )
             st.dataframe(basic_category_df, width="stretch", hide_index=True)
             t = cat.get('total', {})
             st.caption(f"合计: {t.get('cnt',0)} 商品 | GMV ¥{t.get('gmv',0)/1e4:.2f}万 | ROI {t.get('roi',0)}")
         if cat.get('invest'):
             st.subheader("品类投放占比与ROI")
-            category_investment_df = pd.DataFrame(cat['invest'])
-            components.html(
+            category_investment_df = pd.DataFrame(
+                cat['invest'], columns=CATEGORY_INVESTMENT_COLUMNS
+            )
+            st.iframe(
                 build_dataframe_copy_button_html(
                     category_investment_df,
                     button_key="category-investment",
                 ),
-                height=0,
-                scrolling=False,
+                height=1,
             )
             st.dataframe(category_investment_df, width="stretch", hide_index=True)
     except Exception as e:

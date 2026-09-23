@@ -146,6 +146,8 @@ def check_release(require_release_branch: bool = False) -> list[str]:
         errors.append("VERSION.json must record rule_versions.execution_cart_rates")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("category_investment_export"):
         errors.append("VERSION.json must record rule_versions.category_investment_export")
+    if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("category_basic_export"):
+        errors.append("VERSION.json must record rule_versions.category_basic_export")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("execution_metric_statuses"):
         errors.append("VERSION.json must record rule_versions.execution_metric_statuses")
     if not isinstance(info.get("rule_versions"), dict) or not info["rule_versions"].get("metric_status_rule_export"):

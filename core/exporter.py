@@ -1,7 +1,11 @@
 """Excel 导出"""
 import io
 import pandas as pd
-from .analysis import category_analysis
+from .analysis import (
+    CATEGORY_BASIC_COLUMNS,
+    CATEGORY_INVESTMENT_COLUMNS,
+    category_analysis,
+)
 from .data_validation import validate_paid_plan_consistency
 from .metric_labels import METRIC_STATUS_RULE_SHEET, metric_status_rule_frame
 from .schema import execution_export_frame
@@ -9,11 +13,7 @@ from .budget_decision import is_removed_budget_column
 
 
 CATEGORY_INVESTMENT_SHEET = '品类投放占比与ROI'
-CATEGORY_INVESTMENT_COLUMNS = [
-    '品类', 'GMV', 'GMV占比', '7天GMV', '7日GMV环比',
-    '付费', '付费占比', '上周期付费', '7日付费环比', '关键词', '人群', '全站',
-    '上周期关键词', '上周期人群', '上周期全站', 'ROI',
-]
+CATEGORY_BASIC_SHEET = '品类分析'
 
 EXECUTION_SHEET = '商品推广执行表'
 NEW_PRODUCT_LIFECYCLE_SHEET = '新品判定'
@@ -265,12 +265,23 @@ def _write_execution_sheet(writer, df, ranking_df=None):
 
 def _write_category_investment_sheet(writer, df, cat_ctx=None):
     """写入与品类分析页面同口径的投放占比与 ROI 表。"""
-    required = {'淘宝类目', '宝贝ID', 'GMV', '付费', '商品访客数', '关键词', '人群', '全站'}
+    required = {'淘宝类目', '宝贝ID', 'GMV', '付费'}
     rows = []
     if df is not None and not df.empty and required.issubset(df.columns):
         rows = category_analysis(df, cat_ctx=cat_ctx).get('invest', [])
     pd.DataFrame(rows, columns=CATEGORY_INVESTMENT_COLUMNS).to_excel(
         writer, sheet_name=CATEGORY_INVESTMENT_SHEET, index=False
+    )
+
+
+def _write_category_basic_sheet(writer, df, cat_ctx=None):
+    """写入与品类分析页面完全同字段、同口径的基础分析表。"""
+    required = {'淘宝类目', '宝贝ID', 'GMV', '付费'}
+    rows = []
+    if df is not None and not df.empty and required.issubset(df.columns):
+        rows = category_analysis(df, cat_ctx=cat_ctx).get('basic', [])
+    pd.DataFrame(rows, columns=CATEGORY_BASIC_COLUMNS).to_excel(
+        writer, sheet_name=CATEGORY_BASIC_SHEET, index=False
     )
 
 
@@ -615,24 +626,26 @@ def _write_budget_decision_sheets(writer, df, budget_decision_context=None):
 BUDGET_DECISION_PRODUCT_COLUMNS = budget_decision_product_columns()
 
 
-def export_execution_table(df, cat_ctx=None, ranking_df=None):
+def export_execution_table(df, cat_ctx=None, ranking_df=None, category_df=None):
     """导出执行表及品类投放占比与 ROI 为 Excel bytes。"""
     validate_paid_plan_consistency(df, '执行表Excel导出')
     output = io.BytesIO()
+    category_source = df if category_df is None else category_df
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         _write_execution_sheet(writer, df, ranking_df=ranking_df)
         _write_metric_status_rule_sheet(writer)
-        _write_category_investment_sheet(writer, df, cat_ctx=cat_ctx)
+        _write_category_investment_sheet(writer, category_source, cat_ctx=cat_ctx)
     output.seek(0)
     return output.read()
 
 
 def export_all_sheets(
         df, cat_ctx=None, ranking_df=None, new_product_ctx=None,
-        budget_decision_context=None):
+        budget_decision_context=None, category_df=None):
     """导出全部分析 Sheet"""
     validate_paid_plan_consistency(df, '全部Sheet Excel导出')
     output = io.BytesIO()
+    category_source = df if category_df is None else category_df
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         # 1. 执行表
         _write_execution_sheet(writer, df, ranking_df=ranking_df)
@@ -653,30 +666,11 @@ def export_all_sheets(
             ).reset_index()
             seg.to_excel(writer, sheet_name='商品分层明细', index=False)
 
-        # 5. 品类
-        if '淘宝类目' in df.columns:
-            work = df.copy()
-            if '退款率' in work.columns:
-                work['_退款率加权金额'] = pd.to_numeric(work['退款率'], errors='coerce').fillna(0.0) \
-                    * pd.to_numeric(work['GMV'], errors='coerce').fillna(0.0)
-            else:
-                work['_退款率加权金额'] = 0.0
-            agg = {
-                '商品数': ('宝贝ID', 'count'),
-                'GMV': ('GMV', 'sum'),
-                '付费': ('付费', 'sum'),
-                '_退款率加权金额': ('_退款率加权金额', 'sum'),
-            }
-            if '成功退款金额' in work.columns:
-                agg['成功退款金额'] = ('成功退款金额', 'sum')
-            cat = work.groupby('淘宝类目').agg(**agg).reset_index()
-            cat['退款率'] = cat['_退款率加权金额'] / cat['GMV'].replace(0, float('nan'))
-            cat['ROI'] = cat['GMV'] / cat['付费'].replace(0, float('nan'))
-            cat = cat.drop(columns=['_退款率加权金额'])
-            cat.to_excel(writer, sheet_name='品类分析', index=False)
+        # 5. 与页面一致的品类基础分析
+        _write_category_basic_sheet(writer, category_source, cat_ctx=cat_ctx)
 
         # 6. 与页面一致的品类投放占比与 ROI
-        _write_category_investment_sheet(writer, df, cat_ctx=cat_ctx)
+        _write_category_investment_sheet(writer, category_source, cat_ctx=cat_ctx)
 
         # 7. 退款风险（聚水潭cohort退款率>70%，与页面阈值一致）
         if '退款率' in df.columns:

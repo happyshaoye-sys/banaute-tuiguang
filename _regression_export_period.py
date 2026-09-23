@@ -41,7 +41,7 @@ def test_export_category_refund_uses_erp_rate():
 
     workbook = export_all_sheets(df)
     cat = pd.read_excel(io.BytesIO(workbook), sheet_name="品类分析")
-    actual = float(cat.loc[0, "退款率"])
+    actual = float(str(cat.loc[0, "退款率"]).rstrip("%")) / 100.0
     expected = (100.0 * 0.50 + 300.0 * 0.10) / 400.0
     check(
         "导出品类退款率使用ERP/cohort加权口径",

@@ -67,29 +67,37 @@ def build_dataframe_copy_button_html(frame: pd.DataFrame, *, button_key: str) ->
   host.style.overflow = "hidden";
 
   function fallbackCopy(text) {{
+    const previousFocus = parentDocument.activeElement;
     const textarea = parentDocument.createElement("textarea");
     textarea.value = text;
     textarea.setAttribute("readonly", "");
     textarea.style.position = "fixed";
     textarea.style.opacity = "0";
     parentDocument.body.appendChild(textarea);
+    textarea.focus({{ preventScroll: true }});
     textarea.select();
-    const copied = parentDocument.execCommand("copy");
-    textarea.remove();
-    if (!copied) throw new Error("copy command was rejected");
+    textarea.setSelectionRange(0, textarea.value.length);
+    let copied = false;
+    try {{
+      copied = parentDocument.execCommand("copy");
+    }} finally {{
+      textarea.remove();
+      if (previousFocus && previousFocus.focus) {{
+        previousFocus.focus({{ preventScroll: true }});
+      }}
+    }}
+    return copied;
   }}
 
   async function copyToClipboard() {{
+    // execCommand must run before the first await so it keeps the click activation.
+    if (fallbackCopy(clipboardText)) return "execCommand";
     const clipboard = parentWindow.navigator.clipboard;
     if (clipboard && clipboard.writeText) {{
-      try {{
-        await clipboard.writeText(clipboardText);
-        return;
-      }} catch (error) {{
-        console.warn("MetoX clipboard API was rejected; using fallback", error);
-      }}
+      await clipboard.writeText(clipboardText);
+      return "clipboard";
     }}
-    fallbackCopy(clipboardText);
+    throw new Error("no supported clipboard writer");
   }}
 
   function findTargetDataframe() {{
@@ -137,22 +145,29 @@ def build_dataframe_copy_button_html(frame: pd.DataFrame, *, button_key: str) ->
     button.setAttribute("data-metox-copy", marker);
     button.setAttribute("aria-label", copyLabel);
     button.setAttribute("title", copyTitle);
+    button.setAttribute("data-metox-copy-state", "idle");
     renderNativeSizedIcon(button, copyPath);
     button.addEventListener("click", async event => {{
       event.preventDefault();
       event.stopPropagation();
+      button.setAttribute("data-metox-copy-state", "copying");
       try {{
-        await copyToClipboard();
+        const copyMethod = await copyToClipboard();
+        button.setAttribute("data-metox-copy-state", "copied");
+        button.setAttribute("data-metox-copy-method", copyMethod);
         button.setAttribute("aria-label", copiedLabel);
         button.setAttribute("title", copiedLabel);
         renderNativeSizedIcon(button, copiedPath);
         window.setTimeout(() => {{
+          button.setAttribute("data-metox-copy-state", "idle");
+          button.removeAttribute("data-metox-copy-method");
           button.setAttribute("aria-label", copyLabel);
           button.setAttribute("title", copyTitle);
           renderNativeSizedIcon(button, copyPath);
         }}, 1600);
       }} catch (error) {{
         console.error("MetoX dataframe copy failed", error);
+        button.setAttribute("data-metox-copy-state", "failed");
         button.setAttribute("title", failedTitle);
       }}
     }});

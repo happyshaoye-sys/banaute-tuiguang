@@ -44,11 +44,32 @@ class DataframeClipboardTests(unittest.TestCase):
         self.assertNotIn('"right:6.25rem"', html)
         self.assertNotIn('removeAttribute("data-testid")', html)
 
+    def test_legacy_copy_runs_inside_the_original_click_activation(self):
+        frame = pd.DataFrame([{"category": "dress"}])
+
+        html = build_dataframe_copy_button_html(frame, button_key="category-basic")
+        copy_function = html.split("async function copyToClipboard()", 1)[1].split(
+            "function findTargetDataframe()", 1
+        )[0]
+
+        self.assertLess(
+            copy_function.index("fallbackCopy(clipboardText)"),
+            copy_function.index("clipboard.writeText"),
+        )
+        self.assertIn('textarea.focus({ preventScroll: true })', html)
+        self.assertIn("textarea.setSelectionRange(0, textarea.value.length)", html)
+        self.assertIn('data-metox-copy-state", "copied"', html)
+        self.assertIn('data-metox-copy-state", "failed"', html)
+
     def test_category_tables_use_distinct_copy_buttons(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
 
         self.assertIn('button_key="category-basic"', source)
         self.assertIn('button_key="category-investment"', source)
+        self.assertEqual(source.count("st.iframe("), 2)
+        self.assertEqual(source.count("height=1,"), 2)
+        self.assertNotIn("height=0,", source)
+        self.assertNotIn("streamlit.components.v1", source)
         self.assertIn(
             "st.dataframe(category_investment_df, width=\"stretch\", hide_index=True)",
             source,

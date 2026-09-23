@@ -473,6 +473,73 @@ class ExportAllSheetsTests(unittest.TestCase):
                 self.assertEqual(category.loc[0, '上周期全站'], 10.0)
                 self.assertEqual(category.loc[0, 'ROI'], 10.0)
 
+    def test_category_sheets_match_page_source_instead_of_execution_filters(self):
+        full_source = pd.DataFrame([
+            {
+                '宝贝ID': 'C1001', '淘宝类目': '连衣裙', 'GMV': 1000.0,
+                '付费': 0.0, '商品访客数': 100, '商品加购件数': 20,
+                '支付买家数': 10, '关键词': 0.0, '人群': 0.0, '全站': 0.0,
+                '退款率': 0.5,
+            },
+            {
+                '宝贝ID': 'C1002', '淘宝类目': 'T恤', 'GMV': 500.0,
+                '付费': 0.0, '商品访客数': 50, '商品加购件数': 5,
+                '支付买家数': 2, '关键词': 0.0, '人群': 0.0, '全站': 0.0,
+                '退款率': 0.1,
+            },
+        ])
+        execution_filter = full_source.iloc[[0]].copy()
+        category_context = {
+            'h7_cur_visitors': {'连衣裙': 100.0, 'T恤': 50.0},
+            'h7_prev_visitors': {'连衣裙': 80.0, 'T恤': 40.0},
+            'h7_cur_carts': {'连衣裙': 20.0, 'T恤': 5.0},
+            'h7_prev_carts': {'连衣裙': 10.0, 'T恤': 4.0},
+            'h7_cur_buyers': {'连衣裙': 10.0, 'T恤': 2.0},
+            'h7_prev_buyers': {'连衣裙': 8.0, 'T恤': 1.0},
+        }
+
+        workbook = export_all_sheets(
+            execution_filter,
+            category_df=full_source,
+            cat_ctx=category_context,
+        )
+        execution = pd.read_excel(io.BytesIO(workbook), sheet_name=EXECUTION_SHEET)
+        category = pd.read_excel(io.BytesIO(workbook), sheet_name='品类分析')
+        investment = pd.read_excel(
+            io.BytesIO(workbook), sheet_name='品类投放占比与ROI'
+        )
+
+        self.assertEqual(len(execution), 1)
+        self.assertEqual(category['商品数'].sum(), 2)
+        self.assertEqual(set(category['品类']), {'连衣裙', 'T恤'})
+        self.assertEqual(set(investment['品类']), {'连衣裙', 'T恤'})
+        self.assertEqual(
+            category.columns.tolist(),
+            [
+                '品类', '商品数', 'GMV', 'GMV占比', '付费占比', '付费',
+                '付费环比', '商品访客数', '访客数占比', '7日访客数环比',
+                '品类加购件数', '7日加购件数环比', '品类加购率',
+                '7日加购率环比', '品类支付转化率', '7日支付转化率环比',
+                '退款率', 'SPU价值', 'ROI',
+            ],
+        )
+        dress = category.set_index('品类').loc['连衣裙']
+        self.assertEqual(dress['商品访客数'], 100)
+        self.assertEqual(dress['7日访客数环比'], '25.0%')
+        self.assertEqual(dress['品类加购率'], '20.0%')
+        self.assertEqual(dress['品类支付转化率'], '10.0%')
+        self.assertEqual(dress['退款率'], '50.0%')
+
+        execution_workbook = export_execution_table(
+            execution_filter,
+            category_df=full_source,
+            cat_ctx=category_context,
+        )
+        execution_investment = pd.read_excel(
+            io.BytesIO(execution_workbook), sheet_name='品类投放占比与ROI'
+        )
+        self.assertEqual(set(execution_investment['品类']), {'连衣裙', 'T恤'})
+
     def test_metric_status_rule_document_is_in_both_downloads(self):
         source = pd.DataFrame([{
             '宝贝ID': '1004',

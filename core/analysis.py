@@ -6,6 +6,19 @@ from .schema import safe_div, to_num
 from .task_engine import AI_TASK_VIEW_COLUMNS, build_ai_task_view
 
 
+CATEGORY_BASIC_COLUMNS = [
+    '品类', '商品数', 'GMV', 'GMV占比', '付费占比', '付费', '付费环比',
+    '商品访客数', '访客数占比', '7日访客数环比', '品类加购件数',
+    '7日加购件数环比', '品类加购率', '7日加购率环比',
+    '品类支付转化率', '7日支付转化率环比', '退款率', 'SPU价值', 'ROI',
+]
+CATEGORY_INVESTMENT_COLUMNS = [
+    '品类', 'GMV', 'GMV占比', '7天GMV', '7日GMV环比',
+    '付费', '付费占比', '上周期付费', '7日付费环比', '关键词', '人群', '全站',
+    '上周期关键词', '上周期人群', '上周期全站', 'ROI',
+]
+
+
 def _s(df, col):
     """安全求和：列不存在返回 0"""
     return float(df[col].sum()) if col in df.columns else 0.0
@@ -498,7 +511,7 @@ def category_analysis(df, cat_ctx=None):
     for col in ('上周期金额', '上周期付费', '上周期关键词', '上周期人群', '上周期全站'):
         if col not in work.columns:
             work[col] = 0.0
-    for col in ('商品加购件数', '支付买家数'):
+    for col in ('商品访客数', '商品加购件数', '支付买家数', '关键词', '人群', '全站'):
         if col not in work.columns:
             work[col] = 0.0
         else:
