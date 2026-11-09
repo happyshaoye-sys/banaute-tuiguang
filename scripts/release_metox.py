@@ -324,7 +324,7 @@ def build_release(baseline: Path, launcher_runtime: Path, output_root: Path) -> 
                 },
             },
             "performance": {
-                "daily_fact_cache": "metox2.55-daily-facts-v5",
+                "daily_fact_cache": "metox2.63-daily-facts-v6",
                 "shared_dimension_cache": "metox2.30-shared-dimensions-v2",
                 "source_invalidation": "path+source_type+size+mtime_ns",
                 "atomic_write": True,

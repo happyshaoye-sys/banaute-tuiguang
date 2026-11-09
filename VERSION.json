@@ -1,6 +1,6 @@
 {
   "product": "MetoX",
-  "version": "2.62",
+  "version": "2.63",
   "release_date": "2026-11-09",
   "external_strategy_version": "v9.3",
   "rule_versions": {
@@ -66,6 +66,7 @@
     "rolling_visitor_metrics": "2026-09-22",
     "wujie_zip_source": "2026-11-09",
     "source_fallback": "2026-11-09",
-    "source_fallback_cart": "2026-11-09"
+    "source_fallback_cart": "2026-11-09",
+    "source_fallback_cache_invalidation": "2026-11-09"
   }
 }
