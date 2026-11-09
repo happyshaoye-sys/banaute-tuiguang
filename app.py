@@ -9,7 +9,7 @@ from functools import partial
 import pandas as pd
 import streamlit as st
 
-from core.loader import read_prepared_source
+from core.loader import dedupe_source_files, read_prepared_source
 from core.data_validation import (
     DataValidationError,
     DataValidationIssue,
@@ -181,6 +181,10 @@ def _log_time(timings, label, start, extra=""):
     timings.append((label, f"{elapsed:.2f} 秒", extra))
     return elapsed
 
+#: v2.60 同源类型多份文件（zip 与 xlsx 并存）被择一后丢弃的条目，供界面提示
+_dropped_multi_source_files: list = []
+
+
 def _scan_target_files(path, source_types=None):
     files = []
     allowed = PRIMARY_LOAD_SOURCE_TYPES if source_types is None else set(source_types)
@@ -191,12 +195,17 @@ def _scan_target_files(path, source_types=None):
         if not os.path.isfile(fp) or fn.startswith('~$'):
             continue
         ext = os.path.splitext(fn)[1].lower()
-        if ext not in ('.xlsx', '.xls', '.csv'):
+        if ext not in ('.xlsx', '.xls', '.csv', '.zip'):   # v2.60：无界报表 zip
             continue
         src_type = classify_file(fn)
         if src_type in allowed:
             files.append((fp, fn, src_type))
-    return files
+    # v2.60：同日同源类型可能 zip 与 xlsx 并存（同一批数据），必须先择一再读，否则花费翻倍
+    entries = [{'path': fp, 'name': fn, 'source': src} for fp, fn, src in files]
+    kept, dropped = dedupe_source_files(entries)
+    if dropped:
+        _dropped_multi_source_files[:] = dropped
+    return [(e['path'], e['name'], e['source']) for e in kept]
 
 
 def _period_cache_key(base_root, year, shop, start_date, end_date, label):

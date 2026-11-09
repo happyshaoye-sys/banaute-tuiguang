@@ -22,7 +22,10 @@ FILE_CLASSIFIERS = [
 # 新品源必须是按日导出的原始表。不能用“包含关键字”匹配，否则
 # `商品-整体退款分布-YYYY-MM-DD.xlsx` 会被误读为主图整体数据源并触发无效校验。
 NEW_PRODUCT_DAILY_FILE_CLASSIFIERS = [
-    (re.compile(r'(?:商品[-_]?整体|商品整体)[-_]?\d{4}-\d{2}-\d{2}$', re.IGNORECASE), SOURCE_PRODUCT_OVERALL),
+    # 2026-11-05 起商品数据改为单文件导出：商品_整体_<起>_<止>.xls（下划线 + 日期写两遍），
+    # 故日期后缀允许一次或两次；仍要求「商品[-_]?整体 + 日期」，不会误吃
+    # 商品-整体退款分布-YYYY-MM-DD 这类同前缀衍生表。
+    (re.compile(r'(?:商品[-_]?整体|商品整体)[-_]?\d{4}-\d{2}-\d{2}(?:[-_]\d{4}-\d{2}-\d{2})?$', re.IGNORECASE), SOURCE_PRODUCT_OVERALL),
     (re.compile(r'(?:无界[-_]?创意|无界创意)[-_]?\d{4}-\d{2}-\d{2}$', re.IGNORECASE), SOURCE_WUJIE_CREATIVE),
 ]
 
@@ -250,7 +253,13 @@ def to_num(v):
 
 def classify_file(fn):
     name = fn.lower()
-    stem = re.sub(r'\.(?:xlsx|xls|csv)$', '', name, flags=re.IGNORECASE)
+    if name.endswith('.zip'):
+        # v2.60：无界新导出 = 按报表打包的 zip；只认「商品总表 / 创意报表」两个包，
+        # 其余包（素材_创意报表/计划报表/人群报表/关键词报表）识别但不消费——
+        # 人群/关键词包是商品总表的场景子集，同时接入会重复计数。
+        from .zip_sources import classify_zip_package
+        return classify_zip_package(fn) or '其他数据'
+    stem = re.sub(r'\.(?:xlsx|xls|csv|zip)$', '', name, flags=re.IGNORECASE)
     for pattern, src in NEW_PRODUCT_DAILY_FILE_CLASSIFIERS:
         if pattern.fullmatch(stem):
             return src
