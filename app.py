@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from core.loader import dedupe_source_files, read_prepared_source
-from core.source_fallback import build_category_map, build_fallback_frame, describe_fallback
+from core.source_fallback import apply_fallback
 from core.data_validation import (
     DataValidationError,
     DataValidationIssue,
@@ -183,10 +183,10 @@ def _log_time(timings, label, start, extra=""):
     return elapsed
 
 #: v2.60 同源类型多份文件（zip 与 xlsx 并存）被择一后丢弃的条目，供界面提示
-_dropped_multi_source_files: list = []
+_dropped_multi_source_files = []
 
 #: v2.61 数据源覆盖/兜底提示（每次加载按日期重建）
-_SOURCE_COMPAT_NOTES: dict = {'day': '', 'notes': []}
+_SOURCE_COMPAT_NOTES = {'day': '', 'notes': []}
 
 
 def _source_compat_note(text: str, day: str = '') -> None:
@@ -756,33 +756,16 @@ def _read_sources_for_date(
 
     # ── v2.61 数据源兜底：某日缺「商品-经营投产比」时，用同日「商品-整体」+ 无界 + 历史类目
     #    构造列结构完全相同的替代帧（不新增任何业务字段），并把来源与缺口写进提示。
-    if SOURCE_PRODUCT_ROI not in sources and SOURCE_PRODUCT_OVERALL in sources:
-        overall_paths = [fp for fp, _df in sources.get(SOURCE_PRODUCT_OVERALL, [])]
-        lookback_folders = []
-        if product_folder:
-            parent = Path(product_folder).parent
-            candidates = sorted(
-                (p for p in parent.iterdir() if p.is_dir() and p.name[:2] == '20'),
-                reverse=True)
-            lookback_folders = candidates[:7]
-        try:
-            category_map = build_category_map(lookback_folders)
-            frame, stats = build_fallback_frame(
-                overall_paths, sources.get(SOURCE_WUJIE_SUBJECT, []), category_map)
-        except Exception as exc:  # noqa: BLE001 - 兜底失败不阻断主流程，只提示
-            frame, stats = None, {'ok': False, 'reason': f'{type(exc).__name__}: {str(exc)[:80]}'}
-        day_label = str(period_label).split(':')[-1]
-        if frame is not None and len(frame):
-            sources[SOURCE_PRODUCT_ROI] = [(f'<兜底>商品-整体+无界({day_label})', frame)]
-            files_info.append({
-                'name': '（兜底）商品-整体 + 无界', 'source': SOURCE_PRODUCT_ROI,
-                'rows': len(frame), 'cols': len(frame.columns), 'period': period_label,
-            })
-            _source_compat_note(describe_fallback(day_label, stats), day_label)
-        else:
-            _source_compat_note(
-                f"{day_label} 缺 `商品-经营投产比` 且兜底不可用（{stats.get('reason')}），"
-                f"该日 GMV/花费 将缺失", day_label)
+    #    v2.64：抽到 core.source_fallback.apply_fallback，且自己按商品目录找「商品-整体」
+    #    （主流程传 shared_dimensions 时 include_day_product=False，商品目录不扫描）。
+    _fb_injected, _fb_note, _fb_frame = apply_fallback(sources, product_folder, period_label)
+    if _fb_injected and _fb_frame is not None:
+        files_info.append({
+            'name': '（兜底）商品-整体 + 无界', 'source': SOURCE_PRODUCT_ROI,
+            'rows': len(_fb_frame), 'cols': len(_fb_frame.columns), 'period': period_label,
+        })
+    if _fb_note:
+        _source_compat_note(_fb_note, str(period_label).split(':')[-1])
 
     return sources, files_info, copied, len(file_list)
 

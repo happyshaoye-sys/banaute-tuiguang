@@ -168,6 +168,72 @@ def _scene_frames(wujie_frames):
     return agg
 
 
+def find_overall_paths(product_folder):
+    """在指定商品目录里找「商品-整体」文件（新老命名都认，排除退款分布等衍生表）。
+
+    v2.63 修复：主流程在传入 `shared_dimensions` 时不会扫描商品目录
+    （`include_day_product=False`），`sources` 里也就没有 `商品-整体`。
+    兜底必须自己按目录再找一遍，否则条件永远不成立、兜底不会触发。
+    """
+    if not product_folder:
+        return []
+    folder = Path(product_folder)
+    if not folder.is_dir():
+        return []
+    paths = []
+    for path in sorted(folder.iterdir()):
+        if not path.is_file() or path.suffix.lower() not in ('.xlsx', '.xls', '.csv'):
+            continue
+        name = path.name
+        if '整体' not in name or '退款' in name:
+            continue
+        if '商品-整体' in name or '商品_整体' in name:
+            paths.append(str(path))
+    return paths
+
+
+def apply_fallback(sources, product_folder, period_label=''):
+    """就地兜底：sources 缺「商品-经营投产比」时注入替代帧。
+
+    返回 ``(injected: bool, note: str, frame)``；无来源可兜底时 note 说明原因。
+    单独抽成函数的原因：主流程在传了 shared_dimensions 时不会扫描商品目录，
+    兜底必须自己按目录找「商品-整体」，这段逻辑必须可单测。
+    """
+    if not isinstance(sources, dict):
+        return False, '', None
+    from .schema import SOURCE_PRODUCT_ROI  # 延迟导入避免循环
+    if SOURCE_PRODUCT_ROI in sources:
+        return False, '', None
+
+    overall_paths = [fp for fp, _df in sources.get(SOURCE_PRODUCT_OVERALL, [])]
+    if not overall_paths:
+        overall_paths = find_overall_paths(product_folder)
+    day_label = str(period_label).split(':')[-1] if period_label else ''
+    if not overall_paths:
+        return False, (f"{day_label} 缺 `商品-经营投产比` 且无 `商品-整体` 可兜底，"
+                       f"该日 GMV/花费 将缺失" if day_label else ''), None
+
+    lookback_folders = []
+    if product_folder:
+        parent = Path(product_folder).parent
+        if parent.is_dir():
+            lookback_folders = sorted(
+                (p for p in parent.iterdir() if p.is_dir() and p.name[:2] == '20'),
+                reverse=True)[:7]
+    try:
+        category_map = build_category_map(lookback_folders)
+        frame, stats = build_fallback_frame(
+            overall_paths, sources.get(SOURCE_WUJIE_SUBJECT, []), category_map)
+    except Exception as exc:  # noqa: BLE001 - 兜底失败不阻断主流程
+        return False, f"{day_label} 兜底构造失败：{type(exc).__name__}: {str(exc)[:80]}", None
+
+    if frame is None or len(frame) == 0:
+        return False, f"{day_label} 缺 `商品-经营投产比` 且兜底不可用（{stats.get('reason')}）", None
+
+    sources[SOURCE_PRODUCT_ROI] = [(f'<兜底>商品-整体+无界({day_label})', frame)]
+    return True, describe_fallback(day_label, stats), frame
+
+
 def build_fallback_frame(overall_paths, wujie_frames, category_map=None):
     """构造与「商品-经营投产比」同列的兜底帧。返回 (DataFrame, 说明 dict)。"""
     category_map = category_map or {}

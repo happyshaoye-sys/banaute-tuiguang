@@ -11,6 +11,7 @@
 import unittest
 
 import pandas as pd
+from pathlib import Path
 
 from core.schema import SOURCE_PRODUCT_ROI
 from core.source_fallback import (
@@ -131,6 +132,61 @@ class CategoryMapTest(unittest.TestCase):
     def test_empty_folders_return_empty_map(self):
         self.assertEqual(build_category_map([]), {})
         self.assertEqual(build_category_map(None), {})
+
+
+class ApplyFallbackTest(unittest.TestCase):
+    """v2.64：兜底必须在「sources 里没有 商品-整体」时也能生效（主流程形态）。"""
+
+    def setUp(self):
+        import tempfile
+        import core.source_fallback as mod
+        self.mod = mod
+        self._orig = mod.read_overall_raw
+        mod.read_overall_raw = lambda path: overall_frame()
+        self.tmp = Path(tempfile.mkdtemp(prefix="metox_fb_"))
+        self.day_dir = self.tmp / "2026-11-08"
+        self.day_dir.mkdir()
+        (self.day_dir / "商品_整体_2026-11-08_2026-11-08.xls").write_bytes(b"stub")
+        (self.day_dir / "商品-整体退款分布-2026-11-08.xlsx").write_bytes(b"stub")
+
+    def tearDown(self):
+        import shutil
+        self.mod.read_overall_raw = self._orig
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_injects_when_roi_missing_and_overall_not_scanned(self):
+        """主流程传 shared_dimensions 时商品目录不扫描 → sources 只有无界，兜底仍须触发。"""
+        sources = {'无界-商品主体': [('wj', wujie_frame())]}
+        injected, note, frame = self.mod.apply_fallback(
+            sources, str(self.day_dir), '当期:2026-11-08')
+        self.assertTrue(injected)
+        self.assertIsNotNone(frame)
+        self.assertIn(SOURCE_PRODUCT_ROI, sources)
+        self.assertEqual(tuple(frame.columns), FALLBACK_COLUMNS)
+        self.assertEqual(len(frame), 2)
+        self.assertIn('2026-11-08', note)
+
+    def test_no_op_when_roi_present(self):
+        sources = {SOURCE_PRODUCT_ROI: [('x', overall_frame())]}
+        injected, note, frame = self.mod.apply_fallback(sources, str(self.day_dir), '当期:2026-11-08')
+        self.assertFalse(injected)
+        self.assertEqual(note, '')
+        self.assertIsNone(frame)
+        self.assertEqual(len(sources[SOURCE_PRODUCT_ROI]), 1)
+
+    def test_note_when_nothing_to_fallback(self):
+        empty_dir = self.tmp / "2026-11-09"
+        empty_dir.mkdir()
+        sources = {'无界-商品主体': [('wj', wujie_frame())]}
+        injected, note, frame = self.mod.apply_fallback(sources, str(empty_dir), '当期:2026-11-09')
+        self.assertFalse(injected)
+        self.assertIsNone(frame)
+        self.assertIn('无 `商品-整体`', note)
+
+    def test_find_overall_paths_excludes_refund_breakdown(self):
+        paths = self.mod.find_overall_paths(self.day_dir)
+        names = [Path(p).name for p in paths]
+        self.assertEqual(names, ['商品_整体_2026-11-08_2026-11-08.xls'])
 
 
 class NoFallbackWhenSourcePresentTest(unittest.TestCase):
