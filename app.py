@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from core.loader import dedupe_source_files, read_prepared_source
+from core.source_fallback import build_category_map, build_fallback_frame, describe_fallback
 from core.data_validation import (
     DataValidationError,
     DataValidationIssue,
@@ -183,6 +184,33 @@ def _log_time(timings, label, start, extra=""):
 
 #: v2.60 同源类型多份文件（zip 与 xlsx 并存）被择一后丢弃的条目，供界面提示
 _dropped_multi_source_files: list = []
+
+#: v2.61 数据源覆盖/兜底提示（每次加载按日期重建）
+_SOURCE_COMPAT_NOTES: dict = {'day': '', 'notes': []}
+
+
+def _source_compat_note(text: str, day: str = '') -> None:
+    """记录一条覆盖/兜底提示（同文去重，按加载日期重建）。"""
+    if day and _SOURCE_COMPAT_NOTES.get('day') != day:
+        _SOURCE_COMPAT_NOTES['day'] = day
+        _SOURCE_COMPAT_NOTES['notes'] = []
+    notes = _SOURCE_COMPAT_NOTES.setdefault('notes', [])
+    if text and text not in notes:
+        notes.append(text)
+
+
+def _render_source_compat_banner() -> None:
+    """数据源覆盖提示条：缺日 / 兜底 / 同源择一。"""
+    notes = list(_SOURCE_COMPAT_NOTES.get('notes') or [])
+    dropped = list(_dropped_multi_source_files or [])
+    if not notes and not dropped:
+        return
+    lines = list(notes)
+    if dropped:
+        pairs = ', '.join(f"{item.get('name')}" for item in dropped[:4])
+        lines.append(f"同日同源文件重复，已只取 zip：{pairs}"
+                     + ("…" if len(dropped) > 4 else ""))
+    st.warning("⚠️ 数据源提示\n\n" + "\n\n".join(f"- {line}" for line in lines))
 
 
 def _scan_target_files(path, source_types=None):
@@ -725,6 +753,36 @@ def _read_sources_for_date(
                 f'{src_type}文件 {fp}',
                 f'读取失败，已停止处理：{str(e)[:160]}',
             )) from e
+
+    # ── v2.61 数据源兜底：某日缺「商品-经营投产比」时，用同日「商品-整体」+ 无界 + 历史类目
+    #    构造列结构完全相同的替代帧（不新增任何业务字段），并把来源与缺口写进提示。
+    if SOURCE_PRODUCT_ROI not in sources and SOURCE_PRODUCT_OVERALL in sources:
+        overall_paths = [fp for fp, _df in sources.get(SOURCE_PRODUCT_OVERALL, [])]
+        lookback_folders = []
+        if product_folder:
+            parent = Path(product_folder).parent
+            candidates = sorted(
+                (p for p in parent.iterdir() if p.is_dir() and p.name[:2] == '20'),
+                reverse=True)
+            lookback_folders = candidates[:7]
+        try:
+            category_map = build_category_map(lookback_folders)
+            frame, stats = build_fallback_frame(
+                overall_paths, sources.get(SOURCE_WUJIE_SUBJECT, []), category_map)
+        except Exception as exc:  # noqa: BLE001 - 兜底失败不阻断主流程，只提示
+            frame, stats = None, {'ok': False, 'reason': f'{type(exc).__name__}: {str(exc)[:80]}'}
+        day_label = str(period_label).split(':')[-1]
+        if frame is not None and len(frame):
+            sources[SOURCE_PRODUCT_ROI] = [(f'<兜底>商品-整体+无界({day_label})', frame)]
+            files_info.append({
+                'name': '（兜底）商品-整体 + 无界', 'source': SOURCE_PRODUCT_ROI,
+                'rows': len(frame), 'cols': len(frame.columns), 'period': period_label,
+            })
+            _source_compat_note(describe_fallback(day_label, stats), day_label)
+        else:
+            _source_compat_note(
+                f"{day_label} 缺 `商品-经营投产比` 且兜底不可用（{stats.get('reason')}），"
+                f"该日 GMV/花费 将缺失", day_label)
 
     return sources, files_info, copied, len(file_list)
 
@@ -4090,6 +4148,8 @@ except DataValidationError as exc:
 budget_decision_ctx = _build_budget_decision_context_cached(st.session_state.df)
 kpis = st.session_state.kpis
 kpi_mom = st.session_state.kpi_mom or calc_kpi_mom_percent(kpis, {})
+
+_render_source_compat_banner()
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
     "📈 数据看板", "📋 数据验收", "💰 预算决策看板", "📊 执行表",
