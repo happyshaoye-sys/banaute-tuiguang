@@ -17,7 +17,7 @@ import pandas as pd
 #: 会继续返回旧口径的日事实。
 #: v4：无界-商品主体放行「计划名字」；v5：v4 是在解析层缓存尚未换代时重建的
 #: （仍取自缺列的老帧），必须再换代一次才能真正吃到新列。
-DAILY_FACT_CACHE_VERSION = "metox2.64-daily-facts-v7"
+DAILY_FACT_CACHE_VERSION = "metox2.65-daily-facts-v8"
 SHARED_DIMENSION_CACHE_VERSION = "metox2.30-shared-dimensions-v2"
 
 

@@ -758,7 +758,8 @@ def _read_sources_for_date(
     #    构造列结构完全相同的替代帧（不新增任何业务字段），并把来源与缺口写进提示。
     #    v2.64：抽到 core.source_fallback.apply_fallback，且自己按商品目录找「商品-整体」
     #    （主流程传 shared_dimensions 时 include_day_product=False，商品目录不扫描）。
-    _fb_injected, _fb_note, _fb_frame = apply_fallback(sources, product_folder, period_label)
+    # 注意：商品-整体 / 经营投产比 放在 `商品/<日期>` 目录（= biz_folder），不是侧边栏『商品目录』根
+    _fb_injected, _fb_note, _fb_frame = apply_fallback(sources, biz_folder, period_label)
     if _fb_injected and _fb_frame is not None:
         files_info.append({
             'name': '（兜底）商品-整体 + 无界', 'source': SOURCE_PRODUCT_ROI,
