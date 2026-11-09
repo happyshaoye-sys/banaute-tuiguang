@@ -9,7 +9,11 @@
 * 渠道访客：用无界的**点击量**按场景映射既有的
   `关键词推广访客数 / 人群推广访客数 / 场景推广访客数`；
   实测 11-07 逐宝贝中位比 1.000（点击≈访客），且人群推广在经营投产比里本就恒为 0。
-* 渠道加购（关键词/人群/场景 加购人数与加购数）无界不提供 → 置 0，并在提示里说明。
+* 渠道加购数：用无界的**总购物车数**按场景映射既有的
+  `关键词推广加购数 / 人群推广加购数 / 场景推广加购数`；
+  11-05 实证与经营投产比完全相等（关键词 769/769、人群 4,291/4,291，逐宝贝 193/193 相等）。
+* 渠道加购人数（关键词/人群/场景）无界无「人数」口径 → 置 0，不臆造并在提示里说明。
+* 淘宝类目**不做标题推断**：文件自带「叶子类目名称」优先，其次历史映射，仍补不到即留空。
 
 字段映射
 --------
@@ -35,7 +39,10 @@ GMV                 支付金额                     —
 关键词推广访客数       —                           Σ 点击（场景=关键词推广）
 人群推广访客数         —                           Σ 点击（场景=人群推广）
 场景推广访客数         —                           Σ 点击（其它场景）
-渠道加购 6 列         —                           0
+关键词推广加购数       —                           Σ 商品加购件数（关键词推广）
+人群推广加购数         —                           Σ 商品加购件数（人群推广）
+场景推广加购数         —                           Σ 商品加购件数（其它场景）
+渠道加购人数 3 列     —                           0（无界无人数口径）
 =================  ==========================  ==============================
 """
 from __future__ import annotations
@@ -146,9 +153,16 @@ def _scene_frames(wujie_frames):
     for label, key in (('_kw', _SCENE_KEYWORD), ('_rq', _SCENE_CROWD)):
         sub = frame[frame['_scene'] == key].groupby('_pid')['_click'].sum()
         agg = agg.merge(sub.rename(label), left_on='_pid', right_index=True, how='left')
-    other = frame[~frame['_scene'].isin([_SCENE_KEYWORD, _SCENE_CROWD])].groupby('_pid')['_click'].sum()
-    agg = agg.merge(other.rename('_sc'), left_on='_pid', right_index=True, how='left')
-    for col in ('_kw', '_rq', '_sc'):
+        # 渠道加购数：无界「总购物车数」= 生意参谋「渠道加购数」
+        # （11-05 实证：关键词 769/769、人群 4,291/4,291 完全相等；逐宝贝 193/193 相等）
+        sub_cart = frame[frame['_scene'] == key].groupby('_pid')['_cart'].sum()
+        agg = agg.merge(sub_cart.rename(label + '_cart'), left_on='_pid', right_index=True, how='left')
+    other_mask = ~frame['_scene'].isin([_SCENE_KEYWORD, _SCENE_CROWD])
+    agg = agg.merge(frame[other_mask].groupby('_pid')['_click'].sum().rename('_sc'),
+                    left_on='_pid', right_index=True, how='left')
+    agg = agg.merge(frame[other_mask].groupby('_pid')['_cart'].sum().rename('_sc_cart'),
+                    left_on='_pid', right_index=True, how='left')
+    for col in ('_kw', '_rq', '_sc', '_kw_cart', '_rq_cart', '_sc_cart'):
         agg[col] = pd.to_numeric(agg[col], errors='coerce').fillna(0.0)
     agg = agg.rename(columns={'_pid': '宝贝ID'})
     return agg
@@ -180,7 +194,7 @@ def build_fallback_frame(overall_paths, wujie_frames, category_map=None):
 
     scene = _scene_frames(wujie_frames)
     merged = overall.merge(scene, on='宝贝ID', how='left') if len(scene) else overall.copy()
-    for col in ('_spend', '_gmv', '_cart', '_kw', '_rq', '_sc'):
+    for col in ('_spend', '_gmv', '_cart', '_kw', '_rq', '_sc', '_kw_cart', '_rq_cart', '_sc_cart'):
         if col not in merged.columns:
             merged[col] = 0.0
         merged[col] = pd.to_numeric(merged[col], errors='coerce').fillna(0.0)
@@ -199,8 +213,12 @@ def build_fallback_frame(overall_paths, wujie_frames, category_map=None):
     out['关键词推广访客数'] = merged['_kw']
     out['人群推广访客数'] = merged['_rq']
     out['场景推广访客数'] = merged['_sc']
-    for col in ('关键词推广加购人数', '关键词推广加购数', '人群推广加购人数', '人群推广加购数',
-                '场景推广加购人数', '场景推广加购数'):
+    # 渠道加购数：无界「总购物车数」即生意参谋「渠道加购数」（11-05 实证完全相等）
+    out['关键词推广加购数'] = merged['_kw_cart']
+    out['人群推广加购数'] = merged['_rq_cart']
+    out['场景推广加购数'] = merged['_sc_cart']
+    # 渠道加购人数：无界无「人数」口径，按 0 计（不臆造）
+    for col in ('关键词推广加购人数', '人群推广加购人数', '场景推广加购人数'):
         out[col] = 0
     for col in FALLBACK_COLUMNS:
         if col not in out.columns:
@@ -230,6 +248,7 @@ def describe_fallback(day, stats):
     return (
         f"{day} 缺 `商品-经营投产比`，已用 `商品-整体` + 无界兜底："
         f"{stats['rows']:,} 个宝贝；类目覆盖 {stats['category_covered']:,} 个"
-        f"（GMV 占比 {stats['category_gmv_ratio']*100:.1f}%，其中 {stats['category_from_history']:,} 个取自历史映射）；"
-        f"渠道访客取无界点击量；渠道加购数无来源、按 0 计。"
+        f"（GMV 占比 {stats['category_gmv_ratio']*100:.1f}%，其中 {stats['category_from_history']:,} 个取自历史映射，"
+        f"其余留空、不做标题推断）；渠道访客取无界点击量、渠道加购数取无界购物车数；"
+        f"渠道加购人数无来源、按 0 计。"
     )

@@ -33,6 +33,8 @@ PROTECTED_FILES = {
     "core/new_product_lifecycle.py",
     "core/periods.py",
     "core/schema.py",
+    "core/source_fallback.py",
+    "core/zip_sources.py",
     "core/segmentation.py",
     "core/v93_algorithm.py",
     "core/v93_signal.py",

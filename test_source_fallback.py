@@ -89,8 +89,12 @@ class FallbackFrameTest(unittest.TestCase):
         self.assertAlmostEqual(float(row['关键词推广访客数']), 120.0)
         self.assertAlmostEqual(float(row['人群推广访客数']), 600.0)
         self.assertAlmostEqual(float(row['场景推广访客数']), 0.0)
-        # 渠道加购无来源 → 0
-        self.assertAlmostEqual(float(row['关键词推广加购数']), 0.0)
+        # 渠道加购数 = 无界购物车数（11-05 实证与渠道加购数完全相等）
+        self.assertAlmostEqual(float(row['关键词推广加购数']), 9.0)
+        self.assertAlmostEqual(float(row['人群推广加购数']), 15.0)
+        self.assertAlmostEqual(float(row['场景推广加购数']), 0.0)
+        # 渠道加购人数无界无口径 → 0
+        self.assertAlmostEqual(float(row['关键词推广加购人数']), 0.0)
 
     def test_second_product_only_keyword_clicks(self):
         frame, _ = build_fallback_frame(['fake.xlsx'], [('src', wujie_frame())])
