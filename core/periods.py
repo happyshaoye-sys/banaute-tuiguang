@@ -30,27 +30,87 @@ PERIOD_SPECS = [
     (30, "30日环比"),
 ]
 
+#: v2.66：按月 / 自定义 周期的长度上限（含首尾）
+MAX_PERIOD_DAYS = 31
+
+MONTH_LABEL = "月环比"
+CUSTOM_LABEL = "自定义环比"
+
+
+def month_bounds(year_month):
+    """把 'YYYY-MM' 解析成该月首末日期（date）。"""
+    year_text, month_text = str(year_month).split("-")[:2]
+    year, month = int(year_text), int(month_text)
+    first = datetime(year, month, 1).date()
+    if month == 12:
+        nxt = datetime(year + 1, 1, 1).date()
+    else:
+        nxt = datetime(year, month + 1, 1).date()
+    return first, nxt - timedelta(days=1)
+
+
+def resolve_month_range(year_month, base_date):
+    """按月口径：历史月取整月；当月取「月初~分析日」（不越界到未来）。"""
+    first, last = month_bounds(year_month)
+    end = last if last < base_date else base_date
+    if end < first:
+        end = first
+    return first, end
+
+
+def validate_custom_range(start_date, end_date, max_days=MAX_PERIOD_DAYS):
+    """校验自定义区间，返回 (start, end, days, error)。"""
+    try:
+        start = datetime.strptime(str(start_date), "%Y-%m-%d").date()
+        end = datetime.strptime(str(end_date), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None, None, 0, "日期格式应为 YYYY-MM-DD"
+    if end < start:
+        return None, None, 0, "结束日期不能早于开始日期"
+    days = (end - start).days + 1
+    if days > max_days:
+        return None, None, days, f"自定义区间最长 {max_days} 天，当前 {days} 天"
+    return start, end, days, ""
+
 COMPARISON_FIELDS = []
 
 
-def build_period_ranges(date_str):
-    """基于单个前端日期生成所有当前周期和对比周期。"""
+def build_period_ranges(date_str, month=None, custom=None):
+    """基于单个前端日期生成所有当前周期和对比周期。
+
+    v2.66 新增两种口径（原有 日/3/7/15/30 完全保留）：
+      * ``month='YYYY-MM'``  → 追加「月环比」：历史月取整月、当月取月初~分析日；
+      * ``custom=(start,end)`` → 追加「自定义环比」：跨度 ≤ MAX_PERIOD_DAYS(31) 天，
+        超出或非法则不追加（由调用方提示）。
+    对比周期统一取"紧邻当前区间之前、等长"的窗口。
+    """
     base_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     periods = {}
 
-    for n, label in PERIOD_SPECS:
-        cur_end = base_date
-        cur_start = base_date - timedelta(days=n - 1)
+    def _put(label, cur_start, cur_end, days):
         prev_end = cur_start - timedelta(days=1)
-        prev_start = prev_end - timedelta(days=n - 1)
-
+        prev_start = prev_end - timedelta(days=days - 1)
         periods[label] = {
             "current_start": cur_start.strftime("%Y-%m-%d"),
             "current_end": cur_end.strftime("%Y-%m-%d"),
             "prev_start": prev_start.strftime("%Y-%m-%d"),
             "prev_end": prev_end.strftime("%Y-%m-%d"),
-            "days": n,
+            "days": int(days),
         }
+
+    for n, label in PERIOD_SPECS:
+        _put(label, base_date - timedelta(days=n - 1), base_date, n)
+
+    if month:
+        month_start, month_end = resolve_month_range(month, base_date)
+        if month_end >= month_start:
+            _put(MONTH_LABEL, month_start, month_end,
+                 (month_end - month_start).days + 1)
+
+    if custom:
+        start_date, end_date, days, error = validate_custom_range(*custom)
+        if not error:
+            _put(CUSTOM_LABEL, start_date, end_date, days)
 
     return periods
 

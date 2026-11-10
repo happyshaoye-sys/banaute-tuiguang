@@ -31,12 +31,18 @@ from core.merge import (
     merge_sources,
 )
 from core.periods import (
+    CUSTOM_LABEL,
+    MAX_PERIOD_DAYS,
+    MONTH_LABEL,
     aggregate_category_metrics,
     aggregate_period_frame,
     apply_period_comparisons,
     apply_rolling_daily_metrics,
     build_period_ranges,
     iter_dates,
+    month_bounds,
+    resolve_month_range,
+    validate_custom_range,
 )
 from core.segmentation import segment_products
 from core.analysis import (
@@ -2139,6 +2145,8 @@ def _load_jst_snapshot_cached(path, mtime):
 PERIOD_LABEL_MAP = {
     "当日": "日环比", "3天": "3日环比", "7天": "7日环比",
     "15天": "15日环比", "30天": "30日环比",
+    # v2.66：按月 / 自定义（跨度 ≤ 31 天）
+    "按月": MONTH_LABEL, "自定义": CUSTOM_LABEL,
 }
 
 
@@ -2152,7 +2160,8 @@ def _cat_sum(frame, col):
 
 
 def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_dir=None,
-                        jst_snap_dir=None, jst_refund_dir=None, period_choice="当日"):
+                        jst_snap_dir=None, jst_refund_dir=None, period_choice="当日",
+                        period_month=None, period_custom=None):
     """读取当前日，并按日/3日/7日/15日/30日生成周期累计环比。一次扫描全部日期，不重复读文件。
     period_choice(2026-07-10 新增): 主表展示口径——当日=单日;3天/7天/15天/30天=对应周期
     current 窗口累计(与文档§五同一窗口定义),KPI/分层/品类分析随主表口径。"""
@@ -2207,7 +2216,11 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
         extra_fingerprint_entries=dimension_fingerprint_entries,
     )
 
-    periods = build_period_ranges(date_str)
+    periods = build_period_ranges(
+        date_str,
+        month=period_month if period_choice == "按月" else None,
+        custom=period_custom if period_choice == "自定义" else None,
+    )
     sel_label = PERIOD_LABEL_MAP.get(period_choice, "日环比")
     comparison_labels = [sel_label] if sel_label in periods else ["日环比"]
 
@@ -3851,12 +3864,61 @@ with st.sidebar:
 
     period_choice = st.selectbox(
         "时间周期",
-        ["当日", "3天", "7天", "15天", "30天"],
+        ["当日", "3天", "7天", "15天", "30天", "按月", "自定义"],
         index=0,
         key="period_choice_input",
         help="主表/看板/品类分析的展示口径:当日=所填日期单日;3天=日期往前3天累计"
-             "(如填2026-07-08则为07-06~07-08,环比对比07-03~07-05),7天/15天/30天同理"
+             "(如填2026-07-08则为07-06~07-08,环比对比07-03~07-05),7天/15天/30天同理;"
+             "按月=选定月份(历史月取整月,当月取月初~所填日期);自定义=自选起止日期,最长31天"
     )
+
+    # ── v2.66 按月 / 自定义 周期的参数控件 ─────────────────────────────
+    period_month = None
+    period_custom = None
+    if period_choice == "按月":
+        _base_for_month = date_input.strip() or datetime.now().strftime("%Y-%m-%d")
+        try:
+            _base_dt = datetime.strptime(_base_for_month, "%Y-%m-%d").date()
+        except ValueError:
+            _base_dt = datetime.now().date()
+        _month_options = []
+        _cursor_year, _cursor_month = _base_dt.year, _base_dt.month
+        for _ in range(18):
+            _month_options.append(f"{_cursor_year:04d}-{_cursor_month:02d}")
+            _cursor_month -= 1
+            if _cursor_month == 0:
+                _cursor_month = 12
+                _cursor_year -= 1
+        period_month = st.selectbox(
+            "月份", _month_options, index=0, key="period_month_input",
+            help=f"历史月取整月；当月取月初~所填日期（{_base_dt.isoformat()}）；最长 {MAX_PERIOD_DAYS} 天",
+        )
+        _m_start, _m_end = resolve_month_range(period_month, _base_dt)
+        st.caption(f"口径：{_m_start.isoformat()} ~ {_m_end.isoformat()}"
+                   f"（{( _m_end - _m_start).days + 1} 天）")
+    elif period_choice == "自定义":
+        _base_for_custom = date_input.strip() or datetime.now().strftime("%Y-%m-%d")
+        try:
+            _custom_end_default = datetime.strptime(_base_for_custom, "%Y-%m-%d").date()
+        except ValueError:
+            _custom_end_default = datetime.now().date()
+        _start_default, _end_default, _, _ = validate_custom_range(
+            (_custom_end_default - timedelta(days=6)).isoformat(),
+            _custom_end_default.isoformat(),
+        ) if True else (None, None, 0, "")
+        _col_a, _col_b = st.columns(2)
+        _custom_start = _col_a.date_input(
+            "开始日期", value=_start_default or _custom_end_default, key="period_custom_start")
+        _custom_end = _col_b.date_input(
+            "结束日期", value=_end_default or _custom_end_default, key="period_custom_end")
+        _s, _e, _days, _err = validate_custom_range(_custom_start, _custom_end)
+        if _err:
+            st.error(f"{_err}，已按「7天」加载")
+            period_choice = "7天"      # 降级：区间非法时不进入自定义口径
+            period_custom = None
+        else:
+            st.caption(f"口径：{_s.isoformat()} ~ {_e.isoformat()}（{_days} 天）")
+            period_custom = (_s.isoformat(), _e.isoformat())
 
     load_requested = st.button(
         "加载并处理数据",
@@ -4038,6 +4100,8 @@ with st.sidebar:
                                 jst_snap_dir=(jst_snap_dir or "").strip().strip('"') or None,
                                 jst_refund_dir=(jst_refund_dir or "").strip().strip('"') or None,
                                 period_choice=period_choice,
+                                period_month=period_month,
+                                period_custom=period_custom,
                             )
                         except DataValidationError as exc:
                             validation_error = str(exc)

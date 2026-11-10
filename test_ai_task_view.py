@@ -856,7 +856,7 @@ class BudgetDecisionDashboardUIContractTests(unittest.TestCase):
         self.assertNotIn('预算池结构参考', all_sheet_block)
 
     def test_sidebar_supports_30_day_period(self):
-        self.assertIn('["当日", "3天", "7天", "15天", "30天"]', self.source)
+        self.assertIn('["当日", "3天", "7天", "15天", "30天", "按月", "自定义"]', self.source)
 
 
 if __name__ == '__main__':
