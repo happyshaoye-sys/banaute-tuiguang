@@ -68,7 +68,7 @@ from core.schema import (
     ALLOWED_SOURCE_TYPES, SOURCE_PRODUCT_INFO, SOURCE_PRODUCT_ROI, SOURCE_STOCK,
     SOURCE_WUJIE_SUBJECT, SOURCE_PRODUCT_OVERALL, SOURCE_WUJIE_CREATIVE,
     classify_file, EXPORT_COLS, ACTION_RULES, compute_bounds,
-    ensure_export_columns,
+    ensure_export_columns, resolve_display_columns,
 )
 
 st.set_page_config(page_title=f"{DISPLAY_VERSION} 半自动推广工具", layout="wide")
@@ -4604,22 +4604,15 @@ with tab4:
 
     # 筛选 + 列设置(2026-07-11:列设置移到筛选行右侧,popover 下拉形式、占位小;
     # 勾选持久化到 cache/column_prefs.json,展示顺序固定按 EXPORT_COLS,仅影响显示、导出仍全量)
+    # 2026-11-11 v2.68:取消硬编码「强制显示」白名单(状态/判定类 12 列此前每次 rerun
+    # 都被塞回偏好,导致取消勾选无效)。现在显示严格按勾选;导出仍全量,因为
+    # export_execution_table / export_all_sheets 走 execution_export_frame() -> EXPORT_COLS。
     all_cols = [c for c in EXPORT_COLS if c in execution_df.columns]
     if "exec_cols_pref" not in st.session_state:
-        saved = _load_column_prefs()
-        pref = [c for c in (saved or all_cols) if c in all_cols] or all_cols
-        st.session_state["exec_cols_pref"] = pref
-    st.session_state["exec_cols_pref"] = [
-        c for c in st.session_state["exec_cols_pref"] if c in all_cols
-    ] or all_cols
-    for c in [
-        "链接投产状态", "可售天数状态",
-        "商品加购率状态", "商品支付转化率状态", "推广加购率状态",
-        "v9.3信号", "MetoX算法命中", "MetoX算法分", "MetoX算法原因",
-        "商品加购率", "推广加购率", "当前有效投放计划数",
-    ]:
-        if c in all_cols and c not in st.session_state["exec_cols_pref"]:
-            st.session_state["exec_cols_pref"].append(c)
+        st.session_state["exec_cols_pref"] = resolve_display_columns(
+            all_cols, _load_column_prefs())
+    st.session_state["exec_cols_pref"] = resolve_display_columns(
+        all_cols, st.session_state["exec_cols_pref"])
 
     cf1, cf2, cf3, cf4 = st.columns([3, 2, 2, 1.3], vertical_alignment="bottom")
     with cf1:
@@ -4641,14 +4634,21 @@ with tab4:
             )
             cb1, cb2 = st.columns(2)
             if cb1.button("应用并记住", width="stretch", key="exec_cols_apply"):
-                st.session_state["exec_cols_pref"] = picked or all_cols
-                _save_column_prefs(st.session_state["exec_cols_pref"])
+                pref = resolve_display_columns(all_cols, picked)
+                st.session_state["exec_cols_pref"] = pref
+                _save_column_prefs(pref)
+                if pref == list(all_cols):
+                    # 勾空=全部列:勾选框同步成全部,避免"框里空着、表里全列"的错位
+                    st.session_state.pop("exec_cols_ms", None)
                 st.rerun()
             if cb2.button("恢复全部列", width="stretch", key="exec_cols_reset"):
                 st.session_state["exec_cols_pref"] = all_cols
                 _save_column_prefs(all_cols)
+                st.session_state.pop("exec_cols_ms", None)
                 st.rerun()
-            st.caption("仅影响表格显示;导出 Excel 仍包含全部字段")
+            st.caption("勾选即生效;取消勾选=隐藏该列(含状态/判定列);"
+                       "清空=全部列。仅影响表格显示,导出 Excel 仍包含全部字段")
+
 
     # 过滤
     filtered = execution_df.copy()
@@ -4680,7 +4680,7 @@ with tab4:
     )
 
     # 显示列(按 EXPORT_COLS 固定顺序取勾选交集)
-    show_cols = [c for c in all_cols if c in st.session_state["exec_cols_pref"]] or all_cols
+    show_cols = resolve_display_columns(all_cols, st.session_state["exec_cols_pref"])
     st.dataframe(
         style_execution_table(filtered[show_cols], ranking_df=execution_df),
         width="stretch",

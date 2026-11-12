@@ -1,7 +1,7 @@
 {
   "product": "MetoX",
-  "version": "2.67",
-  "release_date": "2026-11-09",
+  "version": "2.68",
+  "release_date": "2026-11-11",
   "external_strategy_version": "v9.3",
   "rule_versions": {
     "refund_risk": "2026-08-02",
@@ -72,6 +72,8 @@
     "source_fallback_day_folder": "2026-11-09",
     "period_month_custom": "2026-11-09",
     "period_custom_timedelta_fix": "2026-11-09",
-    "ui_smoke_test": "2026-11-09"
+    "ui_smoke_test": "2026-11-09",
+    "exec_display_columns_user_controlled": "2026-11-11",
+    "ui_smoke_exec_columns": "2026-11-11"
   }
 }

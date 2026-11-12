@@ -240,6 +240,24 @@ def execution_export_frame(frame):
     """返回严格按 EXPORT_COLS 排列的执行表副本。"""
     return ensure_export_columns(frame).loc[:, EXPORT_COLS]
 
+
+def resolve_display_columns(all_columns, preferred):
+    """把界面「列设置」勾选的列按 all_columns(通常=EXPORT_COLS) 顺序解析。
+
+    v2.68：显示严格按用户勾选，**不注入任何"强制列"**。
+    在此之前 app.py 里有一段硬编码白名单（链接投产状态 / 可售天数状态 / 三个加购与
+    转化状态列 / v9.3信号 / MetoX算法命中·分·原因 / 商品加购率 / 推广加购率 /
+    当前有效投放计划数），每次 rerun 都会把这些列无条件塞回偏好，导致"取消勾选无效"。
+
+    导出链路与显示无关：export_execution_table / export_all_sheets 走
+    execution_export_frame() -> EXPORT_COLS，恒为全量。
+
+    preferred 为空、或勾选列全被过滤掉时回退为全部列，对应界面约定"清空=全部列"。
+    """
+    keep = {str(column) for column in (preferred or [])}
+    columns = [column for column in all_columns if column in keep]
+    return columns or list(all_columns)
+
 # ── 工具函数 ─────────────────────────────────────────────
 def safe_div(a, b):
     return a / b if b else 0.0
