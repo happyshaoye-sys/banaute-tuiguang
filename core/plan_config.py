@@ -102,6 +102,25 @@ def parse_budget(value):
     return int(number) if float(number).is_integer() else number
 
 
+def format_budget_cell(value):
+    """预算列展示用：数值→整数字符串（310），文字（不限）→原样，空→''。
+
+    计划列表同一列既有数字也有「不限」，Streamlit 表格要求整列同类型
+    （混类型会抛 ArrowInvalid），所以只在展示层统一成字符串；导出仍保留数值。
+    """
+    if value is None:
+        return ''
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, (int, float)):
+        number = float(value)
+        if number != number:      # NaN
+            return ''
+        return str(int(number)) if number.is_integer() else f'{number:g}'
+    text = str(value).strip()
+    return '' if text.lower() in ('nan', 'none') else text
+
+
 def _clean_text(value) -> str:
     text = str(value if value is not None else '').strip()
     return '' if text.lower() in ('nan', 'none') else text
@@ -263,6 +282,7 @@ __all__ = [
     'PLAN_CONFIG_CACHE_VERSION',
     'PLAN_CONFIG_COLUMNS',
     'find_latest_plan_list',
+    'format_budget_cell',
     'load_plan_config',
     'parse_budget',
     'plan_config_caption',

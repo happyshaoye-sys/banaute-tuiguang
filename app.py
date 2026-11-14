@@ -30,7 +30,7 @@ from core.merge import (
     merge_daily_facts,
     merge_sources,
 )
-from core.plan_config import load_plan_config, plan_config_caption
+from core.plan_config import format_budget_cell, load_plan_config, plan_config_caption
 from core.periods import (
     CUSTOM_LABEL,
     MAX_PERIOD_DAYS,
@@ -4587,17 +4587,26 @@ with tab3:
                 column for column in (
                     '序号', '计划ID', '计划名称', '所属渠道', '商品数', '计划类型', '计划经营结构',
                     '预算', '出价方式',
-                    '周期花费', '归因成交', 'ROI', '方向证据', '计划管理建议',
+                    '周期花费', '归因成交', 'ROI', '日均花费', '方向证据', '计划管理建议',
                 )
                 if column in plans.columns
             ] or list(plans.columns)
-            plan_table = plans[plan_columns]
+            plan_table = plans[plan_columns].copy()
+            if '预算' in plan_table.columns:
+                # 计划列表里既有「310元」这种数值，也有「不限」这种文字，还可能有没有匹配到的空值。
+                # Streamlit 的表格序列化要求整列同类型（mixed 会抛 ArrowInvalid），
+                # 所以展示前统一转成字符串：数值→'310'，文字→原样，空值→''。
+                plan_table['预算'] = plan_table['预算'].map(format_budget_cell)
             plan_column_config = {
                 '序号': st.column_config.NumberColumn('序号', format='%d'),
                 '商品数': st.column_config.NumberColumn('商品数', format='%d'),
                 '周期花费': st.column_config.NumberColumn('周期花费', format='¥%.2f'),
                 '归因成交': st.column_config.NumberColumn('归因成交', format='¥%.2f'),
                 'ROI': st.column_config.NumberColumn('ROI', format='%.2f'),
+                '日均花费': st.column_config.NumberColumn(
+                    '日均花费', format='¥%.2f',
+                    help='所选周期花费 ÷ 所选周期天数（当日口径即 1 天）',
+                ),
             }
             st.dataframe(
                 plan_table,

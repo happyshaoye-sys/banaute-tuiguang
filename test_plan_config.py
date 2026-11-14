@@ -22,6 +22,7 @@ from core.budget_decision import build_budget_decision_context, build_plan_manag
 from core.exporter import BUDGET_DECISION_PLAN_COLUMNS
 from core.plan_config import (
     find_latest_plan_list,
+    format_budget_cell,
     load_plan_config,
     parse_budget,
     plan_config_caption,
@@ -53,6 +54,27 @@ class ParseBudgetTests(unittest.TestCase):
         self.assertEqual(parse_budget(''), '')
         self.assertEqual(parse_budget('nan'), '')
         self.assertEqual(parse_budget(None), '')
+
+
+class FormatBudgetCellTests(unittest.TestCase):
+    """预算列展示：整列必须同类型（否则 Streamlit 抛 ArrowInvalid）。"""
+
+    def test_numbers_become_integer_strings(self):
+        self.assertEqual(format_budget_cell(310), '310')
+        self.assertEqual(format_budget_cell(310.0), '310')
+        self.assertEqual(format_budget_cell(0.5), '0.5')
+
+    def test_text_and_empty(self):
+        self.assertEqual(format_budget_cell('不限'), '不限')
+        self.assertEqual(format_budget_cell(''), '')
+        self.assertEqual(format_budget_cell(None), '')
+        self.assertEqual(format_budget_cell(float('nan')), '')
+
+    def test_mixed_column_is_all_str(self):
+        values = [310, '不限', '', None]
+        formatted = [format_budget_cell(value) for value in values]
+        self.assertTrue(all(isinstance(item, str) for item in formatted))
+        self.assertEqual(formatted, ['310', '不限', '', ''])
 
 
 class FindLatestPlanListTests(unittest.TestCase):
@@ -250,6 +272,58 @@ class PlanManagementJoinTests(unittest.TestCase):
         self.assertEqual(columns[columns.index('计划经营结构') + 1], '预算')
         self.assertEqual(columns[columns.index('计划经营结构') + 2], '出价方式')
         self.assertLess(columns.index('出价方式'), columns.index('周期花费'))
+        # 2026-11-14：日均花费紧跟 ROI
+        self.assertEqual(columns[columns.index('ROI') + 1], '日均花费')
+        self.assertLess(columns.index('日均花费'), columns.index('方向证据'))
+
+
+class PlanDailySpendTests(unittest.TestCase):
+    """日均花费 = 所选周期花费 ÷ 所选周期天数。"""
+
+    DETAIL = json.dumps([
+        {'计划ID': '82843151879', '计划名称': '计划A', '所属渠道': '人群',
+         '当前花费': 300.0, '归因成交': 900.0},
+    ], ensure_ascii=False)
+
+    def _source(self, days=None):
+        frame = pd.DataFrame({FULL_PLAN_DETAIL_COLUMN: [self.DETAIL], '宝贝ID': ['A1']})
+        if days is not None:
+            frame['计划实际数据天数'] = [days]
+        return frame
+
+    def _rows(self, days=None, period_days=None):
+        return build_plan_management(
+            self._source(days),
+            products=[{'宝贝ID': 'A1', '商品周期': '成长期', '商品定位': '主推',
+                       '_plan_detail_values': [self.DETAIL]}],
+            period_days=period_days,
+        )
+
+    def test_daily_spend_uses_period_days(self):
+        rows = self._rows(days=30)
+        self.assertEqual(rows[0]['周期花费'], 300.0)
+        self.assertEqual(rows[0]['日均花费'], 10.0)
+
+    def test_single_day_period_equals_period_spend(self):
+        rows = self._rows(days=1)
+        self.assertEqual(rows[0]['日均花费'], 300.0)
+
+    def test_explicit_period_days_wins(self):
+        rows = self._rows(days=30, period_days=15)
+        self.assertEqual(rows[0]['日均花费'], 20.0)
+
+    def test_missing_days_column_falls_back_to_one_day(self):
+        rows = self._rows(days=None)
+        self.assertEqual(rows[0]['日均花费'], 300.0)
+
+    def test_zero_days_does_not_divide_by_zero(self):
+        rows = self._rows(days=0)
+        self.assertEqual(rows[0]['日均花费'], 300.0)
+
+    def test_column_sits_right_after_roi(self):
+        rows = self._rows(days=7)
+        columns = list(rows[0])
+        self.assertEqual(columns[columns.index('ROI') + 1], '日均花费')
 
 
 if __name__ == '__main__':

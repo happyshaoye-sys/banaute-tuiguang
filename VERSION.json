@@ -1,6 +1,6 @@
 {
   "product": "MetoX",
-  "version": "2.69",
+  "version": "2.70",
   "release_date": "2026-11-14",
   "external_strategy_version": "v9.3",
   "rule_versions": {
@@ -76,6 +76,7 @@
     "exec_display_columns_user_controlled": "2026-11-11",
     "ui_smoke_exec_columns": "2026-11-11",
     "plan_management_budget_bid": "2026-11-14",
-    "plan_list_latest_snapshot": "2026-11-14"
+    "plan_list_latest_snapshot": "2026-11-14",
+    "plan_management_daily_spend": "2026-11-14"
   }
 }

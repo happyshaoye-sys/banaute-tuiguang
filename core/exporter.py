@@ -86,7 +86,8 @@ BUDGET_DECISION_TIER_ALIASES = {
 BUDGET_DECISION_TIER_DROP_COLUMNS = {'错配金额', *BUDGET_RANK_BAND_LEGACY_COLUMNS}
 BUDGET_DECISION_PLAN_COLUMNS = [
     '序号', '计划ID', '计划名称', '所属渠道', '商品数', '计划类型',
-    '计划经营结构', '预算', '出价方式', '周期花费', '归因成交', 'ROI', '方向证据', '计划管理建议',
+    '计划经营结构', '预算', '出价方式',
+    '周期花费', '归因成交', 'ROI', '日均花费', '方向证据', '计划管理建议',
 ]
 BUDGET_DECISION_PLAN_ALIASES = {
     '计划类型': ('计划商品类型',),

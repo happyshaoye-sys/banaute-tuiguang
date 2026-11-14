@@ -603,12 +603,16 @@ def build_plan_management(
     df: pd.DataFrame,
     products: list[dict] | None = None,
     plan_config: dict | None = None,
+    period_days: int | None = None,
 ) -> list[dict]:
     """Aggregate full plan details by PlanID without inventing names, budget, or bids.
 
     2026-11-14：新增 ``预算`` / ``出价方式`` 两列，来源是无界目录下最新的
     `计划列表_*.xlsx`（按计划ID左连接，见 core.plan_config）。这两列是**后台当前配置**，
     只做展示，不参与任何指标或预算决策计算；匹配不到就留空。
+
+    2026-11-14：新增 ``日均花费`` = 所选周期花费 ÷ 所选周期天数（``计划实际数据天数``，
+    当日口径即 1 天）。天数缺失或为 0 时按 1 天处理，避免除零。
     """
     if df is None or len(df) == 0 or FULL_PLAN_DETAIL_COLUMN not in df.columns:
         return []
@@ -650,6 +654,12 @@ def build_plan_management(
 
     rows = []
     config_by_id = (plan_config or {}).get('by_id') or {}
+    try:
+        days = int(period_days) if period_days is not None else 0
+    except (TypeError, ValueError):
+        days = 0
+    if days <= 0:
+        days = max(int(_actual_days_from_source(df) or 1), 1)
     for plan in plans.values():
         product_count = len(plan['_products'])
         structures = plan['_structures']
@@ -669,6 +679,7 @@ def build_plan_management(
             '周期花费': period_spend,
             '归因成交': _round_money(plan['归因成交']),
             'ROI': _round_rate(safe_div(plan['归因成交'], plan['所选周期花费'])),
+            '日均花费': _round_money(safe_div(period_spend, days)),
             '商品数': product_count,
             '计划商品类型': plan_type,
             '计划类型': plan_type,
@@ -697,7 +708,10 @@ def build_budget_decision_context(df: pd.DataFrame, roles=None, plan_config=None
     ]
     summary = _store_summary(_aggregate_product_rows(source), source_columns, actual_days)
     tiers = build_rank_band_summary(products)
-    plans = build_plan_management(source, products=internal_products, plan_config=plan_config)
+    plans = build_plan_management(
+        source, products=internal_products, plan_config=plan_config,
+        period_days=actual_days,
+    )
     adjustments = [to_num(row.get('未来7日建议调整金额', 0)) for row in products]
     summary['周期GMV'] = summary['全店GMV']
     summary['周期花费'] = summary['全店付费']
