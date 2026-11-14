@@ -832,13 +832,22 @@ class BudgetDecisionDashboardUIContractTests(unittest.TestCase):
         plan_view = view[view.index('with plan_tab:'):]
         for column in (
             '序号', '计划ID', '所属渠道', '商品数', '计划类型', '计划经营结构',
+            '预算', '出价方式',
             '周期花费', '归因成交', 'ROI', '方向证据', '计划管理建议',
         ):
             self.assertIn(column, plan_view)
         self.assertIn("'序号', '计划ID'", plan_view)
         self.assertIn("'序号': st.column_config.NumberColumn('序号', format='%d')", plan_view)
         self.assertIn('合集计划只给父级诊断，勿把商品建议重复落成预算', plan_view)
-        self.assertIn('不得推断计划名称/计划组/预算/出价', plan_view)
+        # 2026-11-14：预算/出价方式改为读「最新计划列表快照」，只能按计划ID只读匹配、不推断
+        self.assertIn('计划列表快照', plan_view)
+        self.assertIn('按计划ID只读匹配，不做推断', plan_view)
+        self.assertIn('plan_config_caption(', plan_view)
+        self.assertNotIn('不得推断计划名称/计划组/预算/出价', plan_view)
+        self.assertIn(
+            "'计划经营结构',\n                    '预算', '出价方式',",
+            plan_view,
+        )
 
     def test_execution_table_remains_independent_tab4(self):
         tab4_start = self.source.index('with tab4:')

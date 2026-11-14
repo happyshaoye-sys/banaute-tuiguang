@@ -562,7 +562,13 @@ class BudgetDecisionRoleLayerTests(unittest.TestCase):
 
         self.assertFalse(budget_role.ROLE_LAYER_ENABLED)
         app_source = (Path(__file__).resolve().parent / 'app.py').read_text(encoding='utf-8-sig')
-        self.assertEqual(app_source.count('build_budget_decision_context(df, roles=True)'), 2)
+        self.assertEqual(
+            app_source.count('build_budget_decision_context(df, roles=True, plan_config=plan_config)'),
+            2,
+        )
+        # 2026-11-14：看板与全量导出都带上最新计划列表（预算/出价方式）
+        self.assertEqual(app_source.count('plan_config=plan_config'), 2)
+        self.assertNotIn('build_budget_decision_context(df, roles=True)', app_source)
         self.assertIn('def _attach_budget_role_basis(', app_source)
         self.assertIn('_attach_budget_role_basis(', app_source)
         self.assertIn('date_str, year=year, shop=shop, cache_root=cache_root,', app_source)

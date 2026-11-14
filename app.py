@@ -30,6 +30,7 @@ from core.merge import (
     merge_daily_facts,
     merge_sources,
 )
+from core.plan_config import load_plan_config, plan_config_caption
 from core.periods import (
     CUSTOM_LABEL,
     MAX_PERIOD_DAYS,
@@ -85,7 +86,7 @@ for key in ['df','prev_df','kpis','prev_kpis','kpi_mom','plan_ids','prev_plan_id
             'sources_info','traffic_bounds','value_bounds','traffic_ref','value_ref',
             'loaded','processing_msg','timings','total_time','period_logs','cat_ctx','kpi_trends',
             'new_product_ctx','new_product_load_state','new_product_history','new_product_progress',
-            'budget_decision_ctx_cache']:
+            'budget_decision_ctx_cache','plan_config']:
     if key not in st.session_state:
         if key == 'loaded':
             st.session_state[key] = False
@@ -533,7 +534,8 @@ def _call_export_all_sheets_with_budget_context(df, **kwargs):
     与看板保持一致：导出同样打开决策角色层（roles=True），
     否则导出的商品预算表会缺角色/闸门列。
     """
-    context = build_budget_decision_context(df, roles=True) or {}
+    plan_config = kwargs.pop('plan_config', None) or {}
+    context = build_budget_decision_context(df, roles=True, plan_config=plan_config) or {}
     return _call_export_all_sheets(
         df,
         budget_decision_context=context,
@@ -3736,6 +3738,8 @@ def _invalidate_budget_decision_context_cache():
 
 def _build_budget_decision_context_cached(df):
     token = _budget_decision_context_cache_token(df)
+    plan_config = st.session_state.get("plan_config") or {}
+    token = (token, plan_config.get("fingerprint", ""))
     cached = st.session_state.get("budget_decision_ctx_cache")
     if (
         isinstance(cached, dict)
@@ -3743,7 +3747,7 @@ def _build_budget_decision_context_cached(df):
         and isinstance(cached.get("context"), dict)
     ):
         return cached["context"]
-    context = build_budget_decision_context(df, roles=True) or {}
+    context = build_budget_decision_context(df, roles=True, plan_config=plan_config) or {}
     st.session_state.budget_decision_ctx_cache = {
         "token": token,
         "context": context,
@@ -3753,6 +3757,17 @@ def _build_budget_decision_context_cached(df):
 def _cache_key(base_root, year, shop, date_str):
     """按数据集生成稳定缓存目录名，让相邻分析日复用重叠历史日期。"""
     return dataset_cache_key(base_root, year, shop)
+
+
+def _load_plan_config_for(base_root, year, shop, date_str, cache_root=None):
+    """读「最新」计划列表快照（预算/出价方式），失败不影响主流程。"""
+    wujie_root = Path(base_root) / str(year) / str(shop) / '生意参谋' / '无界'
+    try:
+        return load_plan_config(wujie_root, analysis_date=date_str, cache_root=cache_root)
+    except Exception as exc:  # noqa: BLE001 - 计划配置只做展示，读不到就留空
+        print(f"[计划列表] 读取失败，预算/出价方式留空：{exc}")
+        return {'by_id': {}, 'fingerprint': '',
+                'source': {'file': '', 'reason': f'计划列表读取失败：{exc}'}}
 
 
 def _resolve_v93_report(path, date_str):
@@ -4159,6 +4174,9 @@ with st.sidebar:
                     st.session_state.cur_date = date_str
                     st.session_state.cur_year = year
                     st.session_state.cur_shop = shop
+                    # 2026-11-14：推广计划管理新增「预算 / 出价方式」，只读最新那份计划列表快照
+                    st.session_state.plan_config = _load_plan_config_for(
+                        root, year, shop, date_str, cache_root=str(file_cache_dir))
                     st.session_state.prev_date = None
                     st.session_state.sources_info = files_info
                     st.session_state.cat_ctx = cat_ctx
@@ -4555,7 +4573,12 @@ with tab3:
     with plan_tab:
         st.caption(
             "合集计划只给父级诊断，勿把商品建议重复落成预算；"
-            "不得推断计划名称/计划组/预算/出价。"
+            "「预算 / 出价方式」取自无界目录下最新的计划列表快照，"
+            "按计划ID只读匹配，不做推断。"
+        )
+        st.caption(
+            "来源：" + plan_config_caption((st.session_state.get('plan_config') or {}).get('source'))
+            + "。注意：这两列是**当前配置**，查历史日期时显示的也是最新值，不是历史值。"
         )
         if plans.empty:
             st.info("暂无推广计划管理数据。")
@@ -4563,6 +4586,7 @@ with tab3:
             plan_columns = [
                 column for column in (
                     '序号', '计划ID', '计划名称', '所属渠道', '商品数', '计划类型', '计划经营结构',
+                    '预算', '出价方式',
                     '周期花费', '归因成交', 'ROI', '方向证据', '计划管理建议',
                 )
                 if column in plans.columns
@@ -4741,6 +4765,7 @@ with tab4:
             new_product_ctx=_filter_new_product_context(
                 st.session_state.get('new_product_ctx'), filtered
             ),
+            plan_config=st.session_state.get('plan_config') or {},
         )
         st.download_button(
             f"📦 生成并下载全部 Sheet Excel ({len(filtered)} 行)",
