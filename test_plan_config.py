@@ -21,12 +21,14 @@ import pandas as pd
 from core.budget_decision import build_budget_decision_context, build_plan_management
 from core.exporter import BUDGET_DECISION_PLAN_COLUMNS
 from core.plan_config import (
+    budget_caption,
     find_latest_plan_list,
     format_budget_cell,
     load_plan_config,
     parse_budget,
     plan_config_caption,
     read_plan_list,
+    summarize_budget,
 )
 from core.plan_metrics import FULL_PLAN_DETAIL_COLUMN
 
@@ -75,6 +77,78 @@ class FormatBudgetCellTests(unittest.TestCase):
         formatted = [format_budget_cell(value) for value in values]
         self.assertTrue(all(isinstance(item, str) for item in formatted))
         self.assertEqual(formatted, ['310', '不限', '', ''])
+
+
+class SummarizeBudgetTests(unittest.TestCase):
+    """摘要「当日预算」= 计划列表里 状态=投放中 的计划日预算合计。"""
+
+    def _config(self, rows):
+        by_id = {}
+        for plan_id, budget, status, module in rows:
+            by_id[plan_id] = {'预算': budget, '出价方式': '', '状态': status, '模块': module}
+        return {'by_id': by_id, 'source': {'file': '计划列表_x.xlsx', 'exported_at': '2026-11-14 13:54'}}
+
+    def test_only_running_plans_counted(self):
+        config = self._config([
+            ('1', 500, '投放中', '关键词推广'),
+            ('2', 800, '投放中', '人群推广'),
+            ('3', 999, '已暂停', '人群推广'),
+            ('4', 111, '已终止', '内容营销-短视频'),
+        ])
+        summary = summarize_budget(config)
+        self.assertEqual(summary['金额'], 1300.0)
+        self.assertEqual(summary['计划数'], 2)
+        self.assertEqual(summary['按模块'], {'人群推广': 800.0, '关键词推广': 500.0})
+
+    def test_unlimited_budget_counted_but_not_summed(self):
+        config = self._config([
+            ('1', 500, '投放中', '关键词推广'),
+            ('2', '不限', '投放中', '货品全站推广'),
+        ])
+        summary = summarize_budget(config)
+        self.assertEqual(summary['金额'], 500.0)
+        self.assertEqual(summary['计划数'], 1)
+        self.assertEqual(summary['含不限数'], 1)
+        self.assertIn('无法求和', budget_caption(summary))
+
+    def test_missing_status_is_not_counted(self):
+        config = {'by_id': {'1': {'预算': 500, '出价方式': ''}}, 'source': {}}
+        summary = summarize_budget(config)
+        self.assertEqual(summary['金额'], 0.0)
+        self.assertEqual(summary['计划数'], 0)
+
+    def test_empty_config_returns_none_not_zero(self):
+        summary = summarize_budget({})
+        self.assertIsNone(summary['金额'])
+        self.assertIn('不可用', budget_caption(summary))
+
+    def test_caption_mentions_snapshot_and_excludes(self):
+        config = self._config([('1', 500, '投放中', '关键词推广')])
+        text = budget_caption(summarize_budget(config))
+        self.assertIn('状态=投放中', text)
+        self.assertIn('已暂停/已终止不计入', text)
+        self.assertIn('计划列表_x.xlsx', text)
+
+    def test_summary_carries_budget_fields(self):
+        detail = json.dumps([
+            {'计划ID': '82843151879', '计划名称': '计划A', '所属渠道': '人群',
+             '当前花费': 300.0, '归因成交': 900.0},
+        ], ensure_ascii=False)
+        source = pd.DataFrame({FULL_PLAN_DETAIL_COLUMN: [detail], '宝贝ID': ['A1']})
+        context = build_budget_decision_context(source, plan_config=self._config([
+            ('82843151879', 500, '投放中', '人群推广'),
+        ]))
+        self.assertEqual(context['summary']['当日预算'], 500.0)
+        self.assertEqual(context['summary']['当日预算计划数'], 1)
+
+    def test_summary_budget_none_without_plan_config(self):
+        detail = json.dumps([
+            {'计划ID': '82843151879', '计划名称': '计划A', '所属渠道': '人群',
+             '当前花费': 300.0, '归因成交': 900.0},
+        ], ensure_ascii=False)
+        source = pd.DataFrame({FULL_PLAN_DETAIL_COLUMN: [detail], '宝贝ID': ['A1']})
+        context = build_budget_decision_context(source)
+        self.assertIsNone(context['summary']['当日预算'])
 
 
 class FindLatestPlanListTests(unittest.TestCase):
@@ -150,8 +224,16 @@ class ReadPlanListTests(unittest.TestCase):
     def test_reads_by_plan_id(self):
         by_id, meta = read_plan_list(self.path)
         self.assertEqual(len(by_id), 3)
-        self.assertEqual(by_id['82843151879'], {'预算': 310, '出价方式': '稳定投产比 投产比6'})
-        self.assertEqual(by_id['81388538644'], {'预算': '不限', '出价方式': '最大化拿量'})
+        self.assertEqual(
+            {key: by_id['82843151879'][key] for key in ('预算', '出价方式')},
+            {'预算': 310, '出价方式': '稳定投产比 投产比6'},
+        )
+        self.assertEqual(by_id['82843151879']['状态'], '投放中')
+        self.assertEqual(by_id['82843151879']['模块'], '人群推广')
+        self.assertEqual(
+            {key: by_id['81388538644'][key] for key in ('预算', '出价方式', '状态', '模块')},
+            {'预算': '不限', '出价方式': '最大化拿量', '状态': '已暂停', '模块': '货品全站推广'},
+        )
         self.assertEqual(meta['rows'], 3)
         self.assertEqual(meta['file'], self.path.name)
 

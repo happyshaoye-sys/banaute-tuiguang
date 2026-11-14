@@ -27,10 +27,11 @@ from pathlib import Path
 
 import pandas as pd
 
-PLAN_CONFIG_CACHE_VERSION = 'metox2.69-plan-config-v1'
+PLAN_CONFIG_CACHE_VERSION = 'metox2.71-plan-config-v3'
 PLAN_LIST_KEYWORD = '计划列表'
 PLAN_LIST_CACHE_DIRNAME = '_plan_config'
 PLAN_CONFIG_COLUMNS = ('预算', '出价方式')
+BUDGET_TOTAL_STATUS = '投放中'
 DEFAULT_LOOKBACK_DAYS = 7
 _DATE_DIR_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 _READABLE_SUFFIXES = ('.xlsx', '.xls', '.csv')
@@ -153,6 +154,8 @@ def read_plan_list(path):
         by_id[plan_id] = {
             '预算': parse_budget(row.get('预算')),
             '出价方式': _clean_text(row.get('出价方式')),
+            '状态': _clean_text(row.get('状态')) if '状态' in frame.columns else '',
+            '模块': _clean_text(row.get('模块')) if '模块' in frame.columns else '',
         }
     meta = {
         'file': path.name,
@@ -262,6 +265,79 @@ def load_plan_config(wujie_root, analysis_date=None, cache_root=None,
     return {'by_id': by_id, 'fingerprint': fingerprint, 'source': source}
 
 
+def summarize_budget(plan_config, status=BUDGET_TOTAL_STATUS):
+    """汇总「当日预算」：计划列表里 ``状态=投放中`` 的计划，日预算合计。
+
+    口径说明（2026-11-14 与运营确认）：
+    * 预算就是预算，实际花费就是实际花费，两者互不对账，不做使用率/超支判断；
+    * 只统计后台当前在投（状态=投放中）的计划，已暂停 / 已终止 不计入；
+    * 预算为「不限」的计划无法求和，单独计数并在说明里点出；
+    * 计划列表快照缺失时返回 ``金额=None``，界面显示占位符而不是 0。
+
+    返回 ``{'金额', '计划数', '含不限数', '按模块', '口径', '快照'}``。
+    """
+    by_id = (plan_config or {}).get('by_id') or {}
+    source = (plan_config or {}).get('source') or {}
+    if not by_id:
+        return {
+            '金额': None,
+            '计划数': 0,
+            '含不限数': 0,
+            '按模块': {},
+            '口径': '未找到计划列表快照，当日预算不可用',
+            '快照': source,
+        }
+    total = 0.0
+    count = 0
+    unlimited = 0
+    by_module = {}
+    for info in by_id.values():
+        if status and str(info.get('状态') or '').strip() != status:
+            continue
+        budget = info.get('预算')
+        if isinstance(budget, str) and '不限' in budget:
+            unlimited += 1
+            continue
+        if not isinstance(budget, (int, float)) or isinstance(budget, bool):
+            continue
+        total += float(budget)
+        count += 1
+        module = str(info.get('模块') or '未分模块')
+        by_module[module] = round(by_module.get(module, 0.0) + float(budget), 2)
+    return {
+        '金额': round(total, 2),
+        '计划数': count,
+        '含不限数': unlimited,
+        '按模块': dict(sorted(by_module.items(), key=lambda item: -item[1])),
+        '口径': f'计划列表里状态={status or "全部"}的计划日预算合计',
+        '快照': source,
+        '状态': status,
+    }
+
+
+def budget_caption(summary) -> str:
+    """摘要卡片下面那行说明。"""
+    summary = summary or {}
+    if summary.get('金额') is None:
+        return str(summary.get('口径') or '未找到计划列表快照，当日预算不可用')
+    parts = [
+        f"当日预算 = 计划列表里状态=投放中 的 {int(summary.get('计划数') or 0)} 个计划日预算合计",
+    ]
+    by_module = summary.get('按模块') or {}
+    if by_module:
+        parts.append('、'.join(f'{name} {value:,.0f} 元' for name, value in by_module.items()))
+    if summary.get('含不限数'):
+        parts.append(f"另有 {int(summary['含不限数'])} 个计划预算「不限」，无法求和、未计入")
+    parts.append('已暂停/已终止不计入')
+    source = summary.get('快照') or {}
+    if source.get('file'):
+        suffix = f"{source['file']}"
+        if source.get('exported_at'):
+            suffix += f"（导出 {source['exported_at']}）"
+        parts.append(f"快照 {suffix}")
+    return '；'.join(parts)
+
+
 def plan_config_caption(source) -> str:
     """界面用的一句话来源说明。"""
     source = source or {}
@@ -278,13 +354,16 @@ def plan_config_caption(source) -> str:
 
 
 __all__ = [
+    'BUDGET_TOTAL_STATUS',
     'DEFAULT_LOOKBACK_DAYS',
     'PLAN_CONFIG_CACHE_VERSION',
     'PLAN_CONFIG_COLUMNS',
+    'budget_caption',
     'find_latest_plan_list',
     'format_budget_cell',
     'load_plan_config',
     'parse_budget',
     'plan_config_caption',
     'read_plan_list',
+    'summarize_budget',
 ]

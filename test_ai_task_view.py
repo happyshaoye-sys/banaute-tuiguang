@@ -724,7 +724,12 @@ class BudgetDecisionDashboardUIContractTests(unittest.TestCase):
         view = self._budget_view_source()
         for label in ('商品数', '周期GMV', '周期花费', '待回收金额', '建议增加金额', '零GMV消耗'):
             self.assertIn(f"summary.get('{label}'", view)
-        self.assertIn('metric_cols = st.columns(6)', view)
+        # 2026-11-14：新增「当日预算」卡片（口径=计划列表里状态=投放中的日预算合计）
+        self.assertIn('("当日预算"', view)
+        self.assertIn('summarize_budget(', view)
+        self.assertIn('budget_caption(', view)
+        self.assertIn('metric_cols = st.columns(len(summary_cards))', view)
+        self.assertNotIn('metric_cols = st.columns(6)', view)
 
     def test_required_methodology_copy_is_visible(self):
         view = self._budget_view_source()

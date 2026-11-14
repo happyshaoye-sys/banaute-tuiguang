@@ -18,6 +18,7 @@ from .plan_metrics import (
     PLAN_ACTUAL_DAYS_COLUMN,
     parse_full_plan_details,
 )
+from .plan_config import summarize_budget
 from .schema import safe_div, to_num
 
 
@@ -278,7 +279,12 @@ def _aggregate_product_rows(source: pd.DataFrame) -> list[dict]:
     return rows
 
 
-def _store_summary(products: list[dict], source_columns: set[str], actual_days: int) -> dict:
+def _store_summary(
+    products: list[dict],
+    source_columns: set[str],
+    actual_days: int,
+    budget_summary: dict | None = None,
+) -> dict:
     total_gmv = sum(item['GMV'] for item in products)
     total_spend = sum(item['付费'] for item in products)
     total_promotion_gmv = sum(item.get('推广成交金额', 0.0) for item in products)
@@ -289,6 +295,7 @@ def _store_summary(products: list[dict], source_columns: set[str], actual_days: 
     else:
         store_roi = safe_div(total_gmv, total_spend)
         roi_note = '执行表缺少推广成交金额，使用商品GMV/付费回退全店推广ROI'
+    budget = dict(budget_summary or {})
     return {
         '商品数': len(products),
         '全店GMV': _round_money(total_gmv),
@@ -298,6 +305,9 @@ def _store_summary(products: list[dict], source_columns: set[str], actual_days: 
         '全店推广ROI口径说明': roi_note,
         '实际数据天数': int(actual_days or 1),
         '未来7日花费基线': _round_money(safe_div(total_spend, actual_days or 1) * 7),
+        # 2026-11-14：当日预算 = 计划列表里状态=投放中的计划日预算合计（与花费不对账）
+        '当日预算': budget.get('金额'),
+        '当日预算计划数': budget.get('计划数', 0),
     }
 
 
@@ -706,7 +716,10 @@ def build_budget_decision_context(df: pd.DataFrame, roles=None, plan_config=None
         {field: item.get(field, '') for field in PRODUCT_COLUMNS}
         for item in internal_products
     ]
-    summary = _store_summary(_aggregate_product_rows(source), source_columns, actual_days)
+    summary = _store_summary(
+        _aggregate_product_rows(source), source_columns, actual_days,
+        budget_summary=summarize_budget(plan_config),
+    )
     tiers = build_rank_band_summary(products)
     plans = build_plan_management(
         source, products=internal_products, plan_config=plan_config,

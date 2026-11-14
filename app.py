@@ -30,7 +30,13 @@ from core.merge import (
     merge_daily_facts,
     merge_sources,
 )
-from core.plan_config import format_budget_cell, load_plan_config, plan_config_caption
+from core.plan_config import (
+    budget_caption,
+    format_budget_cell,
+    load_plan_config,
+    plan_config_caption,
+    summarize_budget,
+)
 from core.periods import (
     CUSTOM_LABEL,
     MAX_PERIOD_DAYS,
@@ -4353,17 +4359,22 @@ with tab3:
     actual_days = budget_decision_ctx.get('actual_days')
 
     st.markdown("#### 摘要先行")
+    # 2026-11-14：当日预算 = 计划列表里状态=投放中的计划日预算合计（与周期花费各自独立，互不对账）
+    budget_summary = summarize_budget(st.session_state.get('plan_config') or {})
+    budget_total = budget_summary.get('金额')
     summary_cards = [
         ("商品数", f"{int(_as_float(summary.get('商品数', len(products)))):,}"),
         ("周期GMV", _format_money(summary.get('周期GMV', summary.get('全店GMV', summary.get('GMV', 0))))),
         ("周期花费", _format_money(summary.get('周期花费', summary.get('全店付费', summary.get('付费', 0))))),
+        ("当日预算", _format_money(budget_total) if budget_total is not None else '—'),
         ("待回收金额", _format_money(summary.get('待回收金额', summary.get('待回收预算', 0)))),
         ("建议增加金额", _format_money(summary.get('建议增加金额', summary.get('建议增加预算', 0)))),
         ("零GMV消耗", _format_money(summary.get('零GMV消耗', summary.get('零GMV花费', summary.get('零GMV付费', 0))))),
     ]
-    metric_cols = st.columns(6)
+    metric_cols = st.columns(len(summary_cards))
     for metric_col, (label, value) in zip(metric_cols, summary_cards):
         metric_col.metric(label, value)
+    st.caption(budget_caption(budget_summary))
     if actual_days:
         st.caption(f"实际数据天数：{actual_days} 天；未来7日字段按所选周期日均等比例换算。")
 
