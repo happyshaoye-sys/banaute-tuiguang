@@ -1,6 +1,6 @@
 {
   "product": "MetoX",
-  "version": "2.71",
+  "version": "2.72",
   "release_date": "2026-11-14",
   "external_strategy_version": "v9.3",
   "rule_versions": {
@@ -78,6 +78,7 @@
     "plan_management_budget_bid": "2026-11-14",
     "plan_list_latest_snapshot": "2026-11-14",
     "plan_management_daily_spend": "2026-11-14",
-    "budget_decision_daily_budget_card": "2026-11-14"
+    "budget_decision_daily_budget_card": "2026-11-14",
+    "category_period_aligned_mom": "2026-11-14"
   }
 }

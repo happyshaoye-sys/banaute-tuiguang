@@ -53,7 +53,7 @@ from core.periods import (
 )
 from core.segmentation import segment_products
 from core.analysis import (
-    CATEGORY_BASIC_COLUMNS, CATEGORY_INVESTMENT_COLUMNS,
+    CATEGORY_BASIC_COLUMNS, CATEGORY_INVESTMENT_COLUMNS, PREV_WINDOW_METRICS,
     build_daily_kpi_trends, calc_kpis, calc_kpi_mom_percent, grade_distribution, channel_summary,
     segment_summary, category_analysis, refund_risk, channel_top, inventory_actions,
     build_operating_daily_report,
@@ -2411,35 +2411,22 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
         period_logs.append({'周期': '聚水潭退款率', '范围': jst_refund_note, '完整性': '',
                             '已读取日期': '', '缺失日期': '', '耗时': ''})
 
-    # 品类环比上下文:所选周期付费环比 + 固定7日品类投放指标。
-    # 直接从已加载日帧按品类汇总，避免为非7日选择额外执行两次商品级周期聚合。
-    h7_period = periods["7日环比"]
-    h7_current = aggregate_category_metrics(
+    # 品类环比上下文（2026-11-14 统一口径）：
+    # 所有「上周期*」与「*环比」都按**所选时间周期**取紧邻的等长上一期，
+    # 直接从已加载日帧按品类汇总（含已下架商品，不额外读盘、不重算商品级周期）。
+    sel_period = periods.get(sel_label) or periods["日环比"]
+    prev_window = aggregate_category_metrics(
         day_map,
-        iter_dates(h7_period["current_start"], h7_period["current_end"]),
-        ["GMV", "商品访客数", "商品加购件数", "支付买家数"],
-    )
-    h7_previous = aggregate_category_metrics(
-        day_map,
-        iter_dates(h7_period["prev_start"], h7_period["prev_end"]),
-        ["GMV", "付费", "关键词", "人群", "全站", "商品访客数", "商品加购件数", "支付买家数"],
+        iter_dates(sel_period["prev_start"], sel_period["prev_end"]),
+        list(PREV_WINDOW_METRICS),
     )
     cat_ctx = {
         'period_choice': period_choice,
         'sel_label': sel_label,
-        'sel_prev_spend': _cat_sum(sel_prev_frame, '付费'),
-        'h7_cur_gmv': h7_current['GMV'],
-        'h7_prev_gmv': h7_previous['GMV'],
-        'h7_cur_visitors': h7_current['商品访客数'],
-        'h7_prev_visitors': h7_previous['商品访客数'],
-        'h7_cur_carts': h7_current['商品加购件数'],
-        'h7_prev_carts': h7_previous['商品加购件数'],
-        'h7_cur_buyers': h7_current['支付买家数'],
-        'h7_prev_buyers': h7_previous['支付买家数'],
-        'h7_prev_spend': h7_previous['付费'],
-        'h7_prev_keyword': h7_previous['关键词'],
-        'h7_prev_crowd': h7_previous['人群'],
-        'h7_prev_omni': h7_previous['全站'],
+        'prev_start': sel_period["prev_start"],
+        'prev_end': sel_period["prev_end"],
+        'prev_days': int(sel_period.get("days") or 0),
+        'prev_window': prev_window,
     }
     kpi_trends = build_daily_kpi_trends(day_map, end_date=date_str)
     # v2.54：冻结后主流程只加载 28 天，看板日趋势图靠逐日 KPI 缓存补回历史 56 天。
@@ -4816,9 +4803,16 @@ with tab6:
     try:
         _ctx = st.session_state.get('cat_ctx') or {}
         if _ctx.get('sel_label'):
-            st.caption(f"口径: 主表={_ctx.get('period_choice','当日')} | "
-                       f"付费环比按 {_ctx['sel_label']} 窗口 | "
-                       "7日GMV/访客数/加购/支付转化率环比按 7日窗口")
+            _prev_range = ''
+            if _ctx.get('prev_start') and _ctx.get('prev_end'):
+                _prev_range = f"（{_ctx['prev_start']}~{_ctx['prev_end']}，" \
+                              f"{int(_ctx.get('prev_days') or 0)} 天）"
+            st.caption(
+                f"口径: 主表={_ctx.get('period_choice','当日')} | "
+                f"所有环比 = 本期 vs 紧邻的等长上一期{_prev_range} | "
+                "`上周期*` 为上一期整段按品类汇总；投放占比=该品类付费÷全店付费，"
+                "上周期投放占比为上一期同口径，占比变化=两者之差(百分点)"
+            )
         cat = category_analysis(df, cat_ctx=_ctx)
         if cat['basic']:
             st.subheader("品类基础分析")

@@ -8,15 +8,20 @@ from .task_engine import AI_TASK_VIEW_COLUMNS, build_ai_task_view
 
 CATEGORY_BASIC_COLUMNS = [
     '品类', '商品数', 'GMV', 'GMV占比', '付费占比', '付费', '付费环比',
-    '商品访客数', '访客数占比', '7日访客数环比', '品类加购件数',
-    '7日加购件数环比', '品类加购率', '7日加购率环比',
-    '品类支付转化率', '7日支付转化率环比', '退款率', 'SPU价值', 'ROI',
+    '商品访客数', '访客数占比', '访客数环比', '品类加购件数',
+    '加购件数环比', '品类加购率', '加购率环比',
+    '品类支付转化率', '支付转化率环比', '退款率', 'SPU价值', 'ROI',
 ]
 CATEGORY_INVESTMENT_COLUMNS = [
-    '品类', 'GMV', 'GMV占比', '7天GMV', '7日GMV环比',
-    '付费', '付费占比', '上周期付费', '7日付费环比', '关键词', '人群', '全站',
+    '品类', 'GMV', 'GMV占比', '上周期GMV', 'GMV环比',
+    '付费', '投放占比', '上周期付费', '上周期投放占比', '占比变化(pp)', '关键词', '人群', '全站',
     '上周期关键词', '上周期人群', '上周期全站', 'ROI',
 ]
+#: 2026-11-14：所有环比统一为「本期 vs 紧邻的上一期（等长）」，
+#: 上一期数据由 app 按所选周期从日帧汇总（含已下架商品），键名见 PREV_WINDOW_METRICS。
+PREV_WINDOW_METRICS = (
+    'GMV', '付费', '关键词', '人群', '全站', '商品访客数', '商品加购件数', '支付买家数',
+)
 
 
 def _s(df, col):
@@ -463,42 +468,50 @@ def segment_summary(df):
 
 def category_analysis(df, cat_ctx=None):
     """品类分析（两张表）。
-    cat_ctx(可选,2026-07-10 新增): 品类级环比上下文,由 app 按所选时间周期构建:
-      {'sel_prev_spend': {类目: 上一周期付费}, 'h7_cur_gmv': {类目: 7日窗GMV},
-       'h7_prev_gmv': {类目: 上一7日窗GMV},
-       'h7_cur_visitors|h7_prev_visitors': {类目: 7日窗商品访客数},
-       'h7_cur_carts|h7_prev_carts': {类目: 7日窗商品加购件数},
-       'h7_cur_buyers|h7_prev_buyers': {类目: 7日窗支付买家数},
-       'h7_prev_spend|keyword|crowd|omni': {类目: 上一7日窗渠道金额}}
-    - 基础表含品类加购件数、品类加购率(加购件数/访客数)、品类支付转化率
-      (支付买家数/访客数)，三项环比均使用固定当前7日与前7日窗口;
-    - 投放表新增 7日GMV环比与7日付费环比(固定7日窗口品类环比);
-    - '7天GMV'优先使用上一7日窗口的完整品类GMV,避免只汇总本期仍存在商品的上周期金额。"""
+
+    2026-11-14 口径统一：**所有「环比」= 本期 vs 紧邻的上一期（与所选时间周期等长）**，
+    `上周期*` = 上一期整段按品类汇总。不再有固定 7 日窗。
+
+    cat_ctx（由 app 按所选周期构建）::
+
+        {'period_choice': '7天', 'sel_label': '7日环比',
+         'prev_start': '2026-11-01', 'prev_end': '2026-11-07', 'prev_days': 7,
+         'prev_window': {指标: {类目: 上一期合计}}}   # 指标见 PREV_WINDOW_METRICS
+
+    上一期窗口缺失时（例如导出没带上下文）回退为行内 `上周期金额/付费/人群/关键词/全站`
+    求和；访客/加购/买家没有行级上一期字段，此时对应环比记 0.0%。
+
+    列口径：
+    - 基础表 `付费占比` = 该品类付费 ÷ 该品类 GMV（成本率）；`付费环比` = 本期 vs 上一期付费。
+    - 投放表 `投放占比` = 该品类付费 ÷ 全店付费；`上周期投放占比` = 上一期同口径；
+      `占比变化(pp)` = 本期投放占比 − 上周期投放占比（百分点）。
+    """
     if '淘宝类目' not in df.columns or len(df) == 0:
         return {'basic':[], 'invest':[], 'total':{}}
     ctx = cat_ctx or {}
-    sel_prev_spend = ctx.get('sel_prev_spend') or {}
-    h7_cur_gmv = ctx.get('h7_cur_gmv') or {}
-    h7_prev_gmv = ctx.get('h7_prev_gmv') or {}
-    h7_cur_visitors = ctx.get('h7_cur_visitors') or {}
-    h7_prev_visitors = ctx.get('h7_prev_visitors') or {}
-    h7_cur_carts = ctx.get('h7_cur_carts') or {}
-    h7_prev_carts = ctx.get('h7_prev_carts') or {}
-    h7_cur_buyers = ctx.get('h7_cur_buyers') or {}
-    h7_prev_buyers = ctx.get('h7_prev_buyers') or {}
-    has_complete_h7_prev = ctx.get('h7_prev_gmv') is not None
-    h7_prev_spend = ctx.get('h7_prev_spend') or {}
-    h7_prev_keyword = ctx.get('h7_prev_keyword') or {}
-    h7_prev_crowd = ctx.get('h7_prev_crowd') or {}
-    h7_prev_omni = ctx.get('h7_prev_omni') or {}
-    has_complete_h7_channels = all(
-        ctx.get(key) is not None for key in (
-            'h7_prev_spend', 'h7_prev_keyword', 'h7_prev_crowd', 'h7_prev_omni',
-        )
-    )
+    prev_window = ctx.get('prev_window') or {}
+    if not isinstance(prev_window, dict):
+        prev_window = {}
+    has_prev_window = bool(prev_window)
+
+    def _prev_value(metric, category, fallback=0.0):
+        """上一期该指标的品类值：优先用上一期整段窗口汇总，否则用行内上周期字段。"""
+        bucket = prev_window.get(metric) or {}
+        if has_prev_window:
+            return float(bucket.get(category, 0.0) or 0.0)
+        return float(fallback or 0.0)
 
     def _mom(cur, prev):
         return f'{safe_div(cur - prev, prev)*100:.1f}%' if prev else '0.0%'
+
+    def _share(value, total):
+        return f'{safe_div(value, total)*100:.1f}%' if total else '0.0%'
+
+    def _pp_change(cur_value, prev_value, cur_total, prev_total):
+        if not cur_total or not prev_total:
+            return '+0.0pp'
+        delta = (float(cur_value) / float(cur_total) - float(prev_value) / float(prev_total)) * 100
+        return f'{delta:+.1f}pp'
 
     # 品类退款率=GMV加权聚水潭cohort退款率(2026-07-10 统一口径,不再用成功退款金额/GMV);
     # 未覆盖品(退款率NaN,近30日无订单)权重按0计,其当期GMV≈0影响可忽略
@@ -530,39 +543,45 @@ def category_analysis(df, cat_ctx=None):
     total_spend = _s(df, '付费')
     total_visitors = _s(df, '商品访客数')
     total = len(df)
+    # 上一期全店口径（用于「上周期投放占比」与占比变化）
+    prev_total_spend = float(sum((prev_window.get('付费') or {}).values())) if has_prev_window else float(
+        pd.to_numeric(work['上周期付费'], errors='coerce').fillna(0.0).sum())
 
     basic, invest = [], []
     for _, r in cat_agg.iterrows():
         cat_key = r['淘宝类目']
-        cur_7d_visitors = float(h7_cur_visitors.get(cat_key, 0.0))
-        prev_7d_visitors = float(h7_prev_visitors.get(cat_key, 0.0))
-        cur_7d_carts = float(h7_cur_carts.get(cat_key, 0.0))
-        prev_7d_carts = float(h7_prev_carts.get(cat_key, 0.0))
-        cur_7d_buyers = float(h7_cur_buyers.get(cat_key, 0.0))
-        prev_7d_buyers = float(h7_prev_buyers.get(cat_key, 0.0))
-        cur_7d_cart_rate = safe_div(cur_7d_carts, cur_7d_visitors)
-        prev_7d_cart_rate = safe_div(prev_7d_carts, prev_7d_visitors)
-        cur_7d_conversion = safe_div(cur_7d_buyers, cur_7d_visitors)
-        prev_7d_conversion = safe_div(prev_7d_buyers, prev_7d_visitors)
-        prev_7d_spend = (
-            float(h7_prev_spend.get(cat_key, 0.0))
-            if has_complete_h7_channels else float(r['d7spend'])
-        )
+        # 本期（= 所选周期合并帧）
+        cur_visitors = float(r['visitors'])
+        cur_carts = float(r['carts'])
+        cur_buyers = float(r['buyers'])
+        cur_cart_rate = safe_div(cur_carts, cur_visitors)
+        cur_conversion = safe_div(cur_buyers, cur_visitors)
+        # 上一期（= 紧邻的等长上一期窗口；缺失时回退行内上周期字段）
+        prev_visitors = _prev_value('商品访客数', cat_key, 0.0)
+        prev_carts = _prev_value('商品加购件数', cat_key, 0.0)
+        prev_buyers = _prev_value('支付买家数', cat_key, 0.0)
+        prev_cart_rate = safe_div(prev_carts, prev_visitors)
+        prev_conversion = safe_div(prev_buyers, prev_visitors)
+        prev_spend = _prev_value('付费', cat_key, r['d7spend'])
+        prev_gmv = _prev_value('GMV', cat_key, r['d7gmv'])
+        prev_keyword = _prev_value('关键词', cat_key, r['d7kw'])
+        prev_crowd = _prev_value('人群', cat_key, r['d7crowd'])
+        prev_omni = _prev_value('全站', cat_key, r['d7omni'])
         basic.append({
             '品类': cat_key or '未分类', '商品数': int(r['cnt']),
             'GMV': float(r['gmv']), 'GMV占比': f'{safe_div(r["gmv"],total_gmv)*100:.1f}%',
             '付费占比': f'{safe_div(r["spend"],r["gmv"])*100:.1f}%',
             '付费': float(r['spend']),
-            '付费环比': _mom(float(r['spend']), float(sel_prev_spend.get(cat_key, 0.0))),
-            '商品访客数': int(r['visitors']),
+            '付费环比': _mom(float(r['spend']), prev_spend),
+            '商品访客数': int(cur_visitors),
             '访客数占比': f'{safe_div(r["visitors"],total_visitors)*100:.1f}%',
-            '7日访客数环比': _mom(cur_7d_visitors, prev_7d_visitors),
-            '品类加购件数': int(r['carts']),
-            '7日加购件数环比': _mom(cur_7d_carts, prev_7d_carts),
+            '访客数环比': _mom(cur_visitors, prev_visitors),
+            '品类加购件数': int(cur_carts),
+            '加购件数环比': _mom(cur_carts, prev_carts),
             '品类加购率': f'{safe_div(r["carts"],r["visitors"])*100:.1f}%',
-            '7日加购率环比': _mom(cur_7d_cart_rate, prev_7d_cart_rate),
+            '加购率环比': _mom(cur_cart_rate, prev_cart_rate),
             '品类支付转化率': f'{safe_div(r["buyers"],r["visitors"])*100:.1f}%',
-            '7日支付转化率环比': _mom(cur_7d_conversion, prev_7d_conversion),
+            '支付转化率环比': _mom(cur_conversion, prev_conversion),
             '退款率': f'{safe_div(r["refund_w"],r["gmv"])*100:.1f}%',
             'SPU价值': float(safe_div(r['gmv'],r['cnt'])),
             'ROI': f'{safe_div(r["gmv"],r["spend"]):.2f}',
@@ -570,21 +589,18 @@ def category_analysis(df, cat_ctx=None):
         invest.append({
             '品类': cat_key or '未分类',
             'GMV': float(r['gmv']), 'GMV占比': f'{safe_div(r["gmv"],total_gmv)*100:.1f}%',
-            '7天GMV': float(h7_prev_gmv.get(cat_key, 0.0))
-                    if has_complete_h7_prev else float(r['d7gmv']),
-            '7日GMV环比': _mom(float(h7_cur_gmv.get(cat_key, 0.0)),
-                            float(h7_prev_gmv.get(cat_key, 0.0))),
+            # 2026-11-14：「上周期GMV」= 上一期整段 GMV，作为「GMV环比」的分母
+            '上周期GMV': prev_gmv,
+            'GMV环比': _mom(float(r['gmv']), prev_gmv),
             '付费': float(r['spend']),
-            '付费占比': f'{safe_div(r["spend"],total_spend)*100:.1f}%' if total_spend else '0%',
-            '上周期付费': prev_7d_spend,
-            '7日付费环比': _mom(float(r['spend']), prev_7d_spend),
+            '投放占比': _share(r['spend'], total_spend),
+            '上周期付费': prev_spend,
+            '上周期投放占比': _share(prev_spend, prev_total_spend),
+            '占比变化(pp)': _pp_change(r['spend'], prev_spend, total_spend, prev_total_spend),
             '关键词': float(r['kw']), '人群': float(r['crowd']), '全站': float(r['omni']),
-            '上周期关键词': float(h7_prev_keyword.get(cat_key, 0.0))
-                    if has_complete_h7_channels else float(r['d7kw']),
-            '上周期人群': float(h7_prev_crowd.get(cat_key, 0.0))
-                    if has_complete_h7_channels else float(r['d7crowd']),
-            '上周期全站': float(h7_prev_omni.get(cat_key, 0.0))
-                    if has_complete_h7_channels else float(r['d7omni']),
+            '上周期关键词': prev_keyword,
+            '上周期人群': prev_crowd,
+            '上周期全站': prev_omni,
             'ROI': f'{safe_div(r["gmv"],r["spend"]):.2f}',
         })
 

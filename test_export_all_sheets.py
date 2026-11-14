@@ -438,16 +438,17 @@ class ExportAllSheetsTests(unittest.TestCase):
             **plan,
         }])
         category_context = {
-            'h7_cur_gmv': {'连衣裙': 1000.0},
-            'h7_prev_gmv': {'连衣裙': 800.0},
-            'h7_prev_spend': {'连衣裙': 90.0},
-            'h7_prev_keyword': {'连衣裙': 50.0},
-            'h7_prev_crowd': {'连衣裙': 30.0},
-            'h7_prev_omni': {'连衣裙': 10.0},
+            'prev_window': {
+                'GMV': {'连衣裙': 800.0},
+                '付费': {'连衣裙': 90.0},
+                '关键词': {'连衣裙': 50.0},
+                '人群': {'连衣裙': 30.0},
+                '全站': {'连衣裙': 10.0},
+            },
         }
         expected_columns = [
-            '品类', 'GMV', 'GMV占比', '7天GMV', '7日GMV环比',
-            '付费', '付费占比', '上周期付费', '7日付费环比',
+            '品类', 'GMV', 'GMV占比', '上周期GMV', 'GMV环比',
+            '付费', '投放占比', '上周期付费', '上周期投放占比', '占比变化(pp)',
             '关键词', '人群', '全站',
             '上周期关键词', '上周期人群', '上周期全站', 'ROI',
         ]
@@ -464,10 +465,13 @@ class ExportAllSheetsTests(unittest.TestCase):
                 )
                 self.assertEqual(category.columns.tolist(), expected_columns)
                 self.assertEqual(category.loc[0, '品类'], '连衣裙')
-                self.assertEqual(category.loc[0, '7天GMV'], 800.0)
-                self.assertEqual(category.loc[0, '7日GMV环比'], '25.0%')
+                self.assertEqual(category.loc[0, '上周期GMV'], 800.0)
+                self.assertEqual(category.loc[0, 'GMV环比'], '25.0%')
                 self.assertEqual(category.loc[0, '上周期付费'], 90.0)
-                self.assertEqual(category.loc[0, '7日付费环比'], '11.1%')
+                # 投放占比 = 100/100 = 100%；上周期投放占比 = 90/90 = 100%
+                self.assertEqual(category.loc[0, '投放占比'], '100.0%')
+                self.assertEqual(category.loc[0, '上周期投放占比'], '100.0%')
+                self.assertEqual(category.loc[0, '占比变化(pp)'], '+0.0pp')
                 self.assertEqual(category.loc[0, '上周期关键词'], 50.0)
                 self.assertEqual(category.loc[0, '上周期人群'], 30.0)
                 self.assertEqual(category.loc[0, '上周期全站'], 10.0)
@@ -490,12 +494,11 @@ class ExportAllSheetsTests(unittest.TestCase):
         ])
         execution_filter = full_source.iloc[[0]].copy()
         category_context = {
-            'h7_cur_visitors': {'连衣裙': 100.0, 'T恤': 50.0},
-            'h7_prev_visitors': {'连衣裙': 80.0, 'T恤': 40.0},
-            'h7_cur_carts': {'连衣裙': 20.0, 'T恤': 5.0},
-            'h7_prev_carts': {'连衣裙': 10.0, 'T恤': 4.0},
-            'h7_cur_buyers': {'连衣裙': 10.0, 'T恤': 2.0},
-            'h7_prev_buyers': {'连衣裙': 8.0, 'T恤': 1.0},
+            'prev_window': {
+                '商品访客数': {'连衣裙': 80.0, 'T恤': 40.0},
+                '商品加购件数': {'连衣裙': 10.0, 'T恤': 4.0},
+                '支付买家数': {'连衣裙': 8.0, 'T恤': 1.0},
+            },
         }
 
         workbook = export_all_sheets(
@@ -517,16 +520,18 @@ class ExportAllSheetsTests(unittest.TestCase):
             category.columns.tolist(),
             [
                 '品类', '商品数', 'GMV', 'GMV占比', '付费占比', '付费',
-                '付费环比', '商品访客数', '访客数占比', '7日访客数环比',
-                '品类加购件数', '7日加购件数环比', '品类加购率',
-                '7日加购率环比', '品类支付转化率', '7日支付转化率环比',
+                '付费环比', '商品访客数', '访客数占比', '访客数环比',
+                '品类加购件数', '加购件数环比', '品类加购率',
+                '加购率环比', '品类支付转化率', '支付转化率环比',
                 '退款率', 'SPU价值', 'ROI',
             ],
         )
         dress = category.set_index('品类').loc['连衣裙']
         self.assertEqual(dress['商品访客数'], 100)
-        self.assertEqual(dress['7日访客数环比'], '25.0%')
+        self.assertEqual(dress['访客数环比'], '25.0%')
         self.assertEqual(dress['品类加购率'], '20.0%')
+        # 转化率 10%(10/100) vs 上一期 10%(8/80) → 0.0%
+        self.assertEqual(dress['支付转化率环比'], '0.0%')
         self.assertEqual(dress['品类支付转化率'], '10.0%')
         self.assertEqual(dress['退款率'], '50.0%')
 
