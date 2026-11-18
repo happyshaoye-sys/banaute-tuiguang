@@ -64,6 +64,10 @@ from core.budget_decision import (
 )
 from core.metox_algorithm import apply_metox_algorithm
 from core.metric_labels import apply_metric_labels
+from core.wujie_scene import (
+    legacy_channels_from_frame,
+    summarize_scene_channels,
+)
 from core.jst_stock import find_snapshot, load_snapshot_as_stock
 from core.jst_refund import find_refund_snapshot, load_refund_rates
 from core.exporter import export_execution_table, export_all_sheets, style_execution_table
@@ -91,7 +95,7 @@ for key in ['df','prev_df','kpis','prev_kpis','kpi_mom','plan_ids','prev_plan_id
             'sources_info','traffic_bounds','value_bounds','traffic_ref','value_ref',
             'loaded','processing_msg','timings','total_time','period_logs','cat_ctx','kpi_trends',
             'new_product_ctx','new_product_load_state','new_product_history','new_product_progress',
-            'budget_decision_ctx_cache','plan_config']:
+            'budget_decision_ctx_cache','plan_config','cur_root','cur_period_days']:
     if key not in st.session_state:
         if key == 'loaded':
             st.session_state[key] = False
@@ -2378,8 +2382,9 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
 
     t0 = time.perf_counter()
     t_step = time.perf_counter()
-    df = apply_period_comparisons(df, comparisons)
-    _log_time(timings, "环比字段写回", t_step, f"{len(comparisons)} 个周期")
+    # 2026-11-16 方案A：「上周期*」跟随所选时间周期（不再写死 7 日环比）
+    df = apply_period_comparisons(df, comparisons, primary_label=sel_label)
+    _log_time(timings, "环比字段写回", t_step, f"{len(comparisons)} 个周期（上周期={sel_label}）")
     t_step = time.perf_counter()
     df = apply_rolling_daily_metrics(df, day_map, date_str)
     _log_time(timings, "滚动日销花费计算", t_step, "3/7/15 天")
@@ -2429,6 +2434,8 @@ def _load_folder_cached(base_root, year, shop, date_str, product_folder, cache_d
     cat_ctx = {
         'period_choice': period_choice,
         'sel_label': sel_label,
+        'current_start': sel_period["current_start"],
+        'current_end': sel_period["current_end"],
         'prev_start': sel_period["prev_start"],
         'prev_end': sel_period["prev_end"],
         'prev_days': int(sel_period.get("days") or 0),
@@ -4117,6 +4124,14 @@ with st.sidebar:
                     st.session_state.cur_date = date_str
                     st.session_state.cur_year = year
                     st.session_state.cur_shop = shop
+                    # 2026-11-16：分渠道花费要用无界营销场景报表，需要根目录与当期窗口日期
+                    st.session_state.cur_root = root
+                    st.session_state.cur_period_days = [
+                        d for d in iter_dates(
+                            cat_ctx.get('current_start', date_str),
+                            cat_ctx.get('current_end', date_str),
+                        )
+                    ]
                     # 2026-11-14：推广计划管理新增「预算 / 出价方式」，只读最新那份计划列表快照
                     st.session_state.plan_config = _load_plan_config_for(
                         root, year, shop, date_str, cache_root=str(file_cache_dir))
@@ -4243,14 +4258,35 @@ with tab1:
 
     st.divider()
 
-    # 分渠道
-    channels = channel_summary(df)
-    ch_total = sum(c['val'] for c in channels)
+    # 分渠道（2026-11-16：优先用无界「营销场景报表」的店铺级口径，缺失则回退商品总表口径）
+    _wujie_root = Path(str(st.session_state.get('cur_root') or '')) / str(
+        st.session_state.get('cur_year') or '') / str(
+        st.session_state.get('cur_shop') or '') / '生意参谋' / '无界'
+    _scene_days = (st.session_state.get('cur_period_days') or [])
+    _scene = summarize_scene_channels(_wujie_root, _scene_days) if _wujie_root.is_dir() else {
+        'ok': False, 'channels': [], 'total': 0.0, 'note': '未定位到无界目录，分渠道花费回退商品总表口径'
+    }
+    if _scene.get('ok'):
+        channels = _scene['channels']
+        ch_total = _scene['total']
+        ch_caption = _scene['note']
+    else:
+        channels = legacy_channels_from_frame(df)
+        ch_total = sum(item['val'] for item in channels)
+        ch_caption = _scene.get('note') or '分渠道花费来自商品总表口径'
     if ch_total > 0:
         st.subheader("分渠道花费")
         for ch in channels:
             pct = ch['val'] / ch_total * 100 if ch_total else 0
             st.progress(pct / 100, text=f"{ch['name']}: ¥{ch['val']/1e4:.2f}万 ({pct:.1f}%)")
+        st.caption(ch_caption)
+        _page_spend = _as_float(kpis.get('本期花费', 0))
+        if _scene.get('ok') and abs(ch_total - _page_spend) > 0.5:
+            st.caption(
+                f"说明：分渠道合计 ¥{ch_total:,.2f} 与「周期花费」¥{_page_spend:,.2f} 不同，"
+                "因为超级直播/超级短视频属于店铺级花费，在商品明细里没有对应商品行；"
+                "执行表的商品级渠道列、付费与 ROI 仍按商品口径计算，未改动。"
+            )
 
 # ── Tab 2: 数据验收 ───────────────────────────────────────
 with tab2:
@@ -4297,28 +4333,39 @@ with tab3:
 
     st.markdown("#### 摘要先行")
     # 2026-11-14：当前预算 = 计划列表里状态=投放中的计划日预算合计（与周期花费各自独立，互不对账）
-    # 2026-11-16：新增 往期预算（上一份快照同口径）与 预算变化（当前 − 往期）
+    # 2026-11-16：新增 往期预算（上一份快照同口径）与 预算变化（当前 − 往期）；并把 9 张卡按语义分三组排版
     budget_summary = summarize_budget(st.session_state.get('plan_config') or {})
     budget_total = budget_summary.get('金额')
     previous_budget = budget_summary.get('往期金额')
     budget_change = budget_summary.get('变化')
-    summary_cards = [
+
+    def _render_metric_group(title, cards):
+        """每组一行：小标题 + 等宽指标卡（3 张）。"""
+        st.markdown(f"**{title}**")
+        cols = st.columns(len(cards))
+        for col, (label, value) in zip(cols, cards):
+            col.metric(label, value)
+
+    _render_metric_group('规模与花费', [
         ("商品数", f"{int(_as_float(summary.get('商品数', len(products)))):,}"),
         ("周期GMV", _format_money(summary.get('周期GMV', summary.get('全店GMV', summary.get('GMV', 0))))),
         ("周期花费", _format_money(summary.get('周期花费', summary.get('全店付费', summary.get('付费', 0))))),
+    ])
+    _render_metric_group('预算（计划列表快照）', [
         ("当前预算", _format_money(budget_total) if budget_total is not None else '—'),
         ("往期预算", _format_money(previous_budget) if previous_budget is not None else '—'),
         ("预算变化", _format_signed_money(budget_change) if budget_change is not None else '—'),
+    ])
+    _render_metric_group('调整建议', [
         ("待回收金额", _format_money(summary.get('待回收金额', summary.get('待回收预算', 0)))),
         ("建议增加金额", _format_money(summary.get('建议增加金额', summary.get('建议增加预算', 0)))),
         ("零GMV消耗", _format_money(summary.get('零GMV消耗', summary.get('零GMV花费', summary.get('零GMV付费', 0))))),
-    ]
-    metric_cols = st.columns(len(summary_cards))
-    for metric_col, (label, value) in zip(metric_cols, summary_cards):
-        metric_col.metric(label, value)
-    st.caption(budget_caption(budget_summary))
+    ])
+    _budget_note = budget_caption(budget_summary)
     if actual_days:
-        st.caption(f"实际数据天数：{actual_days} 天；未来7日字段按所选周期日均等比例换算。")
+        _budget_note += f"　｜　实际数据天数：{actual_days} 天，未来7日字段按所选周期日均等比例换算"
+    with st.expander("口径与数据来源", expanded=False):
+        st.caption(_budget_note)
 
     _render_threshold_freeze_panel()
     _render_budget_role_summary(products)

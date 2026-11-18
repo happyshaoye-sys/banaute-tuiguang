@@ -1,4 +1,4 @@
-﻿"""日期区间与周期环比计算。"""
+"""日期区间与周期环比计算。"""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -327,8 +327,13 @@ def aggregate_period_frame(
     return grouped
 
 
-def apply_period_comparisons(df, comparisons):
-    """把每个周期的累计环比写回当前执行表。"""
+def apply_period_comparisons(df, comparisons, primary_label="7日环比"):
+    """把每个周期的累计环比写回当前执行表。
+
+    2026-11-16（方案A）：``上周期金额/付费/关键词/人群/全站`` 不再写死取「7日环比」的上一窗，
+    改为写**所选时间周期**的上一期（``primary_label`` 由 app 传 sel_label）。
+    这样任何档位（当日/3天/7天/15天/30天/按月/自定义）都有上周期值，且与品类分析表口径一致。
+    """
     out = df.copy()
     if "宝贝ID" not in out.columns:
         return out
@@ -346,7 +351,7 @@ def apply_period_comparisons(df, comparisons):
                 lambda pid: _compare_metric(pid, source_col, cur_map, prev_map)
             )
 
-        if label == "7日环比":
+        if label == primary_label:
             out["上周期金额"] = out["宝贝ID"].apply(lambda pid: _lookup_metric(pid, "GMV", prev_map))
             out["上周期付费"] = out["宝贝ID"].apply(lambda pid: _lookup_metric(pid, "付费", prev_map))
             out["上周期人群"] = out["宝贝ID"].apply(lambda pid: _lookup_metric(pid, "人群", prev_map))

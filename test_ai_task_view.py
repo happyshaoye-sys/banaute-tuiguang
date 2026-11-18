@@ -726,7 +726,11 @@ class BudgetDecisionDashboardUIContractTests(unittest.TestCase):
         self.assertIn('_format_signed_money(', view)
         self.assertIn('summarize_budget(', view)
         self.assertIn('budget_caption(', view)
-        self.assertIn('metric_cols = st.columns(len(summary_cards))', view)
+        # 2026-11-16：摘要按语义分三组排版（规模与花费 / 预算 / 调整建议），口径说明收进折叠面板
+        self.assertIn("_render_metric_group('规模与花费'", view)
+        self.assertIn("_render_metric_group('预算（计划列表快照）'", view)
+        self.assertIn("_render_metric_group('调整建议'", view)
+        self.assertIn('with st.expander("口径与数据来源"', view)
         self.assertNotIn('metric_cols = st.columns(6)', view)
 
     def test_required_methodology_copy_is_visible(self):
