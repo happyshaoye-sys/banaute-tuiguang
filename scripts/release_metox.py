@@ -161,10 +161,18 @@ def _audit(
     if str(version_info.get("version")) != version:
         raise RuntimeError("packaged VERSION.json does not match requested version")
     app_source = (stage / "app.py").read_text(encoding="utf-8-sig")
-    if "from core.version import APP_VERSION, DISPLAY_VERSION, PRODUCT_NAME" not in app_source:
+    # v2.73：显示名与 product 分离，import 行多带 DISPLAY_NAME，这里按"三个版本变量都来自 core.version"判断
+    version_imports = [line for line in app_source.splitlines()
+                       if line.startswith("from core.version import")]
+    if not any(
+        all(name in line for name in ("APP_VERSION", "DISPLAY_VERSION", "PRODUCT_NAME"))
+        for line in version_imports
+    ):
         raise RuntimeError("packaged app.py is not connected to VERSION.json")
     if (stage / "core" / "v93_algorithm.py").exists():
         raise RuntimeError("obsolete core/v93_algorithm.py leaked into release")
+    if (stage / "core" / "v93_signal.py").exists():
+        raise RuntimeError("obsolete core/v93_signal.py leaked into release (v2.73 removed v9.3)")
     launcher_source = (stage / "launcher.py").read_text(encoding="utf-8")
     if (
         "find_available_port" not in launcher_source
@@ -258,7 +266,6 @@ def build_release(baseline: Path, launcher_runtime: Path, output_root: Path) -> 
             "product": info["product"],
             "version": version,
             "release_date": release_date,
-            "external_strategy_version": info["external_strategy_version"],
             "source_commit": _git_commit(),
             "baseline_package": baseline.name,
             "launcher_runtime": launcher_runtime.name,

@@ -524,11 +524,6 @@ class AITaskViewAdditionalContractTests(unittest.TestCase):
             with self.subTest(labels=labels):
                 self.assertEqual(_one(MetoX算法命中=labels)['优先级'], priority)
 
-    def test_external_v93_burst_remains_compatible_without_filling_metox_priority(self):
-        task = _one(MetoX算法命中='', **{'v9.3信号': '爆发'})
-        self.assertTrue(task['AI任务类型'])
-        self.assertEqual(task['优先级'], '')
-
     def test_product_name_is_absent_from_task_output_not_only_hidden_by_page_projection(self):
         task = _one(MetoX算法命中='保护持有')
         self.assertNotIn('商品名称', task.index)
@@ -724,8 +719,11 @@ class BudgetDecisionDashboardUIContractTests(unittest.TestCase):
         view = self._budget_view_source()
         for label in ('商品数', '周期GMV', '周期花费', '待回收金额', '建议增加金额', '零GMV消耗'):
             self.assertIn(f"summary.get('{label}'", view)
-        # 2026-11-14：新增「当日预算」卡片（口径=计划列表里状态=投放中的日预算合计）
-        self.assertIn('("当日预算"', view)
+        # 2026-11-14/16：预算三卡（当前 / 往期 / 变化），口径=计划列表里状态=投放中的日预算合计
+        self.assertIn('("当前预算"', view)
+        self.assertIn('("往期预算"', view)
+        self.assertIn('("预算变化"', view)
+        self.assertIn('_format_signed_money(', view)
         self.assertIn('summarize_budget(', view)
         self.assertIn('budget_caption(', view)
         self.assertIn('metric_cols = st.columns(len(summary_cards))', view)
@@ -837,7 +835,7 @@ class BudgetDecisionDashboardUIContractTests(unittest.TestCase):
         plan_view = view[view.index('with plan_tab:'):]
         for column in (
             '序号', '计划ID', '所属渠道', '商品数', '计划类型', '计划经营结构',
-            '预算', '出价方式',
+            '当前预算', '往期预算', '预算变化', '出价方式',
             '周期花费', '归因成交', 'ROI', '方向证据', '计划管理建议',
         ):
             self.assertIn(column, plan_view)
@@ -848,11 +846,11 @@ class BudgetDecisionDashboardUIContractTests(unittest.TestCase):
         self.assertIn('计划列表快照', plan_view)
         self.assertIn('按计划ID只读匹配，不做推断', plan_view)
         self.assertIn('plan_config_caption(', plan_view)
+        self.assertIn('预算变化 = 当前预算 − 往期预算', plan_view)
         self.assertNotIn('不得推断计划名称/计划组/预算/出价', plan_view)
-        self.assertIn(
-            "'计划经营结构',\n                    '预算', '出价方式',",
-            plan_view,
-        )
+        self.assertIn('当前预算', plan_view)
+        self.assertIn('往期预算', plan_view)
+        self.assertIn('预算变化', plan_view)
 
     def test_execution_table_remains_independent_tab4(self):
         tab4_start = self.source.index('with tab4:')

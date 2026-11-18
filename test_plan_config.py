@@ -304,6 +304,10 @@ class PlanManagementJoinTests(unittest.TestCase):
                 '82843151879': {'预算': 310, '出价方式': '稳定投产比 投产比6'},
                 '82938652650': {'预算': 90, '出价方式': '平均点击成本 0.3元'},
             },
+            'previous_by_id': {
+                '82843151879': {'预算': 200, '出价方式': '稳定投产比 投产比6'},
+                '82938652650': {'预算': 90, '出价方式': '平均点击成本 0.3元'},
+            },
             'fingerprint': 'test',
         }
 
@@ -316,8 +320,10 @@ class PlanManagementJoinTests(unittest.TestCase):
         for row in rows:
             columns = list(row)
             self.assertIn('计划经营结构', columns)
-            self.assertEqual(columns[columns.index('计划经营结构') + 1], '预算')
-            self.assertEqual(columns[columns.index('计划经营结构') + 2], '出价方式')
+            self.assertEqual(columns[columns.index('计划经营结构') + 1], '当前预算')
+            self.assertEqual(columns[columns.index('计划经营结构') + 2], '往期预算')
+            self.assertEqual(columns[columns.index('计划经营结构') + 3], '预算变化')
+            self.assertEqual(columns[columns.index('计划经营结构') + 4], '出价方式')
 
     def test_join_values_and_missing_left_blank(self):
         detail = self._source()[FULL_PLAN_DETAIL_COLUMN][0]
@@ -325,11 +331,16 @@ class PlanManagementJoinTests(unittest.TestCase):
             {'宝贝ID': 'A1', '商品周期': '成长期', '商品定位': '主推', '_plan_detail_values': [detail]},
         ], plan_config=self._plan_config())
         by_id = {row['计划ID']: row for row in rows}
-        self.assertEqual(by_id['82843151879']['预算'], 310)
+        self.assertEqual(by_id['82843151879']['当前预算'], 310)
+        self.assertEqual(by_id['82843151879']['往期预算'], 200)
+        self.assertEqual(by_id['82843151879']['预算变化'], 110.0)
         self.assertEqual(by_id['82843151879']['出价方式'], '稳定投产比 投产比6')
-        self.assertEqual(by_id['82938652650']['预算'], 90)
-        # 计划列表里没有的计划：留空，不推断
-        self.assertEqual(by_id['89999999999']['预算'], '')
+        self.assertEqual(by_id['82938652650']['当前预算'], 90)
+        self.assertEqual(by_id['82938652650']['预算变化'], 0.0)
+        # 计划列表里没有的计划：全部留空，不推断
+        self.assertEqual(by_id['89999999999']['当前预算'], '')
+        self.assertEqual(by_id['89999999999']['往期预算'], '')
+        self.assertEqual(by_id['89999999999']['预算变化'], '')
         self.assertEqual(by_id['89999999999']['出价方式'], '')
 
     def test_context_passes_plan_config_through(self):
@@ -338,7 +349,7 @@ class PlanManagementJoinTests(unittest.TestCase):
         context = build_budget_decision_context(source, plan_config=self._plan_config())
         plans = context.get('plans') or []
         self.assertTrue(plans)
-        budgets = {row['计划ID']: row['预算'] for row in plans}
+        budgets = {row['计划ID']: row['当前预算'] for row in plans}
         self.assertEqual(budgets.get('82843151879'), 310)
         self.assertIn('出价方式', plans[0])
 
@@ -347,12 +358,18 @@ class PlanManagementJoinTests(unittest.TestCase):
         rows = build_plan_management(self._source(), products=[
             {'宝贝ID': 'A1', '商品周期': '成长期', '商品定位': '主推', '_plan_detail_values': [detail]},
         ])
-        self.assertTrue(all(row['预算'] == '' and row['出价方式'] == '' for row in rows))
+        self.assertTrue(all(
+            row['当前预算'] == '' and row['往期预算'] == '' and row['预算变化'] == ''
+            and row['出价方式'] == ''
+            for row in rows
+        ))
 
     def test_export_column_order_matches_page(self):
         columns = list(BUDGET_DECISION_PLAN_COLUMNS)
-        self.assertEqual(columns[columns.index('计划经营结构') + 1], '预算')
-        self.assertEqual(columns[columns.index('计划经营结构') + 2], '出价方式')
+        self.assertEqual(columns[columns.index('计划经营结构') + 1], '当前预算')
+        self.assertEqual(columns[columns.index('计划经营结构') + 2], '往期预算')
+        self.assertEqual(columns[columns.index('计划经营结构') + 3], '预算变化')
+        self.assertEqual(columns[columns.index('计划经营结构') + 4], '出价方式')
         self.assertLess(columns.index('出价方式'), columns.index('周期花费'))
         # 2026-11-14：日均花费紧跟 ROI
         self.assertEqual(columns[columns.index('ROI') + 1], '日均花费')

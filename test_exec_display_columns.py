@@ -37,7 +37,7 @@ ROOT = Path(__file__).resolve().parent
 EX_FORCED_COLUMNS = [
     "链接投产状态", "可售天数状态",
     "商品加购率状态", "商品支付转化率状态", "推广加购率状态",
-    "v9.3信号", "MetoX算法命中", "MetoX算法分", "MetoX算法原因",
+    "MetoX算法命中", "MetoX算法分", "MetoX算法原因",
     "商品加购率", "推广加购率", "当前有效投放计划数",
 ]
 
@@ -103,7 +103,7 @@ class ExportStaysCompleteTests(unittest.TestCase):
         self.assertEqual(displayed, ["宝贝ID", "GMV"])
         exported = execution_export_frame(frame)
         self.assertEqual(list(exported.columns), list(EXPORT_COLS))
-        self.assertEqual(len(exported.columns), 81)
+        self.assertEqual(len(exported.columns), 80)
         self.assertIn("链接投产状态", exported.columns)
         self.assertEqual(exported.loc[0, "链接投产状态"], "高")
 

@@ -416,8 +416,9 @@ def channel_summary(df):
 
 def segment_summary(df):
     """商品分层明细（按组合聚合）。
-    v9.3信号和MetoX算法命中按各自标签汇总命中商品数（例如v9.3的`爆发×3`
-    与MetoX的`加购爆发×3`）；按命中数降序，一品多标签分别计数，无信号留空。"""
+
+    MetoX算法命中按标签汇总命中商品数（如 `加购爆发×3`）；按命中数降序，
+    一品多标签分别计数，无命中留空。v9.3 外部信号已于 v2.73 剔除。"""
     if '组合' not in df.columns or '综合等级' not in df.columns:
         return []
     group_keys = ['组合', '综合等级', '商品定位', '对应操作']
@@ -425,19 +426,7 @@ def segment_summary(df):
         cnt=('宝贝ID','count'), gmv=('GMV','sum'), spend=('付费','sum')
     ).reset_index().sort_values('cnt', ascending=False)
 
-    sig_map = {}
     builtin_sig_map = {}
-    if 'v9.3信号' in df.columns:
-        for keys, sub in df.groupby(group_keys):
-            label_cnt = {}
-            for v in sub['v9.3信号'].dropna():
-                for lbl in str(v).split('|'):
-                    lbl = lbl.strip()
-                    if lbl:
-                        label_cnt[lbl] = label_cnt.get(lbl, 0) + 1
-            sig_map[keys] = ' | '.join(
-                f'{lbl}×{n}' for lbl, n in
-                sorted(label_cnt.items(), key=lambda x: (-x[1], x[0])))
     if 'MetoX算法命中' in df.columns:
         for keys, sub in df.groupby(group_keys):
             label_cnt = {}
@@ -458,7 +447,6 @@ def segment_summary(df):
             '组合': r['组合'], '综合等级': r['综合等级'], '商品定位': r['商品定位'],
             '对应操作': r['对应操作'], '操作建议': act['action'],
             '预算建议': act['budget'], '关注重点': act['focus'],
-            'v9.3信号': sig_map.get(tuple(r[k] for k in group_keys), ''),
             'MetoX算法命中': builtin_sig_map.get(tuple(r[k] for k in group_keys), ''),
             '商品数': int(r['cnt']), 'GMV': float(r['gmv']),
             '付费': round(float(r['spend']), 2),

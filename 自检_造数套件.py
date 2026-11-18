@@ -2,7 +2,7 @@
 """造数自检套件(验收门禁 T1/T3/T4/T5a)。
 
 人工构造 5+3 商品×4 数据源,期望值全部手算,过真实管线逐项断言:
-  T1  公式正确性(合并/比率/分层/风险/分析/周期/滚动/v9.3)
+  T1  公式正确性(合并/比率/分层/风险/分析/周期/滚动)
   T3  同一款多规则命中正确合并(多计划/多渠道/多风险标签/多信号/动量×退款/同款多链接)
   T4  零动销商品不被过滤
   T5a 分界点配置修改后分层正确变化
@@ -30,7 +30,6 @@ from core.segmentation import segment_products
 from core.analysis import (calc_kpis, segment_summary, category_analysis,
                            refund_risk, channel_top, inventory_actions)
 from core.schema import to_num, classify_channel, safe_div
-from core.v93_signal import parse_v93_report
 
 PASS, FAIL = 0, []
 
@@ -245,7 +244,6 @@ seg3 = segment_products(df.reset_index(drop=True), TB, VB2).set_index("宝贝ID"
 check("T5a 价值分界点变更 2003 待改善→潜力款", seg3.loc["2003", "价值定位"], "潜力款")
 
 # ══ 4. KPI/分析函数 ══
-seg["v9.3信号"] = ""
 kpis = calc_kpis(seg, plan_ids)
 check("KPI GMV", kpis["GMV"], 13200.0)
 check("KPI 花费(剔除店铺主体60)", kpis["本期花费"], 970.0)
@@ -266,28 +264,10 @@ check("退款风险: 严格>0.7入选", sorted(r["宝贝ID"] for r in rr), [])
 inv = inventory_actions(seg)
 check("缺货仍投放(436273237剔除后仅1003)", sorted(r["宝贝ID"] for r in inv["no_stock"]), ["1003"])
 
-# ══ 5. v9.3 解析+多信号合并+分层汇总 ══
-v93_txt = """
-【第二步】明日之星识别
-1. [100000001001] 连衣裙A | 综合分:90
-【第四步】爆发单品
-- [100000001001] 连衣裙A
-【第五步】预算再平衡
-🔴 【削减】(1个)
-- [100000001003] 半身裙C
-【补充】投放溢出洞察
-🌟 [100000001001] 溢出
-【补充】全量分层展示
-- [100000009999] 不应被解析
-"""
-sig = parse_v93_report(v93_txt)
-check("T3 v9.3 三信号合并(顺序去重)", sig.get("100000001001"), "明日之星|爆发|溢出")
-check("v9.3 削减桶", sig.get("100000001003"), "削减")
-check("v9.3 全量分层段不解析", "100000009999" in sig, False)
-seg["v9.3信号"] = seg["宝贝ID"].map({"1001": "明日之星|爆发", "1002": "明日之星"}).fillna("")
+# ══ 5. 分层汇总（v2.73 起已剔除 v9.3 外部信号，只按内置 MetoX 标签聚合）══
 ss = segment_summary(seg)
 row_c = next(r for r in ss if r["组合"] == "待改善明星款")
-check("分层表 信号计数聚合", row_c["v9.3信号"], "明日之星×1 | 爆发×1")
+check("分层表 不再输出 v9.3信号 列", "v9.3信号" in row_c, False)
 check("分层表 付费求和", row_c["付费"], 150.0)
 # P0-1 连带:滞销款滞销款组原含 1003/2001/436273237,店铺主体剔除后剩 1003/2001(2 个)
 check("T4 零动销品计入分层汇总",

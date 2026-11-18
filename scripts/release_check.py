@@ -37,7 +37,6 @@ PROTECTED_FILES = {
     "core/zip_sources.py",
     "core/segmentation.py",
     "core/v93_algorithm.py",
-    "core/v93_signal.py",
     "scripts/build_launcher.py",
     "scripts/smoke_three_entries.ps1",
     "启动MetoX半自动推广工具.bat",
@@ -204,7 +203,13 @@ def check_release(require_release_branch: bool = False) -> list[str]:
             )
 
     app_source = (ROOT / "app.py").read_text(encoding="utf-8-sig")
-    if "from core.version import APP_VERSION, DISPLAY_VERSION, PRODUCT_NAME" not in app_source:
+    # v2.73：显示名（MetoX推广参谋）与 product 分离，import 行里多带一个 DISPLAY_NAME
+    version_imports = [line for line in app_source.splitlines()
+                       if line.startswith("from core.version import")]
+    if not any(
+        all(name in line for name in ("APP_VERSION", "DISPLAY_VERSION", "PRODUCT_NAME"))
+        for line in version_imports
+    ):
         errors.append("app.py must derive the application version from core.version")
     if re.search(r"^APP_VERSION\s*=", app_source, flags=re.MULTILINE):
         errors.append("app.py must not hardcode APP_VERSION")

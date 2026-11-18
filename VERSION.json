@@ -1,8 +1,7 @@
 {
   "product": "MetoX",
-  "version": "2.72",
-  "release_date": "2026-11-14",
-  "external_strategy_version": "v9.3",
+  "version": "2.73",
+  "release_date": "2026-11-16",
   "rule_versions": {
     "refund_risk": "2026-08-02",
     "startup_launcher": "2026-08-02",
@@ -79,6 +78,10 @@
     "plan_list_latest_snapshot": "2026-11-14",
     "plan_management_daily_spend": "2026-11-14",
     "budget_decision_daily_budget_card": "2026-11-14",
-    "category_period_aligned_mom": "2026-11-14"
-  }
+    "category_period_aligned_mom": "2026-11-14",
+    "remove_v93_signal_source": "2026-11-16",
+    "display_name_metox_advisor": "2026-11-16",
+    "plan_budget_current_previous_delta": "2026-11-16"
+  },
+  "display_name": "MetoX推广参谋"
 }

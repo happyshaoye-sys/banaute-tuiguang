@@ -73,7 +73,7 @@ REQUIRED_COLS = [
 STRING_COLS = [
     '宝贝ID', '款式主图', '货号', '商品名称', '统计日期', '淘宝类目',
     '创建时间', '推广明细', FULL_PLAN_DETAIL_COLUMN, PLAN_PERIOD_LABEL_COLUMN,
-    PLAN_PERIOD_RANGE_COLUMN, 'v9.3信号',
+    PLAN_PERIOD_RANGE_COLUMN,
 ]
 
 

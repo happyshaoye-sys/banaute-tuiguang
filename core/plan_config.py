@@ -27,12 +27,12 @@ from pathlib import Path
 
 import pandas as pd
 
-PLAN_CONFIG_CACHE_VERSION = 'metox2.71-plan-config-v3'
+PLAN_CONFIG_CACHE_VERSION = 'metox2.73-plan-config-v4'
 PLAN_LIST_KEYWORD = '计划列表'
 PLAN_LIST_CACHE_DIRNAME = '_plan_config'
-PLAN_CONFIG_COLUMNS = ('预算', '出价方式')
+PLAN_CONFIG_COLUMNS = ('当前预算', '出价方式')
 BUDGET_TOTAL_STATUS = '投放中'
-DEFAULT_LOOKBACK_DAYS = 7
+DEFAULT_LOOKBACK_DAYS = 30
 _DATE_DIR_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 _READABLE_SUFFIXES = ('.xlsx', '.xls', '.csv')
 
@@ -47,17 +47,17 @@ def _is_plan_list_file(path: Path) -> bool:
     return PLAN_LIST_KEYWORD in name
 
 
-def find_latest_plan_list(wujie_root, analysis_date=None, lookback_days=DEFAULT_LOOKBACK_DAYS):
-    """在无界根目录下找最新的「计划列表」文件。
+def find_plan_list_snapshots(wujie_root, analysis_date=None, lookback_days=DEFAULT_LOOKBACK_DAYS):
+    """列出可用的「计划列表」快照，按目录日期倒序。
 
-    返回 ``(path, folder_date)``；找不到返回 ``(None, '')``。
-    folder_date 是文件所在日期目录的名字，用于界面提示来源。
+    返回 ``[(folder_date, path), ...]``；v2.73 起「往期预算」需要用到上一份快照，
+    所以这里返回全部候选，由调用方取 [0] 当当前、[1] 当往期。
     """
     if not wujie_root:
-        return None, ''
+        return []
     root = Path(wujie_root)
     if not root.is_dir():
-        return None, ''
+        return []
     floor = None
     if analysis_date:
         try:
@@ -80,10 +80,21 @@ def find_latest_plan_list(wujie_root, analysis_date=None, lookback_days=DEFAULT_
             continue
         newest = max(files, key=lambda p: (p.stat().st_mtime, p.name))
         candidates.append((entry.name, newest))
-    if not candidates:
-        return None, ''
     candidates.sort(key=lambda item: item[0], reverse=True)
-    folder_date, path = candidates[0]
+    return candidates
+
+
+def find_latest_plan_list(wujie_root, analysis_date=None, lookback_days=DEFAULT_LOOKBACK_DAYS):
+    """在无界根目录下找最新的「计划列表」文件。
+
+    返回 ``(path, folder_date)``；找不到返回 ``(None, '')``。
+    folder_date 是文件所在日期目录的名字，用于界面提示来源。
+    """
+    snapshots = find_plan_list_snapshots(
+        wujie_root, analysis_date=analysis_date, lookback_days=lookback_days)
+    if not snapshots:
+        return None, ''
+    folder_date, path = snapshots[0]
     return path, folder_date
 
 
@@ -198,7 +209,8 @@ def _read_cache(cache_root, fingerprint):
     return payload
 
 
-def _write_cache(cache_root, fingerprint, by_id, source):
+def _write_cache(cache_root, fingerprint, by_id, source, previous_by_id=None,
+                 previous_source=None):
     if not cache_root:
         return
     path = _cache_path(cache_root)
@@ -209,6 +221,8 @@ def _write_cache(cache_root, fingerprint, by_id, source):
             'fingerprint': fingerprint,
             'by_id': by_id,
             'source': source,
+            'previous_by_id': previous_by_id or {},
+            'previous_source': previous_source or {},
         }
         tmp = path.with_suffix('.pkl.tmp')
         with tmp.open('wb') as handle:
@@ -220,15 +234,20 @@ def _write_cache(cache_root, fingerprint, by_id, source):
 
 def load_plan_config(wujie_root, analysis_date=None, cache_root=None,
                      lookback_days=DEFAULT_LOOKBACK_DAYS):
-    """读取「最新」计划列表，返回 ``{'by_id', 'source', 'fingerprint'}``。
+    """读取「最新」计划列表 + 「上一份」计划列表。
 
-    任何时候都返回字典（找不到就是空 by_id + 说明），调用方不需要 try。
+    返回 ``{'by_id', 'previous_by_id', 'source', 'previous_source', 'fingerprint'}``：
+    * ``by_id``：最新快照，提供 `当前预算` / `出价方式`；
+    * ``previous_by_id``：紧邻的上一份可用快照（不严格要求"前一天"，
+      因为共享盘常常缺某天的快照），用于补 `往期预算` 与 `预算变化`；
+    * 任何时候都返回字典（找不到就是空 dict + 说明），调用方不需要 try。
     """
-    path, folder_date = find_latest_plan_list(
+    snapshots = find_plan_list_snapshots(
         wujie_root, analysis_date=analysis_date, lookback_days=lookback_days)
-    if path is None:
+    if not snapshots:
         return {
             'by_id': {},
+            'previous_by_id': {},
             'fingerprint': '',
             'source': {
                 'file': '',
@@ -236,62 +255,65 @@ def load_plan_config(wujie_root, analysis_date=None, cache_root=None,
                 'reason': f'无界目录下未找到「{PLAN_LIST_KEYWORD}_*.xlsx」'
                           f'（回溯 {lookback_days} 天）',
             },
+            'previous_source': {},
         }
+    folder_date, path = snapshots[0]
+    previous = snapshots[1] if len(snapshots) > 1 else None
     try:
         fingerprint = _fingerprint(path)
+        if previous is not None:
+            fingerprint += ':' + _fingerprint(previous[1])
     except OSError as exc:
         return {
             'by_id': {},
+            'previous_by_id': {},
             'fingerprint': '',
             'source': {'file': path.name, 'folder_date': folder_date,
                        'reason': f'计划列表读取失败：{exc}'},
+            'previous_source': {},
         }
     cached = _read_cache(cache_root, fingerprint)
     if cached is not None:
         source = dict(cached.get('source') or {})
         source['folder_date'] = folder_date
         source['from_cache'] = True
+        previous_source = dict(cached.get('previous_source') or {})
         return {
             'by_id': dict(cached.get('by_id') or {}),
+            'previous_by_id': dict(cached.get('previous_by_id') or {}),
             'fingerprint': fingerprint,
             'source': source,
+            'previous_source': previous_source,
         }
     by_id, meta = read_plan_list(path)
     source = dict(meta)
     source['folder_date'] = folder_date
     source['from_cache'] = False
+    previous_by_id, previous_source = {}, {}
+    if previous is not None:
+        prev_folder, prev_path = previous
+        previous_by_id, prev_meta = read_plan_list(prev_path)
+        previous_source = dict(prev_meta)
+        previous_source['folder_date'] = prev_folder
     if by_id:
-        _write_cache(cache_root, fingerprint, by_id, source)
-    return {'by_id': by_id, 'fingerprint': fingerprint, 'source': source}
+        _write_cache(cache_root, fingerprint, by_id, source,
+                     previous_by_id=previous_by_id, previous_source=previous_source)
+    return {
+        'by_id': by_id,
+        'previous_by_id': previous_by_id,
+        'fingerprint': fingerprint,
+        'source': source,
+        'previous_source': previous_source,
+    }
 
 
-def summarize_budget(plan_config, status=BUDGET_TOTAL_STATUS):
-    """汇总「当日预算」：计划列表里 ``状态=投放中`` 的计划，日预算合计。
-
-    口径说明（2026-11-14 与运营确认）：
-    * 预算就是预算，实际花费就是实际花费，两者互不对账，不做使用率/超支判断；
-    * 只统计后台当前在投（状态=投放中）的计划，已暂停 / 已终止 不计入；
-    * 预算为「不限」的计划无法求和，单独计数并在说明里点出；
-    * 计划列表快照缺失时返回 ``金额=None``，界面显示占位符而不是 0。
-
-    返回 ``{'金额', '计划数', '含不限数', '按模块', '口径', '快照'}``。
-    """
-    by_id = (plan_config or {}).get('by_id') or {}
-    source = (plan_config or {}).get('source') or {}
-    if not by_id:
-        return {
-            '金额': None,
-            '计划数': 0,
-            '含不限数': 0,
-            '按模块': {},
-            '口径': '未找到计划列表快照，当日预算不可用',
-            '快照': source,
-        }
+def _snapshot_total(by_id, status=BUDGET_TOTAL_STATUS):
+    """某一份快照里 ``状态=投放中`` 计划的日预算合计（跳过「不限」与空值）。"""
     total = 0.0
     count = 0
     unlimited = 0
     by_module = {}
-    for info in by_id.values():
+    for info in (by_id or {}).values():
         if status and str(info.get('状态') or '').strip() != status:
             continue
         budget = info.get('预算')
@@ -309,9 +331,59 @@ def summarize_budget(plan_config, status=BUDGET_TOTAL_STATUS):
         '计划数': count,
         '含不限数': unlimited,
         '按模块': dict(sorted(by_module.items(), key=lambda item: -item[1])),
+    }
+
+
+def summarize_budget(plan_config, status=BUDGET_TOTAL_STATUS):
+    """汇总预算：`当前预算` = 最新快照里状态=投放中的计划日预算合计；
+    `往期预算` = 上一份可用快照的同口径合计；`预算变化` = 当前 − 往期。
+
+    口径说明（2026-11-14 与运营确认）：
+    * 预算就是预算，实际花费就是实际花费，两者互不对账，不做使用率/超支判断；
+    * 只统计后台当前在投（状态=投放中）的计划，已暂停 / 已终止 不计入；
+    * 预算为「不限」的计划无法求和，单独计数并在说明里点出；
+    * 「往期」取紧邻的上一份可用快照（共享盘常缺某天的快照），页面上标注来源；
+    * 快照缺失时返回 ``金额=None``，界面显示占位符而不是 0。
+
+    返回 ``{'金额', '计划数', '含不限数', '按模块', '口径', '快照',
+             '往期金额', '往期计划数', '变化', '往期快照'}``。
+    """
+    by_id = (plan_config or {}).get('by_id') or {}
+    source = (plan_config or {}).get('source') or {}
+    previous_by_id = (plan_config or {}).get('previous_by_id') or {}
+    previous_source = (plan_config or {}).get('previous_source') or {}
+    if not by_id:
+        return {
+            '金额': None,
+            '计划数': 0,
+            '含不限数': 0,
+            '按模块': {},
+            '口径': '未找到计划列表快照，当前预算不可用',
+            '快照': source,
+            '往期金额': None,
+            '往期计划数': 0,
+            '变化': None,
+            '往期快照': previous_source,
+        }
+    current = _snapshot_total(by_id, status=status)
+    previous = _snapshot_total(previous_by_id, status=status) if previous_by_id else None
+    previous_amount = previous['金额'] if previous else None
+    change = (
+        round(current['金额'] - previous_amount, 2)
+        if previous_amount is not None else None
+    )
+    return {
+        '金额': current['金额'],
+        '计划数': current['计划数'],
+        '含不限数': current['含不限数'],
+        '按模块': current['按模块'],
         '口径': f'计划列表里状态={status or "全部"}的计划日预算合计',
         '快照': source,
         '状态': status,
+        '往期金额': previous_amount,
+        '往期计划数': previous['计划数'] if previous else 0,
+        '变化': change,
+        '往期快照': previous_source,
     }
 
 
@@ -319,9 +391,9 @@ def budget_caption(summary) -> str:
     """摘要卡片下面那行说明。"""
     summary = summary or {}
     if summary.get('金额') is None:
-        return str(summary.get('口径') or '未找到计划列表快照，当日预算不可用')
+        return str(summary.get('口径') or '未找到计划列表快照，当前预算不可用')
     parts = [
-        f"当日预算 = 计划列表里状态=投放中 的 {int(summary.get('计划数') or 0)} 个计划日预算合计",
+        f"当前预算 = 计划列表里状态=投放中 的 {int(summary.get('计划数') or 0)} 个计划日预算合计",
     ]
     by_module = summary.get('按模块') or {}
     if by_module:
@@ -329,12 +401,27 @@ def budget_caption(summary) -> str:
     if summary.get('含不限数'):
         parts.append(f"另有 {int(summary['含不限数'])} 个计划预算「不限」，无法求和、未计入")
     parts.append('已暂停/已终止不计入')
+    previous = summary.get('往期金额')
+    if previous is not None:
+        change = summary.get('变化') or 0.0
+        parts.append(
+            f"往期预算 {previous:,.0f} 元（{int(summary.get('往期计划数') or 0)} 个在投），"
+            f"预算变化 {change:+,.0f} 元"
+        )
+    else:
+        parts.append('未找到上一份计划列表快照，往期预算/预算变化留空')
     source = summary.get('快照') or {}
     if source.get('file'):
         suffix = f"{source['file']}"
         if source.get('exported_at'):
             suffix += f"（导出 {source['exported_at']}）"
-        parts.append(f"快照 {suffix}")
+        parts.append(f"当前快照 {suffix}")
+    previous_source = summary.get('往期快照') or {}
+    if previous_source.get('file'):
+        suffix = f"{previous_source['file']}"
+        if previous_source.get('exported_at'):
+            suffix += f"（导出 {previous_source['exported_at']}）"
+        parts.append(f"往期快照 {suffix}")
     return '；'.join(parts)
 
 
@@ -360,6 +447,7 @@ __all__ = [
     'PLAN_CONFIG_COLUMNS',
     'budget_caption',
     'find_latest_plan_list',
+    'find_plan_list_snapshots',
     'format_budget_cell',
     'load_plan_config',
     'parse_budget',

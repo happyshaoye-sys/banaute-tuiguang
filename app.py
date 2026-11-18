@@ -62,7 +62,6 @@ from core.acceptance import build_source_status
 from core.budget_decision import (
     BUDGET_DECISION_MAIN_COLUMNS, build_budget_decision_context, is_removed_budget_column,
 )
-from core.v93_signal import parse_v93_report
 from core.metox_algorithm import apply_metox_algorithm
 from core.metric_labels import apply_metric_labels
 from core.jst_stock import find_snapshot, load_snapshot_as_stock
@@ -70,7 +69,7 @@ from core.jst_refund import find_refund_snapshot, load_refund_rates
 from core.exporter import export_execution_table, export_all_sheets, style_execution_table
 from core.dataframe_clipboard import build_dataframe_copy_button_html
 from core.version_control import find_repository, get_status, next_version_name, save_version
-from core.version import APP_VERSION, DISPLAY_VERSION, PRODUCT_NAME
+from core.version import APP_VERSION, DISPLAY_NAME, DISPLAY_VERSION, PRODUCT_NAME
 from core.schema import (
     ALLOWED_SOURCE_TYPES, SOURCE_PRODUCT_INFO, SOURCE_PRODUCT_ROI, SOURCE_STOCK,
     SOURCE_WUJIE_SUBJECT, SOURCE_PRODUCT_OVERALL, SOURCE_WUJIE_CREATIVE,
@@ -78,8 +77,8 @@ from core.schema import (
     ensure_export_columns, resolve_display_columns,
 )
 
-st.set_page_config(page_title=f"{DISPLAY_VERSION} 半自动推广工具", layout="wide")
-st.title(f"{DISPLAY_VERSION} 半自动推广工具")
+st.set_page_config(page_title=f"{DISPLAY_VERSION}", layout="wide")
+st.title(f"{DISPLAY_VERSION}")
 GIT_PROJECT_NAME = PRODUCT_NAME
 if not hasattr(st.column_config, "PercentColumn"):
     st.column_config.PercentColumn = partial(
@@ -183,6 +182,13 @@ def _as_float(value, default=0.0):
 
 def _format_money(value):
     return f"¥{_as_float(value) / 1e4:.2f}万"
+
+
+def _format_signed_money(value):
+    """带正负号的金额（用于「预算变化」这类差额）：+¥0.16万 / -¥0.13万 / ¥0.00万。"""
+    amount = _as_float(value)
+    sign = '+' if amount > 0 else ('-' if amount < 0 else '')
+    return f"{sign}¥{abs(amount) / 1e4:.2f}万"
 
 
 # ── 加载数据 ──────────────────────────────────────────────
@@ -2554,7 +2560,6 @@ BUDGET_DECISION_HIDDEN_COLUMN_TOKENS = (
 
 _LEGACY_METOX_PREFIX = "v" + "9" + "." + "3"
 DISPLAY_RENAME_MAP = {
-    "MetoX" + "信号": "v9.3信号",
     f"{_LEGACY_METOX_PREFIX}算法命中": "MetoX算法命中",
     f"{_LEGACY_METOX_PREFIX}算法分": "MetoX算法分",
     f"{_LEGACY_METOX_PREFIX}算法原因": "MetoX算法原因",
@@ -2566,16 +2571,12 @@ DISPLAY_RENAME_MAP = {
 
 
 def _normalize_display_columns(obj):
-    """兼容旧会话/旧列偏好:区分外部 v9.3 信号与内置 MetoX 算法。"""
+    """兼容旧会话/旧列偏好:把历史 MetoX 前缀列名归一到当前列名。"""
     if obj is None:
         return obj
     if isinstance(obj, pd.DataFrame):
         rename = {old: new for old, new in DISPLAY_RENAME_MAP.items() if old in obj.columns}
-        out = obj.rename(columns=rename) if rename else obj
-        if "v9.3信号" not in out.columns:
-            out = out.copy()
-            out["v9.3信号"] = ""
-        return out
+        return obj.rename(columns=rename) if rename else obj
     if isinstance(obj, list):
         return [DISPLAY_RENAME_MAP.get(c, c) for c in obj]
     return obj
@@ -2946,8 +2947,6 @@ DEFAULT_JST_PRODUCT_DIR = _first_existing_dir(
     _JST_PORTABLE,
     _JST_DEV,
     _JST_SHARE)
-# v9.3 日报默认目录(共享盘每日复盘;按分析日自动匹配文件名含日期的 txt)
-DEFAULT_V93_DIR = r"\\10.1.22.253\天猫mark\2026\女装店\明日之星-每日数据"
 
 
 def _load_column_prefs():
@@ -3763,24 +3762,6 @@ def _load_plan_config_for(base_root, year, shop, date_str, cache_root=None):
                 'source': {'file': '', 'reason': f'计划列表读取失败：{exc}'}}
 
 
-def _resolve_v93_report(path, date_str):
-    """v9.3 日报路径解析:接受 txt 文件;若填的是文件夹,按分析日自动匹配
-    <目录>/<日期>/report.txt(每日流水线布局)或文件名含日期的 *.txt。找不到返回 None。"""
-    if os.path.isfile(path):
-        return path
-    if os.path.isdir(path):
-        import glob as _glob
-        candidates = [
-            os.path.join(path, date_str, "report.txt"),
-            os.path.join(path, f"report_{date_str}.txt"),
-        ]
-        candidates += sorted(_glob.glob(os.path.join(path, f"*{date_str}*.txt")))
-        candidates += sorted(_glob.glob(os.path.join(path, f"*{date_str.replace('-', '')}*.txt")))
-        for c in candidates:
-            if os.path.isfile(c):
-                return c
-    return None
-
 def _build_paths(base_root, date_str, year, shop):
     """根据根目录、日期、年份、店铺生成两个目录路径"""
     root = Path(base_root)
@@ -3979,18 +3960,6 @@ with st.sidebar:
                  "快照未覆盖的品(近30日无订单)退款率留空"
         )
 
-        # v9.3 日报（可选，标注正向池信号列）
-        v93_report_path = st.text_input(
-            "v9.3 日报文件或文件夹（可选）",
-            value=DEFAULT_V93_DIR if os.path.isdir(DEFAULT_V93_DIR) else "",
-            placeholder="留空则跳过 v9.3 信号标注",
-            key="v93_report_input",
-            help="daily_review v9.3 日报 txt,或日报所在文件夹(按分析日自动匹配,如 明日之星每日复盘_<日期>_标准版.txt);"
-                 "解析全部信号段标注到「v9.3信号」列:明日之星/潜力款/爆发/加预算(正向)、"
-                 "亏损风险/饱和观察/保护持有/削减(风险与维持)、溢出(付费带动自然);"
-                 "全量分层展示为纯展示段,不解析"
-        )
-
         st.divider()
         st.markdown("#### 自定义分界点")
         t_input = st.text_input(
@@ -4128,26 +4097,7 @@ with st.sidebar:
                         timings.append(("商品分层", f"{time.perf_counter() - t_seg:.2f} 秒",
                                         f"流量{tb_load or '自动'} 价值{vb_load or '自动'}"))
 
-                    # v9.3 信号标注（可选,解析失败不阻断加载）
-                    df["v9.3信号"] = ""   # 列恒在,未提供日报时为空
-                    v93_path = (v93_report_path or "").strip().strip('"')
-                    if v93_path:
-                        resolved = _resolve_v93_report(v93_path, date_str)
-                        if resolved:
-                            try:
-                                signals = parse_v93_report(
-                                    Path(resolved).read_text(encoding="utf-8", errors="replace"))
-                                df["v9.3信号"] = df["宝贝ID"].astype(str).map(signals).fillna("")
-                                st.caption(f"v9.3信号: 日报={os.path.basename(resolved)} | "
-                                           f"全信号 {len(signals)} 个pid,"
-                                           f"命中执行表 {(df['v9.3信号'] != '').sum()} 个")
-                            except Exception as e:
-                                st.warning(f"v9.3 日报解析失败(不影响其余数据): {str(e)[:80]}")
-                        else:
-                            st.warning(
-                                f"未找到 {date_str} 的 v9.3 日报(支持 txt 文件路径,"
-                                f"或含 <日期>/report.txt、文件名带日期 txt 的文件夹): {v93_path}"
-                                " ——「v9.3信号」列本次为空")
+                    # v2.73：v9.3 外部信号已从工具中剔除，不再读取/注入该列
 
                     # 保存耗时日志到 session，让它在主区域持久显示
                     total_time = time.perf_counter() - t_load
@@ -4346,14 +4296,19 @@ with tab3:
     actual_days = budget_decision_ctx.get('actual_days')
 
     st.markdown("#### 摘要先行")
-    # 2026-11-14：当日预算 = 计划列表里状态=投放中的计划日预算合计（与周期花费各自独立，互不对账）
+    # 2026-11-14：当前预算 = 计划列表里状态=投放中的计划日预算合计（与周期花费各自独立，互不对账）
+    # 2026-11-16：新增 往期预算（上一份快照同口径）与 预算变化（当前 − 往期）
     budget_summary = summarize_budget(st.session_state.get('plan_config') or {})
     budget_total = budget_summary.get('金额')
+    previous_budget = budget_summary.get('往期金额')
+    budget_change = budget_summary.get('变化')
     summary_cards = [
         ("商品数", f"{int(_as_float(summary.get('商品数', len(products)))):,}"),
         ("周期GMV", _format_money(summary.get('周期GMV', summary.get('全店GMV', summary.get('GMV', 0))))),
         ("周期花费", _format_money(summary.get('周期花费', summary.get('全店付费', summary.get('付费', 0))))),
-        ("当日预算", _format_money(budget_total) if budget_total is not None else '—'),
+        ("当前预算", _format_money(budget_total) if budget_total is not None else '—'),
+        ("往期预算", _format_money(previous_budget) if previous_budget is not None else '—'),
+        ("预算变化", _format_signed_money(budget_change) if budget_change is not None else '—'),
         ("待回收金额", _format_money(summary.get('待回收金额', summary.get('待回收预算', 0)))),
         ("建议增加金额", _format_money(summary.get('建议增加金额', summary.get('建议增加预算', 0)))),
         ("零GMV消耗", _format_money(summary.get('零GMV消耗', summary.get('零GMV花费', summary.get('零GMV付费', 0))))),
@@ -4571,12 +4526,15 @@ with tab3:
     with plan_tab:
         st.caption(
             "合集计划只给父级诊断，勿把商品建议重复落成预算；"
-            "「预算 / 出价方式」取自无界目录下最新的计划列表快照，"
+            "「当前预算 / 往期预算 / 出价方式」取自无界目录下的计划列表快照，"
             "按计划ID只读匹配，不做推断。"
         )
         st.caption(
             "来源：" + plan_config_caption((st.session_state.get('plan_config') or {}).get('source'))
-            + "。注意：这两列是**当前配置**，查历史日期时显示的也是最新值，不是历史值。"
+            + "；往期取自上一份可用快照 "
+            + plan_config_caption((st.session_state.get('plan_config') or {}).get('previous_source'))
+            + "。注意：这些都是**当前配置**，查历史日期时显示的也是最新值，不是历史值；"
+            "「预算变化 = 当前预算 − 往期预算」，计划在任一侧缺失时留空。"
         )
         if plans.empty:
             st.info("暂无推广计划管理数据。")
@@ -4584,23 +4542,29 @@ with tab3:
             plan_columns = [
                 column for column in (
                     '序号', '计划ID', '计划名称', '所属渠道', '商品数', '计划类型', '计划经营结构',
-                    '预算', '出价方式',
+                    '当前预算', '往期预算', '预算变化', '出价方式',
                     '周期花费', '归因成交', 'ROI', '日均花费', '方向证据', '计划管理建议',
                 )
                 if column in plans.columns
             ] or list(plans.columns)
             plan_table = plans[plan_columns].copy()
-            if '预算' in plan_table.columns:
-                # 计划列表里既有「310元」这种数值，也有「不限」这种文字，还可能有没有匹配到的空值。
-                # Streamlit 的表格序列化要求整列同类型（mixed 会抛 ArrowInvalid），
-                # 所以展示前统一转成字符串：数值→'310'，文字→原样，空值→''。
-                plan_table['预算'] = plan_table['预算'].map(format_budget_cell)
+            # 预算类列既有数值（310）也有文字（不限），还可能有空值；
+            # Streamlit 表格要求整列同类型（混类型抛 ArrowInvalid），展示前统一转字符串。
+            for column in ('当前预算', '往期预算', '预算变化'):
+                if column in plan_table.columns:
+                    plan_table[column] = plan_table[column].map(format_budget_cell)
             plan_column_config = {
                 '序号': st.column_config.NumberColumn('序号', format='%d'),
                 '商品数': st.column_config.NumberColumn('商品数', format='%d'),
                 '周期花费': st.column_config.NumberColumn('周期花费', format='¥%.2f'),
                 '归因成交': st.column_config.NumberColumn('归因成交', format='¥%.2f'),
                 'ROI': st.column_config.NumberColumn('ROI', format='%.2f'),
+                '当前预算': st.column_config.TextColumn(
+                    '当前预算', help='最新计划列表快照里的日预算（「不限」原样显示）'),
+                '往期预算': st.column_config.TextColumn(
+                    '往期预算', help='上一份可用计划列表快照里的日预算'),
+                '预算变化': st.column_config.TextColumn(
+                    '预算变化', help='当前预算 − 往期预算；任一侧缺失时留空'),
                 '日均花费': st.column_config.NumberColumn(
                     '日均花费', format='¥%.2f',
                     help='所选周期花费 ÷ 所选周期天数（当日口径即 1 天）',
@@ -4692,7 +4656,7 @@ with tab4:
     search_q = str(search).strip() if search else ""
     if search_q:
         mask = pd.Series(False, index=filtered.index)
-        for col in ['宝贝ID','货号','淘宝类目','商品定位','商品名称','v9.3信号','MetoX算法命中','MetoX算法原因']:
+        for col in ['宝贝ID','货号','淘宝类目','商品定位','商品名称','MetoX算法命中','MetoX算法原因']:
             if col in filtered.columns:
                 mask |= filtered[col].astype(str).str.contains(
                     search_q, case=False, na=False, regex=False)

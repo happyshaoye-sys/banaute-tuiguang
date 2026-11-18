@@ -150,6 +150,15 @@ def _round_money(value: float) -> float:
     return round(float(value or 0.0), 2)
 
 
+def _budget_delta(current, previous):
+    """预算变化 = 当前预算 − 往期预算；任一侧缺失（新增/已删除计划）或为「不限」时留空。"""
+    if isinstance(current, bool) or isinstance(previous, bool):
+        return ''
+    if not isinstance(current, (int, float)) or not isinstance(previous, (int, float)):
+        return ''
+    return _round_money(float(current) - float(previous))
+
+
 def _round_rate(value: float) -> float:
     return round(float(value or 0.0), 6)
 
@@ -664,6 +673,7 @@ def build_plan_management(
 
     rows = []
     config_by_id = (plan_config or {}).get('by_id') or {}
+    previous_by_id = (plan_config or {}).get('previous_by_id') or {}
     try:
         days = int(period_days) if period_days is not None else 0
     except (TypeError, ValueError):
@@ -681,6 +691,9 @@ def build_plan_management(
             direction for direction in ('增加', '回收', '保持') if direction in directions
         ) or '保持'
         config = config_by_id.get(plan['计划ID']) or {}
+        previous_config = previous_by_id.get(plan['计划ID']) or {}
+        current_budget = config.get('预算', '')
+        previous_budget = previous_config.get('预算', '')
         rows.append({
             '计划ID': plan['计划ID'],
             '计划名称': plan['计划名称'],
@@ -694,7 +707,9 @@ def build_plan_management(
             '计划商品类型': plan_type,
             '计划类型': plan_type,
             '计划经营结构': structure,
-            '预算': config.get('预算', ''),
+            '当前预算': current_budget,
+            '往期预算': previous_budget,
+            '预算变化': _budget_delta(current_budget, previous_budget),
             '出价方式': config.get('出价方式', ''),
             '方向证据': direction_evidence,
             '计划管理建议': _plan_management_advice(product_count, structures, directions),

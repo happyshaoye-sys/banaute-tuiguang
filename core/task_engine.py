@@ -46,15 +46,15 @@ PLAN_DETAIL_COLUMNS = [
     '观察周期', '成功标准', '停止条件', '数据来源',
 ]
 
-# “爆发”仅用于兼容外部v9.3信号与历史缓存；内置MetoX从v2.12起输出“加购爆发”。
-_OPPORTUNITY_LABELS = {'明日之星', '强主推', '近3日潜力', '加购爆发', '爆发', '加预算'}
+# 内置 MetoX 算法从 v2.12 起输出“加购爆发”；v2.73 剔除 v9.3 外部信号后不再需要兼容标签。
+_OPPORTUNITY_LABELS = {'明日之星', '强主推', '近3日潜力', '加购爆发', '加预算'}
 _RISK_LABELS = {'亏损风险', '削减'}
 _CORRECTION_LABELS = {'饱和观察', '保护持有', '溢出'}
 _KNOWN_LABELS = _OPPORTUNITY_LABELS | _RISK_LABELS | _CORRECTION_LABELS
 _METOX_PRIORITY_RULES = (
     ('P0', {'亏损风险', '削减'}),
     ('P1', {'加预算', '强主推', '饱和观察'}),
-    ('P2', {'加购爆发', '爆发', '明日之星', '近3日潜力'}),
+    ('P2', {'加购爆发', '明日之星', '近3日潜力'}),
     ('P3', {'保护持有', '溢出'}),
 )
 _GROWTH_CYCLES = {'测试期', '成长期', '爆发期', '重点', '加预算', '上升验证', '放量', '适当放量'}
@@ -348,10 +348,8 @@ def _source_window(period_label: str) -> str:
 
 def _build_product_context(row, columns, benchmarks):
     metox_text = _text(row.get('MetoX算法命中', ''))
-    v93_text = _text(row.get('v9.3信号', ''))
     metox_labels = _labels(metox_text)
-    v93_labels = _labels(v93_text)
-    labels = metox_labels | v93_labels
+    labels = metox_labels
     opportunity = labels & _OPPORTUNITY_LABELS
     risk = labels & _RISK_LABELS
     corrections = labels & _CORRECTION_LABELS
@@ -437,8 +435,8 @@ def _build_product_context(row, columns, benchmarks):
 
     return {
         'row': row, 'columns': set(columns), 'benchmarks': benchmarks,
-        'metox_text': metox_text, 'v93_text': v93_text,
-        'metox_labels': metox_labels, 'v93_labels': v93_labels, 'labels': labels,
+        'metox_text': metox_text,
+        'metox_labels': metox_labels, 'labels': labels,
         'opportunity': opportunity, 'risk': risk, 'corrections': corrections,
         'grade': grade, 'position': position, 'cycle': cycle,
         'spend': spend, 'gmv': gmv, 'ad_gmv': ad_gmv, 'ad_carts': ad_carts,
@@ -537,7 +535,7 @@ def _resolve_product_strategy(ctx, diagnosis) -> tuple[str, str]:
         if ctx['position'] == '金牛款' or ctx['cycle'] == '成熟期':
             return '稳量任务', '保持投放'
         if ctx['position'] in ('冲刺款', '明星款') and growth:
-            strong = bool(ctx['opportunity'] & {'强主推', '加购爆发', '爆发', '加预算'})
+            strong = bool(ctx['opportunity'] & {'强主推', '加购爆发', '加预算'})
             return '放量任务', '重点放量' if strong and ctx['grade'] in ('S', 'A+') else '谨慎放量'
         return '放量任务', '谨慎放量'
 
@@ -903,7 +901,7 @@ def _calculate_task_priority(ctx, task_type: str, strategy: str, conflicts: list
     elif task_type == '止损任务':
         score = 84 if diagnosis['severe_loss'] else 76
     elif task_type == '放量任务':
-        score = 78 if ctx['opportunity'] & {'强主推', '加购爆发', '爆发', '加预算'} else 70
+        score = 78 if ctx['opportunity'] & {'强主推', '加购爆发', '加预算'} else 70
     elif task_type == '渠道调整任务':
         score = 66
     elif task_type == '测试任务':
@@ -945,8 +943,6 @@ def _build_task_reason(ctx, diagnosis, conflicts) -> str:
     reasons = []
     if ctx['metox_labels']:
         reasons.append('MetoX:' + '/'.join(sorted(ctx['metox_labels'])))
-    if ctx['v93_labels']:
-        reasons.append('v9.3:' + '/'.join(sorted(ctx['v93_labels'])))
     metox_reason = _text(ctx['row'].get('MetoX算法原因', ''))
     if metox_reason:
         reasons.append('MetoX原因:' + metox_reason[:160])
@@ -980,7 +976,7 @@ def _build_task_reason(ctx, diagnosis, conflicts) -> str:
 def _should_show_task(ctx, task_type: str, diagnosis) -> bool:
     if not task_type:
         return False
-    if ctx['labels'] or ctx['v93_labels']:
+    if ctx['labels']:
         return True
     if ctx['spend'] > 0 and (
         diagnosis['promotion_anomaly'] or ctx['low_channels'] or ctx['mixed_channels']
