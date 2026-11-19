@@ -77,7 +77,7 @@ from core.version import APP_VERSION, DISPLAY_NAME, DISPLAY_VERSION, PRODUCT_NAM
 from core.schema import (
     ALLOWED_SOURCE_TYPES, SOURCE_PRODUCT_INFO, SOURCE_PRODUCT_ROI, SOURCE_STOCK,
     SOURCE_WUJIE_SUBJECT, SOURCE_PRODUCT_OVERALL, SOURCE_WUJIE_CREATIVE,
-    classify_file, EXPORT_COLS, ACTION_RULES, compute_bounds,
+    classify_file, EXPORT_COLS, ACTION_RULES, compute_bounds, execution_column_groups,
     ensure_export_columns, resolve_display_columns,
 )
 
@@ -4668,28 +4668,71 @@ with tab4:
         with st.popover(
                 f"⚙️ 列设置({len(st.session_state['exec_cols_pref'])}/{len(all_cols)})",
                 width="stretch"):
-            picked = st.multiselect(
-                "展示列(可输入关键字快速查找;清空=全部列)",
-                options=all_cols,
-                default=st.session_state["exec_cols_pref"],
-                key="exec_cols_ms",
+            # 2026-11-18 v2.75：按语义分组的折叠面板 + 勾选即生效（自动保存）
+            st.caption("勾选即生效（自动保存到本机）；分组便于定位，组内可一键全选/清空。"
+                       "仅影响表格显示，导出 Excel 仍为全部字段")
+            if 'exec_cols_before_edit' not in st.session_state:
+                st.session_state['exec_cols_before_edit'] = list(
+                    st.session_state['exec_cols_pref'])
+            _group_list = execution_column_groups(all_cols)
+            _picked_all = []
+            for _group_name, _group_cols in _group_list:
+                _selected = [c for c in _group_cols
+                             if c in st.session_state['exec_cols_pref']]
+                _widget_key = f"exec_cols_grp_{_group_name}"
+                with st.expander(
+                        f"{_group_name}（{len(_selected)}/{len(_group_cols)}）",
+                        expanded=False):
+                    _pick_col, _btn_col = st.columns([3, 1])
+                    _picked = _pick_col.multiselect(
+                        _group_name,
+                        options=_group_cols,
+                        default=_selected,
+                        key=_widget_key,
+                        label_visibility="collapsed",
+                    )
+                    if _btn_col.button("全选", key=f"exec_cols_all_{_group_name}",
+                                       width="stretch"):
+                        st.session_state[_widget_key] = list(_group_cols)
+                        st.rerun()
+                    if _btn_col.button("清空", key=f"exec_cols_none_{_group_name}",
+                                       width="stretch"):
+                        st.session_state[_widget_key] = []
+                        st.rerun()
+                _picked_all.extend(_picked)
+
+            _new_pref = resolve_display_columns(all_cols, _picked_all)
+            if not _picked_all:
+                # 全部组都清空时不留空表：回退到「基础」组并提示
+                st.warning("至少要保留 1 列，已自动恢复「基础」组")
+                _base = next((cols for name, cols in _group_list if name == '基础'),
+                             all_cols[:5])
+                _new_pref = resolve_display_columns(all_cols, _base)
+                st.session_state['exec_cols_grp_基础'] = list(_base)
+            if _new_pref != list(st.session_state['exec_cols_pref']):
+                st.session_state['exec_cols_pref'] = _new_pref
+                _save_column_prefs(_new_pref)
+
+            _cur_pref = list(st.session_state['exec_cols_pref'])
+            st.caption(
+                "表格列序固定按运营定稿顺序（与勾选顺序无关），前 12 列："
+                + " → ".join(_cur_pref[:12]) + f" → …（共 {len(_cur_pref)} 列）"
             )
-            cb1, cb2 = st.columns(2)
-            if cb1.button("应用并记住", width="stretch", key="exec_cols_apply"):
-                pref = resolve_display_columns(all_cols, picked)
-                st.session_state["exec_cols_pref"] = pref
-                _save_column_prefs(pref)
-                if pref == list(all_cols):
-                    # 勾空=全部列:勾选框同步成全部,避免"框里空着、表里全列"的错位
-                    st.session_state.pop("exec_cols_ms", None)
+            _undo_col, _reset_col = st.columns(2)
+            if _undo_col.button("撤销到本次打开前", width="stretch",
+                                key="exec_cols_undo"):
+                st.session_state['exec_cols_pref'] = resolve_display_columns(
+                    all_cols, st.session_state.get('exec_cols_before_edit') or all_cols)
+                _save_column_prefs(st.session_state['exec_cols_pref'])
+                for _name, _cols in _group_list:
+                    st.session_state.pop(f"exec_cols_grp_{_name}", None)
                 st.rerun()
-            if cb2.button("恢复全部列", width="stretch", key="exec_cols_reset"):
-                st.session_state["exec_cols_pref"] = all_cols
+            if _reset_col.button("恢复全部列", width="stretch", key="exec_cols_reset"):
+                st.session_state['exec_cols_pref'] = all_cols
                 _save_column_prefs(all_cols)
-                st.session_state.pop("exec_cols_ms", None)
+                for _name, _cols in _group_list:
+                    st.session_state.pop(f"exec_cols_grp_{_name}", None)
                 st.rerun()
-            st.caption("勾选即生效;取消勾选=隐藏该列(含状态/判定列);"
-                       "清空=全部列。仅影响表格显示,导出 Excel 仍包含全部字段")
 
 
     # 过滤

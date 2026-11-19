@@ -5,7 +5,7 @@
 v2.68 之前 app.py 有一段硬编码「强制显示」白名单，每次 rerun 都把用户勾掉的
 状态/判定列塞回偏好 —— 纯函数单测覆盖不到，因为它发生在页面脚本里。
 这里用 Streamlit 官方 AppTest **真渲染页面**：加载真实数据 → 取消勾选
-「链接投产状态」→ 应用并记住 → 断言表格列里真的没有它，并且多次 rerun 不复活，
+「链接投产状态」→ 勾选即生效 → 断言表格列里真的没有它，并且多次 rerun 不复活，
 点「恢复全部列」能回来。
 
 运行方式（默认跳过，避免发布门禁依赖共享盘）
@@ -26,6 +26,8 @@ try:
     from streamlit.testing.v1 import AppTest
 except Exception:  # pragma: no cover - 旧版 streamlit 无 testing API
     AppTest = None
+
+from core.schema import EXPORT_COLS
 
 ROOT = Path(__file__).resolve().parent
 ENABLED = os.environ.get("METOX_UI_REAL_DATA") == "1"
@@ -104,19 +106,20 @@ class ExecutionColumnPrefsSmokeTest(unittest.TestCase):
         self.assertIn(TARGET_COLUMN, list(self.first.columns))
 
     def test_02_unchecked_column_disappears_and_stays_hidden(self):
-        all_options = list(self.at.multiselect(key="exec_cols_ms").options)
+        group_key = "exec_cols_grp_判定状态"   # v2.75：按语义分组，判定状态组内取消勾选
+        all_options = list(self.at.multiselect(key=group_key).options)
         self.assertIn(TARGET_COLUMN, all_options)
         picked = [c for c in all_options if c != TARGET_COLUMN]
-        self.at.multiselect(key="exec_cols_ms").set_value(picked).run()
-        self.at.button(key="exec_cols_apply").click().run()
-        self.assertEqual(_exception_text(self.at), "", "应用列设置后页面抛异常")
+        # v2.75：勾选即生效，不再需要「应用并记住」
+        self.at.multiselect(key=group_key).set_value(picked).run()
+        self.assertEqual(_exception_text(self.at), "", "取消勾选后页面抛异常")
 
         frame = _execution_frame(self.at)
-        self.assertIsNotNone(frame, "应用列设置后执行表消失了")
+        self.assertIsNotNone(frame, "取消勾选后执行表消失了")
         self.assertNotIn(TARGET_COLUMN, list(frame.columns), "取消勾选的列仍然显示")
         for column in KEEP_ALWAYS:
             self.assertIn(column, list(frame.columns))
-        self.assertEqual(len(frame.columns), len(picked))
+        before = len(frame.columns)
 
         # 关键回归：再 rerun 两次，被取消的列不得复活
         for round_index in range(2):
@@ -128,14 +131,14 @@ class ExecutionColumnPrefsSmokeTest(unittest.TestCase):
                 list(again.columns),
                 f"第 {round_index + 1} 次 rerun 后取消勾选的列又出现了",
             )
+            self.assertEqual(len(again.columns), before, "列数在 rerun 后发生变化")
 
     def test_03_restore_all_columns(self):
         self.at.button(key="exec_cols_reset").click().run()
         frame = _execution_frame(self.at)
         self.assertIsNotNone(frame)
         self.assertIn(TARGET_COLUMN, list(frame.columns), "恢复全部列后该列未回来")
-        options = list(self.at.multiselect(key="exec_cols_ms").options)
-        self.assertEqual(len(frame.columns), len(options), "恢复全部列后列数应等于全部可选列")
+        self.assertEqual(len(frame.columns), len(EXPORT_COLS), "恢复全部列后应为全部 80 列")
 
 
 if __name__ == "__main__":

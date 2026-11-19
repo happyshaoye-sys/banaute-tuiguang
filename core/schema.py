@@ -258,6 +258,65 @@ def resolve_display_columns(all_columns, preferred):
     columns = [column for column in all_columns if column in keep]
     return columns or list(all_columns)
 
+
+#: 执行表「列设置」语义分组（v2.75）。顺序即界面分组顺序；组内顺序由 EXPORT_COLS 决定。
+EXEC_COLUMN_GROUPS = [
+    ('基础', ['统计日期', '宝贝ID', '款式主图', '淘宝类目', '货号', '链接数', '创建时间',
+              '商品名称', '销售排名', '流量排名', '消耗排名']),
+    ('销售与投产', ['GMV', '推广成交金额', '付费', '推广投产', '推广实际投产', '链接投产',
+                    '链接实际投产', 'ROI', '件单价', '利润率', '预估利润', '倍率',
+                    '访客平均价值', '购物车价值', '直购数量', '直购成本']),
+    ('判定状态', ['链接投产状态', '可售天数状态', '推广加购率状态', '商品加购率状态',
+                  '商品支付转化率状态']),
+    ('分层定位', ['流量定位', '价值定位', '组合', '商品定位', '综合等级', '商品周期',
+                  '对应操作', '推广动作', '商品动作', '运营备注', '预算优先级', '风险标签']),
+    ('MetoX算法', ['MetoX算法命中', 'MetoX算法分', 'MetoX算法原因']),
+    ('渠道与环比', ['关键词', '人群', '全站', '店铺直达', '关键词环比', '人群环比',
+                    '全站环比', '店铺直达环比', 'MetoX推广花费', 'MetoX推广成交金额',
+                    'MetoX推广加购数', 'MetoX推广加购件数', 'MetoX推广访客数']),
+    ('周期与上周期', ['上周期金额', '上周期付费', '上周期人群', '上周期关键词', '上周期全站']),
+    ('滚动与日均', ['日销3', '日销7', '日销15', '日均访客3', '日均访客7', '日均访客15',
+                    '花费3', '花费7', '花费15', '日均消耗']),
+    ('流量与转化', ['商品访客数', '商品加购件数', '加购数', '支付买家数', '支付件数',
+                    '商品加购率', '推广加购率', '商品支付转化率', '点击率', 'CPC', 'CPM',
+                    '展现', '点击', '搜索引导访客数', '成功退款金额', '退款率']),
+    ('库存与成本', ['可售天数', '在仓库存', '在途', '成本价', '成本价（含税）']),
+    ('计划', ['当前有效投放计划数', '推广明细', '推广计划全量明细', '推广计划总数',
+              '推广计划展示数', '计划覆盖率', '计划数据完整度', '计划统计天数',
+              '计划实际数据天数', '计划数据口径', '计划数据范围', '计划数', '计划明细']),
+]
+EXEC_COLUMN_GROUP_FALLBACK = '其他'
+
+
+def execution_column_groups(columns=None):
+    """把执行表列按 ``EXEC_COLUMN_GROUPS`` 分组，返回 ``[(组名, [列...])]``。
+
+    规则：
+    * 只保留 ``columns`` 里真实存在的列（默认取 ``EXPORT_COLS``）；
+    * 组内顺序按 ``EXPORT_COLS`` 的固定顺序，保证与表格显示一致；
+    * 没被任何组覆盖的列统一落到「其他」组，保证**零遗漏**；
+    * 空组不返回，避免界面出现空面板。
+    """
+    source = list(columns or EXPORT_COLS)
+    order = {column: index for index, column in enumerate(source)}
+    groups = []
+    used = set()
+    for name, members in EXEC_COLUMN_GROUPS:
+        picked = sorted(
+            {column for column in members if column in order and column not in used},
+            key=lambda column: order[column],
+        )
+        if not picked:
+            continue
+        used.update(picked)
+        groups.append((name, picked))
+    rest = sorted((column for column in source if column not in used),
+                  key=lambda column: order[column])
+    if rest:
+        groups.append((EXEC_COLUMN_GROUP_FALLBACK, rest))
+    return groups
+
+
 # ── 工具函数 ─────────────────────────────────────────────
 def safe_div(a, b):
     return a / b if b else 0.0
