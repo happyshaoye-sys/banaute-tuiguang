@@ -85,14 +85,26 @@ class ColumnSettingsUiContractTests(unittest.TestCase):
 
     def test_dialog_is_two_panel_with_search(self):
         # 弹窗装饰器经 _column_dialog 安全包装（AST 单测里没有 st.dialog）
-        self.assertIn('@_column_dialog("列设置")', self.source)
+        self.assertIn('@_column_dialog("列设置", width="small"', self.source)
         self.assertIn('getattr(st, "dialog", None)', self.source)
+        # v2.77：窄面板（small ≤520px），不再用全屏 large
+        self.assertNotIn('width="large"', self.source)
+        self.assertIn("on_dismiss=_close_exec_column_dialog", self.source)
         self.assertIn("已隐藏列", self.source)
         self.assertIn("已显示列", self.source)
         self.assertIn("exec_cols_dlg_hidden_q", self.source)
         self.assertIn("exec_cols_dlg_shown_q", self.source)
         self.assertIn("exec_cols_dlg_", self.source)
-        self.assertIn("恢复默认（全部列）", self.source)
+        self.assertIn("恢复默认", self.source)
+        # 紧凑密排样式（一列一行），不再是大号复选框网格
+        self.assertIn('st.caption(f"▍{group_name}")', self.source)
+        self.assertIn('div[data-testid="stDialog"] div[data-testid="stCheckbox"]',
+                      self.source)
+        self.assertIn('div[data-testid="stDialog"] div[data-testid="stCaptionContainer"]',
+                      self.source)
+        # 贴窗口右侧的窄面板，而不是居中全屏弹窗
+        self.assertIn("position: fixed !important;", self.source)
+        self.assertIn("width: var(--mx-cd-w, 430px) !important;", self.source)
 
     def test_dialog_applies_instantly_and_keeps_filtered_columns(self):
         self.assertIn("_save_column_prefs(new_pref)", self.source)

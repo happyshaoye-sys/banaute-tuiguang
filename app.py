@@ -188,38 +188,87 @@ def _format_money(value):
     return f"¥{_as_float(value) / 1e4:.2f}万"
 
 
-def _column_dialog(title, width="large"):
+def _column_dialog(title, width="small", **options):
     """st.dialog 的安全包装：单测会用假 streamlit 模块 exec 本文件，缺 dialog 时退化为普通函数。"""
     decorator = getattr(st, "dialog", None)
     if decorator is None:
         return lambda fn: fn
     try:
-        return decorator(title, width=width)
-    except TypeError:  # 老版本 st.dialog 不接受 width
+        return decorator(title, width=width, **options)
+    except TypeError:  # 老版本 st.dialog 不接受 width / on_dismiss
         return decorator(title)
 
 
-@_column_dialog("列设置")
-def _render_exec_column_dialog(all_columns):
-    """列设置双栏弹窗（2026-11-18 v2.77）。
+def _close_exec_column_dialog():
+    """用户点 ×、按 ESC 或点弹窗外时，把「弹窗打开」标记清掉，避免下次 rerun 又弹出来。"""
+    st.session_state['exec_cols_dialog_open'] = False
 
-    形态对齐常见列选择器：左侧「已隐藏列」、右侧「已显示列」，各自带搜索框；
-    每列一个复选框，勾/取消立即生效（写入偏好并保存），点右上角 × 关闭。
-    表格列序仍固定按 EXPORT_COLS，不提供拖拽排序。
+
+#: 列设置弹窗的紧凑样式（v2.77）：
+#: 贴窗口右侧、竖直落在筛选行下方，两栏窄列、一列一行密排；
+#: 勾/取消立即生效。宽度用 --mx-cd-w 控制，方便按屏幕宽度微调。
+_COLUMN_DIALOG_CSS = """
+<style>
+div[data-testid="stDialog"] {
+  position: fixed !important;
+  left: auto !important;
+  right: 1.1rem !important;
+  top: 11rem !important;
+  margin: 0 !important;
+  width: var(--mx-cd-w, 430px) !important;
+  max-width: calc(100vw - 2rem) !important;
+  max-height: 74vh;
+}
+div[data-testid="stDialog"] div[data-testid="stVerticalBlock"] { gap: 0.12rem; }
+div[data-testid="stDialog"] div[data-testid="stHorizontalBlock"] { gap: 0.4rem; }
+div[data-testid="stDialog"] div[data-testid="stCheckbox"] { margin: 0; }
+div[data-testid="stDialog"] div[data-testid="stCheckbox"] label { min-height: 1.15rem; }
+div[data-testid="stDialog"] div[data-testid="stCheckbox"] p {
+  font-size: 12px !important; line-height: 1.05 !important;
+}
+div[data-testid="stDialog"] div[data-testid="stCheckbox"] svg { width: 15px; height: 15px; }
+div[data-testid="stDialog"] div[data-testid="stTextInput"] input {
+  font-size: 12px; height: 1.75rem; min-height: 1.75rem; padding: 0 0.35rem;
+}
+div[data-testid="stDialog"] div[data-testid="stCaptionContainer"] {
+  margin: 6px 0 1px 0 !important;
+}
+div[data-testid="stDialog"] div[data-testid="stCaptionContainer"] p {
+  font-size: 11px; color: #8a94a6; margin: 0; line-height: 1.25;
+}
+div[data-testid="stDialog"] button[kind="tertiary"] {
+  min-height: 1.5rem !important; height: 1.5rem !important; padding: 0 0.3rem !important;
+  border: none !important; background: transparent !important;
+}
+div[data-testid="stDialog"] button[kind="tertiary"] p {
+  font-size: 11px !important; color: #7c8798 !important;
+}
+div[data-testid="stDialog"] button[kind="tertiary"]:hover p { color: #c9d1de !important; }
+div[data-testid="stDialog"] .mx-cd-head {
+  font-size: 12px; font-weight: 600; color: #3d4655;
+}
+div[data-testid="stDialog"] .mx-cd-count { color: #8a94a6; font-weight: 400; }
+</style>
+"""
+
+
+@_column_dialog("列设置", width="small", on_dismiss=_close_exec_column_dialog)
+def _render_exec_column_dialog(all_columns):
+    """列设置窄列双栏弹窗（2026-11-19 v2.77）。
+
+    形态对齐常见列选择器：窄面板里左右两栏「已隐藏列 / 已显示列」，每栏带搜索框，
+    一列一行密排；勾/取消立即生效并保存。点 ×、ESC 或弹窗外即关闭。
+    表格列序固定按运营定稿顺序（EXPORT_COLS），不提供拖拽排序。
     """
     all_columns = list(all_columns)
     pref = list(st.session_state.get('exec_cols_pref') or [])
     pref_set = set(pref)
     groups = execution_column_groups(all_columns)
     group_of = {column: name for name, columns in groups for column in columns}
+    st.markdown(_COLUMN_DIALOG_CSS, unsafe_allow_html=True)
 
-    head_left, head_right = st.columns([3, 1], vertical_alignment="center")
-    head_left.caption(
-        "勾选即生效（自动保存到本机）；表格列序固定按运营定稿顺序，与勾选顺序无关；"
-        "导出 Excel 始终包含全部字段。"
-    )
-    if head_right.button("恢复默认（全部列）", key="exec_cols_restore_default",
-                         width="stretch"):
+    _blank_col, restore_col = st.columns([2, 1], vertical_alignment="center")
+    if restore_col.button("恢复默认", key="exec_cols_restore_default", type="tertiary"):
         st.session_state['exec_cols_pref'] = all_columns
         _save_column_prefs(all_columns)
         for column in all_columns:
@@ -228,36 +277,52 @@ def _render_exec_column_dialog(all_columns):
 
     hidden = [c for c in all_columns if c not in pref_set]
     shown = [c for c in all_columns if c in pref_set]
-    left_col, right_col = st.columns(2)
 
-    def _render_panel(container, title, columns, checked, key_prefix, search_key):
+    search_left, search_right = st.columns(2, gap="small")
+    keyword_hidden = search_left.text_input(
+        "搜索隐藏列字段", key="exec_cols_dlg_hidden_q", label_visibility="collapsed",
+        placeholder="搜索隐藏列字段…",
+    )
+    keyword_shown = search_right.text_input(
+        "搜索已显示字段", key="exec_cols_dlg_shown_q", label_visibility="collapsed",
+        placeholder="搜索已显示字段…",
+    )
+
+    head_left, head_right = st.columns(2, gap="small")
+    for head, title, count in (
+        (head_left, "已隐藏列", len(hidden)),
+        (head_right, "已显示列", len(shown)),
+    ):
+        head.markdown(
+            f'<span class="mx-cd-head">{title}</span>'
+            f'<span class="mx-cd-count">（{count}）</span>',
+            unsafe_allow_html=True,
+        )
+
+    left_col, right_col = st.columns(2, gap="small")
+
+    def _render_panel(container, columns, checked, keyword):
+        picked = []
+        query = str(keyword or '').strip().lower()
         with container:
-            st.markdown(f"**{title}（{len(columns)}）**")
-            keyword = st.text_input(
-                title, key=search_key, label_visibility="collapsed",
-                placeholder="输入关键字搜索…",
-            )
-            picked = []
-            matches = [c for c in columns
-                       if not keyword or str(keyword).strip().lower() in str(c).lower()]
+            matches = [c for c in columns if not query or query in str(c).lower()]
             if not matches:
                 st.caption("没有匹配的列")
-            with st.container(height=360):
+            with st.container(height=320):
                 current_group = None
                 for column in matches:
                     group_name = group_of.get(column, '其他')
                     if group_name != current_group:
-                        st.caption(f"— {group_name} —")
+                        # 用 caption 而不是原始 HTML，避免行内 div 撑不出高度、压住下一行
+                        st.caption(f"▍{group_name}")
                         current_group = group_name
                     if st.checkbox(column, value=checked,
-                                   key=f"{key_prefix}{column}"):
+                                   key=f"exec_cols_dlg_{column}"):
                         picked.append(column)
-            return picked
+        return picked
 
-    picked_hidden = _render_panel(
-        left_col, "已隐藏列", hidden, False, "exec_cols_dlg_", "exec_cols_dlg_hidden_q")
-    picked_shown = _render_panel(
-        right_col, "已显示列", shown, True, "exec_cols_dlg_", "exec_cols_dlg_shown_q")
+    picked_hidden = _render_panel(left_col, hidden, False, keyword_hidden)
+    picked_shown = _render_panel(right_col, shown, True, keyword_shown)
 
     rendered = set(hidden) | set(shown)
     picked = list(picked_hidden) + list(picked_shown)
@@ -274,13 +339,9 @@ def _render_exec_column_dialog(all_columns):
     if _changed:
         st.session_state['exec_cols_pref'] = new_pref
         _save_column_prefs(new_pref)
-    _foot_left, _foot_right = st.columns([3, 1], vertical_alignment="center")
-    _foot_left.caption(
-        "当前生效 " + str(len(new_pref)) + " 列；勾选已实时生效并自动保存（表格已在后台刷新）"
+    st.caption(
+        f"当前生效 {len(new_pref)} 列 · 勾选即生效并自动保存 · 点右上角 × 关闭"
     )
-    if _foot_right.button("完成", key="exec_cols_dialog_done", width="stretch"):
-        st.session_state['exec_cols_dialog_open'] = False
-        st.rerun(scope="app")
     if _changed:
         # 弹窗内容属于 fragment，必须整页 rerun 才能让下方表格按新列渲染
         st.rerun(scope="app")
