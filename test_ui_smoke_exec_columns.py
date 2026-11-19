@@ -105,9 +105,19 @@ class ExecutionColumnPrefsSmokeTest(unittest.TestCase):
     def test_01_target_column_visible_by_default(self):
         self.assertIn(TARGET_COLUMN, list(self.first.columns))
 
+    def _open_dialog(self):
+        trigger = next(
+            (btn for btn in self.at.button if btn.key == "exec_cols_open"), None)
+        if trigger is None:
+            raise AssertionError("筛选行缺少「列设置」入口按钮")
+        trigger.click().run()
+        return
+
     def test_02_unchecked_column_disappears_and_stays_hidden(self):
-        # v2.76：列设置改成复选框网格，取消勾选 = 关掉该列的复选框，立刻实时生效
-        checkbox_key = f"exec_col_chk_{TARGET_COLUMN}"
+        # v2.77：双栏弹窗，取消勾选 = 关掉该列复选框，实时生效
+        self._open_dialog()
+        self.assertEqual(_exception_text(self.at), "", "打开列设置弹窗后页面抛异常")
+        checkbox_key = f"exec_cols_dlg_{TARGET_COLUMN}"
         self.assertTrue(self.at.checkbox(key=checkbox_key).value, "该列默认应勾选")
         self.at.checkbox(key=checkbox_key).uncheck().run()
         self.assertEqual(_exception_text(self.at), "", "取消勾选后页面抛异常")
@@ -118,10 +128,10 @@ class ExecutionColumnPrefsSmokeTest(unittest.TestCase):
         for column in KEEP_ALWAYS:
             self.assertIn(column, list(frame.columns))
         before = len(frame.columns)
-        # 相对初始列数少 1 列（初始列数取决于本机已保存偏好，不硬编码 80）
         self.assertEqual(before, len(self.first.columns) - 1, "取消 1 列后应比初始少 1 列")
 
-        # 关键回归：再 rerun 两次，被取消的列不得复活，复选框也要保持未勾选
+        # 关掉弹窗（rerun 后弹窗内容消失），再 rerun 两次确认不复活
+        self.at.run()
         for round_index in range(2):
             self.at.run()
             again = _execution_frame(self.at)
@@ -132,19 +142,21 @@ class ExecutionColumnPrefsSmokeTest(unittest.TestCase):
                 f"第 {round_index + 1} 次 rerun 后取消勾选的列又出现了",
             )
             self.assertEqual(len(again.columns), before, "列数在 rerun 后发生变化")
-            self.assertFalse(self.at.checkbox(key=checkbox_key).value,
-                             "复选框状态在 rerun 后丢失")
 
     def test_02b_recheck_restores_single_column(self):
-        # 单独把这一列勾回来（旧版只能整组恢复，这里验证"逐列恢复"）
-        checkbox_key = f"exec_col_chk_{TARGET_COLUMN}"
+        self._open_dialog()
+        checkbox_key = f"exec_cols_dlg_{TARGET_COLUMN}"
+        self.assertFalse(self.at.checkbox(key=checkbox_key).value,
+                         "该列此时应在「已隐藏列」里且未勾选")
         self.at.checkbox(key=checkbox_key).check().run()
         frame = _execution_frame(self.at)
         self.assertIsNotNone(frame)
         self.assertIn(TARGET_COLUMN, list(frame.columns), "重新勾选后该列未恢复")
+        self.at.run()
 
     def test_03_restore_all_columns(self):
-        self.at.button(key="exec_cols_reset").click().run()
+        self._open_dialog()
+        self.at.button(key="exec_cols_restore_default").click().run()
         frame = _execution_frame(self.at)
         self.assertIsNotNone(frame)
         self.assertIn(TARGET_COLUMN, list(frame.columns), "恢复全部列后该列未回来")

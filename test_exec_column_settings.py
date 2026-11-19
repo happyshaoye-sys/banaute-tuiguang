@@ -76,37 +76,38 @@ class ColumnSettingsUiContractTests(unittest.TestCase):
         tree = ast.parse(cls.source)
         cls.tab4 = cls.source[cls.source.index('with tab4:'):]
 
-    def test_checkbox_grid_and_instant_apply(self):
-        self.assertIn('execution_column_groups(all_cols)', self.tab4)
-        self.assertIn('st.checkbox(', self.tab4)
-        self.assertIn('exec_col_chk_{_col}', self.tab4)
-        self.assertIn('勾选即生效', self.tab4)
-        self.assertIn('_save_column_prefs(_new_pref)', self.tab4)
-        # 全宽折叠面板（不再是窄弹层）；两步式交互与旧多选控件均已移除
+    def test_dialog_trigger_lives_in_filter_row(self):
+        """入口回到筛选行右侧（v2.72 的位置），点开是弹窗。"""
+        self.assertIn('key="exec_cols_open"', self.tab4)
+        self.assertIn("_render_exec_column_dialog(all_cols)", self.tab4)
         self.assertNotIn('st.popover(', self.tab4)
-        self.assertNotIn('应用并记住', self.tab4)
-        self.assertNotIn('exec_cols_apply', self.tab4)
-        self.assertNotIn('exec_cols_ms', self.tab4)
-        self.assertNotIn('exec_cols_grp_', self.tab4)
+        self.assertNotIn('exec_col_chk_', self.tab4)
 
-    def test_group_all_and_none_buttons(self):
-        self.assertIn('exec_cols_all_{_group_name}', self.tab4)
-        self.assertIn('exec_cols_none_{_group_name}', self.tab4)
+    def test_dialog_is_two_panel_with_search(self):
+        # 弹窗装饰器经 _column_dialog 安全包装（AST 单测里没有 st.dialog）
+        self.assertIn('@_column_dialog("列设置")', self.source)
+        self.assertIn('getattr(st, "dialog", None)', self.source)
+        self.assertIn("已隐藏列", self.source)
+        self.assertIn("已显示列", self.source)
+        self.assertIn("exec_cols_dlg_hidden_q", self.source)
+        self.assertIn("exec_cols_dlg_shown_q", self.source)
+        self.assertIn("exec_cols_dlg_", self.source)
+        self.assertIn("恢复默认（全部列）", self.source)
 
-    def test_empty_selection_falls_back_to_base_group(self):
-        self.assertIn('至少要保留 1 列', self.tab4)
-        # 空选时回退基础组：写入偏好后重置所有复选框，再 rerun
-        self.assertIn(
-            "st.session_state['exec_cols_pref'] = _new_pref", self.tab4)
-        self.assertIn("st.session_state.pop(f\"exec_col_chk_{_c}\", None)", self.tab4)
+    def test_dialog_applies_instantly_and_keeps_filtered_columns(self):
+        self.assertIn("_save_column_prefs(new_pref)", self.source)
+        self.assertIn("被搜索过滤掉、这次没渲染的列，沿用当前偏好", self.source)
+        self.assertIn("至少要保留 1 列", self.source)
+        # 不再有需要点击才生效的「应用」按钮
+        self.assertNotIn("应用并记住", self.source)
+        self.assertNotIn("exec_cols_apply", self.source)
 
-    def test_undo_and_reset_buttons(self):
-        self.assertIn('撤销到本次打开前', self.tab4)
-        self.assertIn('exec_cols_before_edit', self.tab4)
-        self.assertIn('恢复全部列', self.tab4)
+    def test_dialog_groups_columns_by_semantic_group(self):
+        self.assertIn("execution_column_groups(all_columns)", self.source)
+        self.assertIn("group_of.get(column", self.source)
 
-    def test_column_order_preview(self):
-        self.assertIn('表格列序固定按运营定稿顺序', self.tab4)
+    def test_column_order_note(self):
+        self.assertIn('表格列序固定按运营定稿顺序', self.source)
 
 
 if __name__ == '__main__':

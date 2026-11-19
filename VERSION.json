@@ -1,7 +1,7 @@
 {
   "product": "MetoX",
-  "version": "2.76",
-  "release_date": "2026-11-18",
+  "version": "2.77",
+  "release_date": "2026-11-19",
   "rule_versions": {
     "refund_risk": "2026-08-02",
     "startup_launcher": "2026-08-02",
@@ -86,7 +86,8 @@
     "summary_layout_grouped": "2026-11-18",
     "channel_spend_from_marketing_scene": "2026-11-18",
     "exec_column_settings_grouped_instant": "2026-11-18",
-    "exec_column_settings_checkbox_grid": "2026-11-18"
+    "exec_column_settings_checkbox_grid": "2026-11-18",
+    "exec_column_settings_dialog": "2026-11-19"
   },
   "display_name": "MetoX推广参谋"
 }
