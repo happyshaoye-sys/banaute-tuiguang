@@ -4656,7 +4656,7 @@ with tab4:
     st.session_state["exec_cols_pref"] = resolve_display_columns(
         all_cols, st.session_state["exec_cols_pref"])
 
-    cf1, cf2, cf3, cf4 = st.columns([3, 2, 2, 1.3], vertical_alignment="bottom")
+    cf1, cf2, cf3 = st.columns([3, 2, 2], vertical_alignment="bottom")
     with cf1:
         search = st.text_input("搜索", placeholder="宝贝ID / 货号 / 类目...", key="exec_search")
     with cf2:
@@ -4664,76 +4664,79 @@ with tab4:
     with cf3:
         actions = [''] + list(ACTION_RULES.keys())
         action_filter = st.selectbox("操作", actions, key="exec_action")
-    with cf4:
-        with st.popover(
-                f"⚙️ 列设置({len(st.session_state['exec_cols_pref'])}/{len(all_cols)})",
-                width="stretch"):
-            # 2026-11-18 v2.75：按语义分组的折叠面板 + 勾选即生效（自动保存）
-            st.caption("勾选即生效（自动保存到本机）；分组便于定位，组内可一键全选/清空。"
-                       "仅影响表格显示，导出 Excel 仍为全部字段")
-            if 'exec_cols_before_edit' not in st.session_state:
-                st.session_state['exec_cols_before_edit'] = list(
-                    st.session_state['exec_cols_pref'])
-            _group_list = execution_column_groups(all_cols)
-            _picked_all = []
-            for _group_name, _group_cols in _group_list:
-                _selected = [c for c in _group_cols
-                             if c in st.session_state['exec_cols_pref']]
-                _widget_key = f"exec_cols_grp_{_group_name}"
-                with st.expander(
-                        f"{_group_name}（{len(_selected)}/{len(_group_cols)}）",
-                        expanded=False):
-                    _pick_col, _btn_col = st.columns([3, 1])
-                    _picked = _pick_col.multiselect(
-                        _group_name,
-                        options=_group_cols,
-                        default=_selected,
-                        key=_widget_key,
-                        label_visibility="collapsed",
-                    )
-                    if _btn_col.button("全选", key=f"exec_cols_all_{_group_name}",
-                                       width="stretch"):
-                        st.session_state[_widget_key] = list(_group_cols)
-                        st.rerun()
-                    if _btn_col.button("清空", key=f"exec_cols_none_{_group_name}",
-                                       width="stretch"):
-                        st.session_state[_widget_key] = []
-                        st.rerun()
-                _picked_all.extend(_picked)
 
-            _new_pref = resolve_display_columns(all_cols, _picked_all)
-            if not _picked_all:
-                # 全部组都清空时不留空表：回退到「基础」组并提示
-                st.warning("至少要保留 1 列，已自动恢复「基础」组")
-                _base = next((cols for name, cols in _group_list if name == '基础'),
-                             all_cols[:5])
-                _new_pref = resolve_display_columns(all_cols, _base)
-                st.session_state['exec_cols_grp_基础'] = list(_base)
-            if _new_pref != list(st.session_state['exec_cols_pref']):
-                st.session_state['exec_cols_pref'] = _new_pref
-                _save_column_prefs(_new_pref)
-
-            _cur_pref = list(st.session_state['exec_cols_pref'])
-            st.caption(
-                "表格列序固定按运营定稿顺序（与勾选顺序无关），前 12 列："
-                + " → ".join(_cur_pref[:12]) + f" → …（共 {len(_cur_pref)} 列）"
+    # ── 列设置（2026-11-18 v2.76：全宽 + 复选框网格 + 实时生效）─────────────
+    # 为什么改：v2.75 把分组塞进窄弹层的多选框，弹层被截断、观感差，取消后想恢复单列
+    # 只能整组重选。改成复选框后「勾=显示、取消=隐藏、再勾=恢复」都只点一下；
+    # 复选框的返回值当次运行即可读到，因此表格**实时**跟随，不需要再点任何"应用"按钮。
+    if 'exec_cols_before_edit' not in st.session_state:
+        st.session_state['exec_cols_before_edit'] = list(st.session_state['exec_cols_pref'])
+    _group_list = execution_column_groups(all_cols)
+    _pref_set = {c for c in st.session_state['exec_cols_pref']}
+    with st.expander(
+            f"⚙️ 列设置（已选 {len(_pref_set)}/{len(all_cols)}；勾选即生效，自动记住）",
+            expanded=False):
+        st.caption("勾上=显示、取消=隐藏、再勾一次就恢复；改动立即作用于下方表格并保存到本机。"
+                   "表格列序固定按运营定稿顺序（与勾选顺序无关）；导出 Excel 始终包含全部字段。")
+        _picked_all = []
+        _grid_width = 4
+        for _group_name, _group_cols in _group_list:
+            _selected = [c for c in _group_cols if c in _pref_set]
+            _head_col, _all_col, _none_col = st.columns([4, 1, 1], vertical_alignment="center")
+            _head_col.markdown(
+                f"**{_group_name}**　"
+                f"<span style='color:#8b93a7'>{len(_selected)}/{len(_group_cols)}</span>",
+                unsafe_allow_html=True,
             )
-            _undo_col, _reset_col = st.columns(2)
-            if _undo_col.button("撤销到本次打开前", width="stretch",
-                                key="exec_cols_undo"):
-                st.session_state['exec_cols_pref'] = resolve_display_columns(
-                    all_cols, st.session_state.get('exec_cols_before_edit') or all_cols)
-                _save_column_prefs(st.session_state['exec_cols_pref'])
-                for _name, _cols in _group_list:
-                    st.session_state.pop(f"exec_cols_grp_{_name}", None)
+            if _all_col.button("全选", key=f"exec_cols_all_{_group_name}", width="stretch"):
+                for _c in _group_cols:
+                    st.session_state[f"exec_col_chk_{_c}"] = True
                 st.rerun()
-            if _reset_col.button("恢复全部列", width="stretch", key="exec_cols_reset"):
-                st.session_state['exec_cols_pref'] = all_cols
-                _save_column_prefs(all_cols)
-                for _name, _cols in _group_list:
-                    st.session_state.pop(f"exec_cols_grp_{_name}", None)
+            if _none_col.button("清空", key=f"exec_cols_none_{_group_name}", width="stretch"):
+                for _c in _group_cols:
+                    st.session_state[f"exec_col_chk_{_c}"] = False
                 st.rerun()
+            _grid = st.columns(_grid_width)
+            for _index, _col in enumerate(_group_cols):
+                with _grid[_index % _grid_width]:
+                    if st.checkbox(_col, value=_col in _pref_set,
+                                   key=f"exec_col_chk_{_col}"):
+                        _picked_all.append(_col)
+            st.divider()
 
+        _new_pref = resolve_display_columns(all_cols, _picked_all)
+        if not _picked_all:
+            st.warning("至少要保留 1 列，已自动恢复「基础」组")
+            _base = next((cols for name, cols in _group_list if name == '基础'), all_cols[:5])
+            _new_pref = resolve_display_columns(all_cols, _base)
+            st.session_state['exec_cols_pref'] = _new_pref
+            _save_column_prefs(_new_pref)
+            for _c in all_cols:
+                st.session_state.pop(f"exec_col_chk_{_c}", None)
+            st.rerun()
+        if _new_pref != list(st.session_state['exec_cols_pref']):
+            st.session_state['exec_cols_pref'] = _new_pref
+            _save_column_prefs(_new_pref)
+
+        _cur_pref = list(st.session_state['exec_cols_pref'])
+        st.caption(
+            f"当前生效 {len(_cur_pref)} 列，前 12 列："
+            + " → ".join(_cur_pref[:12]) + f" → …（共 {len(_cur_pref)} 列）"
+        )
+        _undo_col, _reset_col = st.columns(2)
+        if _undo_col.button("撤销到本次打开前", width="stretch", key="exec_cols_undo"):
+            st.session_state['exec_cols_pref'] = resolve_display_columns(
+                all_cols, st.session_state.get('exec_cols_before_edit') or all_cols)
+            _save_column_prefs(st.session_state['exec_cols_pref'])
+            for _c in all_cols:
+                st.session_state.pop(f"exec_col_chk_{_c}", None)
+            st.rerun()
+        if _reset_col.button("恢复全部列", width="stretch", key="exec_cols_reset"):
+            st.session_state['exec_cols_pref'] = all_cols
+            _save_column_prefs(all_cols)
+            for _c in all_cols:
+                st.session_state.pop(f"exec_col_chk_{_c}", None)
+            st.rerun()
 
     # 过滤
     filtered = execution_df.copy()

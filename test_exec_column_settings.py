@@ -76,15 +76,18 @@ class ColumnSettingsUiContractTests(unittest.TestCase):
         tree = ast.parse(cls.source)
         cls.tab4 = cls.source[cls.source.index('with tab4:'):]
 
-    def test_grouped_expanders_and_instant_apply(self):
+    def test_checkbox_grid_and_instant_apply(self):
         self.assertIn('execution_column_groups(all_cols)', self.tab4)
-        self.assertIn('st.expander(', self.tab4)
+        self.assertIn('st.checkbox(', self.tab4)
+        self.assertIn('exec_col_chk_{_col}', self.tab4)
         self.assertIn('勾选即生效', self.tab4)
         self.assertIn('_save_column_prefs(_new_pref)', self.tab4)
-        # 旧的「应用并记住」两步式交互已移除
+        # 全宽折叠面板（不再是窄弹层）；两步式交互与旧多选控件均已移除
+        self.assertNotIn('st.popover(', self.tab4)
         self.assertNotIn('应用并记住', self.tab4)
         self.assertNotIn('exec_cols_apply', self.tab4)
-        self.assertNotIn('key="exec_cols_ms"', self.tab4)
+        self.assertNotIn('exec_cols_ms', self.tab4)
+        self.assertNotIn('exec_cols_grp_', self.tab4)
 
     def test_group_all_and_none_buttons(self):
         self.assertIn('exec_cols_all_{_group_name}', self.tab4)
@@ -92,7 +95,10 @@ class ColumnSettingsUiContractTests(unittest.TestCase):
 
     def test_empty_selection_falls_back_to_base_group(self):
         self.assertIn('至少要保留 1 列', self.tab4)
-        self.assertIn("st.session_state['exec_cols_grp_基础'] = list(_base)", self.tab4)
+        # 空选时回退基础组：写入偏好后重置所有复选框，再 rerun
+        self.assertIn(
+            "st.session_state['exec_cols_pref'] = _new_pref", self.tab4)
+        self.assertIn("st.session_state.pop(f\"exec_col_chk_{_c}\", None)", self.tab4)
 
     def test_undo_and_reset_buttons(self):
         self.assertIn('撤销到本次打开前', self.tab4)

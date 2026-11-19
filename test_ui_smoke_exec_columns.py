@@ -5,7 +5,7 @@
 v2.68 之前 app.py 有一段硬编码「强制显示」白名单，每次 rerun 都把用户勾掉的
 状态/判定列塞回偏好 —— 纯函数单测覆盖不到，因为它发生在页面脚本里。
 这里用 Streamlit 官方 AppTest **真渲染页面**：加载真实数据 → 取消勾选
-「链接投产状态」→ 勾选即生效 → 断言表格列里真的没有它，并且多次 rerun 不复活，
+「链接投产状态」→ 取消复选框（实时生效）→ 断言表格列里没有它，再勾回可单列恢复，并且多次 rerun 不复活，
 点「恢复全部列」能回来。
 
 运行方式（默认跳过，避免发布门禁依赖共享盘）
@@ -106,12 +106,10 @@ class ExecutionColumnPrefsSmokeTest(unittest.TestCase):
         self.assertIn(TARGET_COLUMN, list(self.first.columns))
 
     def test_02_unchecked_column_disappears_and_stays_hidden(self):
-        group_key = "exec_cols_grp_判定状态"   # v2.75：按语义分组，判定状态组内取消勾选
-        all_options = list(self.at.multiselect(key=group_key).options)
-        self.assertIn(TARGET_COLUMN, all_options)
-        picked = [c for c in all_options if c != TARGET_COLUMN]
-        # v2.75：勾选即生效，不再需要「应用并记住」
-        self.at.multiselect(key=group_key).set_value(picked).run()
+        # v2.76：列设置改成复选框网格，取消勾选 = 关掉该列的复选框，立刻实时生效
+        checkbox_key = f"exec_col_chk_{TARGET_COLUMN}"
+        self.assertTrue(self.at.checkbox(key=checkbox_key).value, "该列默认应勾选")
+        self.at.checkbox(key=checkbox_key).uncheck().run()
         self.assertEqual(_exception_text(self.at), "", "取消勾选后页面抛异常")
 
         frame = _execution_frame(self.at)
@@ -120,8 +118,10 @@ class ExecutionColumnPrefsSmokeTest(unittest.TestCase):
         for column in KEEP_ALWAYS:
             self.assertIn(column, list(frame.columns))
         before = len(frame.columns)
+        # 相对初始列数少 1 列（初始列数取决于本机已保存偏好，不硬编码 80）
+        self.assertEqual(before, len(self.first.columns) - 1, "取消 1 列后应比初始少 1 列")
 
-        # 关键回归：再 rerun 两次，被取消的列不得复活
+        # 关键回归：再 rerun 两次，被取消的列不得复活，复选框也要保持未勾选
         for round_index in range(2):
             self.at.run()
             again = _execution_frame(self.at)
@@ -132,6 +132,16 @@ class ExecutionColumnPrefsSmokeTest(unittest.TestCase):
                 f"第 {round_index + 1} 次 rerun 后取消勾选的列又出现了",
             )
             self.assertEqual(len(again.columns), before, "列数在 rerun 后发生变化")
+            self.assertFalse(self.at.checkbox(key=checkbox_key).value,
+                             "复选框状态在 rerun 后丢失")
+
+    def test_02b_recheck_restores_single_column(self):
+        # 单独把这一列勾回来（旧版只能整组恢复，这里验证"逐列恢复"）
+        checkbox_key = f"exec_col_chk_{TARGET_COLUMN}"
+        self.at.checkbox(key=checkbox_key).check().run()
+        frame = _execution_frame(self.at)
+        self.assertIsNotNone(frame)
+        self.assertIn(TARGET_COLUMN, list(frame.columns), "重新勾选后该列未恢复")
 
     def test_03_restore_all_columns(self):
         self.at.button(key="exec_cols_reset").click().run()
