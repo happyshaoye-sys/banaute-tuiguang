@@ -261,20 +261,23 @@ def _render_exec_column_dialog(all_columns):
     表格列序固定按运营定稿顺序（EXPORT_COLS），不提供拖拽排序。
     """
     all_columns = list(all_columns)
-    pref = list(st.session_state.get('exec_cols_pref') or [])
-    pref_set = set(pref)
     groups = execution_column_groups(all_columns)
     group_of = {column: name for name, columns in groups for column in columns}
     st.markdown(_COLUMN_DIALOG_CSS, unsafe_allow_html=True)
+    # 复选框 key 的"代":恢复默认时换代,让 80 个复选框按新值重建。
+    # 前端会用它记住的旧勾选状态覆盖 value,不换代就会出现"恢复默认了但那几列仍显示未勾选"。
+    _rev = int(st.session_state.get('exec_cols_dlg_rev') or 0)
 
     _blank_col, restore_col = st.columns([2, 1], vertical_alignment="center")
     if restore_col.button("恢复默认", key="exec_cols_restore_default", type="tertiary"):
         st.session_state['exec_cols_pref'] = all_columns
         _save_column_prefs(all_columns)
-        for column in all_columns:
-            st.session_state.pop(f"exec_cols_dlg_{column}", None)
-        st.rerun()
+        _rev += 1
+        st.session_state['exec_cols_dlg_rev'] = _rev
+        # 不需要 rerun：这一次点击已经重跑了弹窗，下面的复选框会按"全部勾选"重建
 
+    pref = list(st.session_state.get('exec_cols_pref') or [])
+    pref_set = set(pref)
     hidden = [c for c in all_columns if c not in pref_set]
     shown = [c for c in all_columns if c in pref_set]
 
@@ -317,7 +320,7 @@ def _render_exec_column_dialog(all_columns):
                         st.caption(f"▍{group_name}")
                         current_group = group_name
                     if st.checkbox(column, value=checked,
-                                   key=f"exec_cols_dlg_{column}"):
+                                   key=f"exec_cols_dlg_{_rev}_{column}"):
                         picked.append(column)
         return picked
 
@@ -333,18 +336,18 @@ def _render_exec_column_dialog(all_columns):
         st.warning("至少要保留 1 列；已自动恢复「基础」组")
         base = next((cols for name, cols in groups if name == '基础'), all_columns[:5])
         new_pref = resolve_display_columns(all_columns, base)
-        for column in all_columns:
-            st.session_state.pop(f"exec_cols_dlg_{column}", None)
+        _rev += 1
+        st.session_state['exec_cols_dlg_rev'] = _rev
     _changed = new_pref != list(st.session_state.get('exec_cols_pref') or [])
     if _changed:
         st.session_state['exec_cols_pref'] = new_pref
         _save_column_prefs(new_pref)
     st.caption(
-        f"当前生效 {len(new_pref)} 列 · 勾选即生效并自动保存 · 点右上角 × 关闭"
+        f"当前生效 {len(new_pref)} 列 · 勾选立即记下 · 关掉面板后表格按新列重排"
     )
-    if _changed:
-        # 弹窗内容属于 fragment，必须整页 rerun 才能让下方表格按新列渲染
-        st.rerun(scope="app")
+    # 注意：这里**故意不整页 rerun**。弹窗本身是 fragment，勾选只重跑弹窗，
+    # 所以点一下是瞬时的；关掉面板（× / ESC / 点外面）时 on_dismiss 回调会触发一次
+    # 整页 rerun，表格才按新列重排 —— 把 N 次卡顿压成 1 次。
 
 
 def _format_signed_money(value):
@@ -4829,7 +4832,8 @@ with tab4:
                 f"⚙️ 列设置({len(st.session_state['exec_cols_pref'])}/{len(all_cols)})",
                 key="exec_cols_open", width="stretch"):
             st.session_state['exec_cols_dialog_open'] = True
-    # 弹窗由会话标记驱动：勾选后触发整页 rerun（表格实时跟随），弹窗保持打开
+    # 弹窗由会话标记驱动：勾选只重跑弹窗（fragment）→ 点一下瞬时；
+    # 关掉面板时 on_dismiss 回调清标记并整页 rerun 一次，表格才按新列重排。
     if st.session_state.get('exec_cols_dialog_open'):
         _render_exec_column_dialog(all_cols)
 

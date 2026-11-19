@@ -113,13 +113,20 @@ class ExecutionColumnPrefsSmokeTest(unittest.TestCase):
         trigger.click().run()
         return
 
+    def _column_checkbox(self, column):
+        """复选框 key 形如 exec_cols_dlg_<代>_<列名>（恢复默认会换代，所以按后缀找）。"""
+        for checkbox in self.at.checkbox:
+            key = checkbox.key or ""
+            if key.startswith("exec_cols_dlg_") and key.endswith(f"_{column}"):
+                return checkbox
+        raise AssertionError(f"弹窗里找不到「{column}」的复选框")
+
     def test_02_unchecked_column_disappears_and_stays_hidden(self):
         # v2.77：双栏弹窗，取消勾选 = 关掉该列复选框，实时生效
         self._open_dialog()
         self.assertEqual(_exception_text(self.at), "", "打开列设置弹窗后页面抛异常")
-        checkbox_key = f"exec_cols_dlg_{TARGET_COLUMN}"
-        self.assertTrue(self.at.checkbox(key=checkbox_key).value, "该列默认应勾选")
-        self.at.checkbox(key=checkbox_key).uncheck().run()
+        self.assertTrue(self._column_checkbox(TARGET_COLUMN).value, "该列默认应勾选")
+        self._column_checkbox(TARGET_COLUMN).uncheck().run()
         self.assertEqual(_exception_text(self.at), "", "取消勾选后页面抛异常")
 
         frame = _execution_frame(self.at)
@@ -145,10 +152,9 @@ class ExecutionColumnPrefsSmokeTest(unittest.TestCase):
 
     def test_02b_recheck_restores_single_column(self):
         self._open_dialog()
-        checkbox_key = f"exec_cols_dlg_{TARGET_COLUMN}"
-        self.assertFalse(self.at.checkbox(key=checkbox_key).value,
+        self.assertFalse(self._column_checkbox(TARGET_COLUMN).value,
                          "该列此时应在「已隐藏列」里且未勾选")
-        self.at.checkbox(key=checkbox_key).check().run()
+        self._column_checkbox(TARGET_COLUMN).check().run()
         frame = _execution_frame(self.at)
         self.assertIsNotNone(frame)
         self.assertIn(TARGET_COLUMN, list(frame.columns), "重新勾选后该列未恢复")
