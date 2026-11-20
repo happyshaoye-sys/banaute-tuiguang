@@ -846,7 +846,11 @@ class BudgetDecisionDashboardUIContractTests(unittest.TestCase):
         # 每组仍是三张卡，且每张卡都带第三元（辅助口径）
         self.assertIn('f"投产 {_summary_roi:.2f}"', view)
         self.assertIn('"占 GMV " + (_summary_ratio_text(_summary_spend, _summary_gmv)', view)
-        self.assertIn("个投放中计划", view)
+        # 2026-11-20：当前预算的辅助口径必须写清两个分母
+        # （全店快照 103 个投放中 vs 本表 98 个，两个口径不同不要写成同一个数）
+        self.assertIn("个投放中", view)
+        self.assertIn("· 本表 {_plans_playing} 个", view)
+        self.assertIn("_plans_playing", view)
         self.assertIn("较上一份快照", view)
         self.assertIn("占周期花费 ", view)
         # 不再用 Streamlit 原生 st.metric 排摘要

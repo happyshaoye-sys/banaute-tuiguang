@@ -4552,6 +4552,14 @@ with tab3:
     budget_total = budget_summary.get('金额')
     previous_budget = budget_summary.get('往期金额')
     budget_change = budget_summary.get('变化')
+    # 计划管理表只覆盖「商品明细里能归因的计划」（关键词/人群），
+    # 摘要的当前预算则是全店快照所有模块的投放中计划，两个分母必须写清楚。
+    _plans_total = len(plans) if plans is not None and hasattr(plans, '__len__') else 0
+    if '计划状态' in getattr(plans, 'columns', []):
+        _plans_playing = int((plans['计划状态'].astype('string').fillna('').str.strip()
+                              == '投放中').sum())
+    else:
+        _plans_playing = 0
     _summary_gmv = _as_float(summary.get('周期GMV', summary.get('全店GMV', summary.get('GMV', 0))))
     _summary_spend = _as_float(summary.get('周期花费', summary.get('全店付费', summary.get('付费', 0))))
     _summary_roi = _summary_gmv / _summary_spend if _summary_spend > 0 else 0.0
@@ -4608,7 +4616,8 @@ with tab3:
     ])
     _render_metric_group('预算（计划列表快照）', [
         ("当前预算", _format_money(budget_total) if budget_total is not None else '—',
-         f"{int(_as_float(budget_summary.get('计划数'))) } 个投放中计划"
+         (f"全店快照 {int(_as_float(budget_summary.get('计划数')))} 个投放中"
+          f" · 本表 {_plans_playing} 个")
          if budget_summary.get('计划数') is not None else '无快照'),
         ("往期预算", _format_money(previous_budget) if previous_budget is not None else '—',
          f"{int(_as_float(budget_summary.get('往期计划数'))) } 个计划"
@@ -4919,7 +4928,8 @@ with tab3:
                                 lambda value: str(value).strip() == chosen)]
                 info_col.caption(
                     f"显示 {len(frame)} / {total_rows} 个计划"
-                    + ("　（计划状态取自最新计划列表快照，移除的计划留空）"
+                    + ("　（本表只含商品明细可归因的关键词/人群计划；"
+                       "计划状态取自最新计划列表快照，移除的计划留空）"
                        if '计划状态' in plan_table.columns else "")
                 )
                 # 行数少时不留一大片空网格（筛选到 2 行也好看）
