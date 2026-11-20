@@ -17,8 +17,8 @@ class VersionContractTests(unittest.TestCase):
         info = json.loads((ROOT / "VERSION.json").read_text(encoding="utf-8"))
         self.assertEqual(info["product"], "MetoX")
         self.assertEqual(info["display_name"], "MetoX推广参谋")
-        self.assertEqual(info["version"], "2.77")
-        self.assertEqual(info["release_date"], "2026-11-19")
+        self.assertEqual(info["version"], "2.78")
+        self.assertEqual(info["release_date"], "2026-11-20")
         # v2.73 起：v9.3 外部信号已剔除，工具只剩内置 MetoX 算法，不再登记外部方法论版本
         self.assertNotIn("external_strategy_version", info)
         self.assertEqual(info["rule_versions"]["refund_risk"], "2026-08-02")
@@ -85,7 +85,7 @@ class VersionContractTests(unittest.TestCase):
         self.assertEqual(info["rule_versions"]["kpi_trend_date_format"], "2026-09-14")
         self.assertEqual(info["rule_versions"]["rolling_visitor_metrics"], "2026-09-22")
         self.assertEqual(version.VERSION_INFO, info)
-        self.assertEqual(version.DISPLAY_VERSION, "MetoX推广参谋 v2.77")
+        self.assertEqual(version.DISPLAY_VERSION, "MetoX推广参谋 v2.78")
         self.assertEqual(version.PRODUCT_NAME, "MetoX")
         self.assertEqual(version.DISPLAY_NAME, "MetoX推广参谋")
 
@@ -123,12 +123,12 @@ class VersionContractTests(unittest.TestCase):
 
     def test_current_operator_documents_show_v2_contract(self):
         documents = {
-            "README.md": "MetoX v2.77",
-            "README_离线使用说明.txt": "MetoX v2.77",
-            "第三方使用说明_先看这个.txt": "MetoX v2.77",
-            "半自动推广工具_数据源与指标说明.md": "MetoX v2.77",
-            "MetoX2.77_使用说明与运营操作顺序.md": "MetoX v2.77",
-            "MetoX2.77_新运营培训手册.html": "MetoX2.77",
+            "README.md": "MetoX v2.78",
+            "README_离线使用说明.txt": "MetoX v2.78",
+            "第三方使用说明_先看这个.txt": "MetoX v2.78",
+            "半自动推广工具_数据源与指标说明.md": "MetoX v2.78",
+            "MetoX2.78_使用说明与运营操作顺序.md": "MetoX v2.78",
+            "MetoX2.78_新运营培训手册.html": "MetoX2.78",
         }
         for relative, marker in documents.items():
             with self.subTest(relative=relative):

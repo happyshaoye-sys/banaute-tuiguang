@@ -425,5 +425,69 @@ class PlanDailySpendTests(unittest.TestCase):
         self.assertEqual(columns[columns.index('ROI') + 1], '日均花费')
 
 
+class PlanStatusColumnTests(unittest.TestCase):
+    """v2.78：推广计划管理新增「计划状态」（取自最新计划列表快照）。"""
+
+    def _frame(self):
+        import pandas as pd
+
+        detail = json.dumps([
+            {'计划ID': 'P1', '计划名称': '关键词A', '所属渠道': '关键词',
+             '当前花费': 60, '归因成交': 240},
+            {'计划ID': 'P2', '计划名称': '人群B', '所属渠道': '人群',
+             '当前花费': 40, '归因成交': 80},
+        ], ensure_ascii=False)
+        return pd.DataFrame([{
+            '宝贝ID': '1001',
+            'GMV': 320.0,
+            '付费': 100.0,
+            '商品访客数': 500,
+            '推广计划全量明细': detail,
+        }])
+
+    def _rows(self, by_id):
+        from core.budget_decision import build_plan_management
+
+        rows = build_plan_management(
+            self._frame(), products=None,
+            plan_config={'by_id': by_id, 'previous_by_id': {}},
+            period_days=1,
+        )
+        return {row['计划ID']: row for row in rows}
+
+    def test_status_comes_from_latest_snapshot(self):
+        rows = self._rows({
+            'P1': {'预算': 100, '出价方式': '最大化拿量', '状态': '投放中'},
+            'P2': {'预算': 50, '出价方式': '稳定投产比', '状态': '已暂停'},
+        })
+        self.assertEqual(rows['P1']['计划状态'], '投放中')
+        self.assertEqual(rows['P2']['计划状态'], '已暂停')
+
+    def test_missing_plan_leaves_status_blank(self):
+        rows = self._rows({
+            'P1': {'预算': 100, '出价方式': '最大化拿量', '状态': '投放中'},
+        })
+        self.assertEqual(rows['P2']['计划状态'], '')
+
+    def test_status_is_a_new_column_not_the_retired_one(self):
+        from core.budget_decision import is_removed_budget_column
+
+        rows = self._rows({'P1': {'预算': 100, '状态': '投放中'}})
+        self.assertIn('计划状态', rows['P1'])
+        self.assertNotIn('状态', rows['P1'])
+        # 裸「状态」仍是废弃列（商品级角色状态），所以新列必须叫「计划状态」
+        self.assertTrue(is_removed_budget_column('状态'))
+        self.assertFalse(is_removed_budget_column('计划状态'))
+
+    def test_status_follows_plan_name_in_column_order(self):
+        from core.exporter import BUDGET_DECISION_PLAN_COLUMNS
+
+        columns = list(BUDGET_DECISION_PLAN_COLUMNS)
+        self.assertEqual(
+            columns[columns.index('计划名称') + 1],
+            '计划状态',
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

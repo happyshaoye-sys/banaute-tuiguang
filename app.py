@@ -357,6 +357,56 @@ def _format_signed_money(value):
     return f"{sign}¥{abs(amount) / 1e4:.2f}万"
 
 
+#: 摘要 KPI 卡片样式（v2.78）。只作用于带 mx-sum-* 类的元素，不影响页面其它部分。
+_SUMMARY_CSS = """
+<style>
+.mx-sum-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; font-weight: 600; letter-spacing: .02em;
+  color: rgba(150,160,178,.95); margin: 14px 0 8px;
+}
+.mx-sum-bar { width: 3px; height: 12px; border-radius: 2px; background: rgba(150,160,178,.75); }
+.mx-sum-row { display: flex; gap: 10px; margin: 0 0 4px; flex-wrap: nowrap; }
+.mx-sum-card {
+  flex: 1 1 0; min-width: 0;
+  border: 1px solid rgba(140,150,170,.22); border-radius: 10px;
+  padding: 10px 12px 9px;
+  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012));
+}
+.mx-sum-label { font-size: 12px; color: rgba(150,160,178,.95); line-height: 1.3; }
+.mx-sum-value {
+  font-size: 25px; font-weight: 650; line-height: 1.2; margin-top: 4px;
+  font-variant-numeric: tabular-nums; letter-spacing: -.01em;
+}
+.mx-sum-unit { font-size: 13px; font-weight: 500; margin-left: 3px; color: rgba(150,160,178,.95); }
+.mx-sum-sub { font-size: 11px; color: rgba(140,150,170,.85); margin-top: 4px; line-height: 1.3; }
+</style>
+"""
+
+
+def _summary_html_text(value) -> str:
+    """摘要卡片里的文本转义（值都是我们自己拼的，仍然转义一遍防意外）。"""
+    return (str(value)
+            .replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            .replace('"', '&quot;'))
+
+
+def _summary_card_parts(value):
+    """把 '¥5.11万' 拆成 ('¥5.11', '万')；'5,057' 拆成 ('5,057', '')；'—' 拆成 ('—', '')。"""
+    text = str(value)
+    if text.endswith('万'):
+        return text[:-1], '万'
+    return text, ''
+
+
+def _summary_ratio_text(part, whole, suffix='', digits=1):
+    """占比文案：占周期花费 3.5%（分母为 0 时返回空串，不显示 0.0%）。"""
+    whole_value = _as_float(whole)
+    if whole_value <= 0:
+        return ''
+    return f"{_as_float(part) / whole_value * 100:.{digits}f}%{suffix}"
+
+
 # ── 加载数据 ──────────────────────────────────────────────
 def _log_time(timings, label, start, extra=""):
     """记录并打印单步耗时"""
@@ -4496,32 +4546,83 @@ with tab3:
     st.markdown("#### 摘要先行")
     # 2026-11-14：当前预算 = 计划列表里状态=投放中的计划日预算合计（与周期花费各自独立，互不对账）
     # 2026-11-16：新增 往期预算（上一份快照同口径）与 预算变化（当前 − 往期）；并把 9 张卡按语义分三组排版
+    # 2026-11-19 v2.78：三组卡改成卡片式排版，每张卡补一行辅助口径（占比 / 投产 / 计划数）
+    st.markdown(_SUMMARY_CSS, unsafe_allow_html=True)
     budget_summary = summarize_budget(st.session_state.get('plan_config') or {})
     budget_total = budget_summary.get('金额')
     previous_budget = budget_summary.get('往期金额')
     budget_change = budget_summary.get('变化')
+    _summary_gmv = _as_float(summary.get('周期GMV', summary.get('全店GMV', summary.get('GMV', 0))))
+    _summary_spend = _as_float(summary.get('周期花费', summary.get('全店付费', summary.get('付费', 0))))
+    _summary_roi = _summary_gmv / _summary_spend if _summary_spend > 0 else 0.0
+    _summary_recover = _as_float(summary.get('待回收金额', summary.get('待回收预算', 0)))
+    _summary_increase = _as_float(summary.get('建议增加金额', summary.get('建议增加预算', 0)))
+    _summary_zero_gmv = _as_float(
+        summary.get('零GMV消耗', summary.get('零GMV花费', summary.get('零GMV付费', 0)))
+    )
+    if previous_budget is not None and _as_float(previous_budget) > 0 and budget_change is not None:
+        _summary_budget_delta = (
+            f"较上一份快照 {_as_float(budget_change) / _as_float(previous_budget) * 100:+.1f}%"
+        )
+    else:
+        _summary_budget_delta = '较上一份快照'
 
     def _render_metric_group(title, cards):
-        """每组一行：小标题 + 等宽指标卡（3 张）。"""
-        st.markdown(f"**{title}**")
-        cols = st.columns(len(cards))
-        for col, (label, value) in zip(cols, cards):
-            col.metric(label, value)
+        """一组一行 KPI 卡片：小标题 + 等宽卡片（标签 / 主数值 / 一行辅助口径）。
+
+        2026-11-19 v2.78：从 Streamlit 原生 st.metric 换成自定义卡片（st.metric 的字号、
+        留白和边框在深色主题下很散）；卡片用 flex 等宽等高，数值统一 tabular-nums 对齐。
+        cards 每项为 (标签, 数值[, 辅助说明])。
+        """
+        rendered = []
+        for card in cards:
+            label = card[0]
+            value = card[1]
+            sub = card[2] if len(card) > 2 else ''
+            main, unit = _summary_card_parts(value)
+            unit_html = (
+                f'<span class="mx-sum-unit">{_summary_html_text(unit)}</span>'
+                if unit else ''
+            )
+            rendered.append(
+                '<div class="mx-sum-card">'
+                f'<div class="mx-sum-label">{_summary_html_text(label)}</div>'
+                f'<div class="mx-sum-value">{_summary_html_text(main)}{unit_html}</div>'
+                f'<div class="mx-sum-sub">{_summary_html_text(sub)}</div>'
+                '</div>'
+            )
+        st.markdown(
+            f'<div class="mx-sum-head"><span class="mx-sum-bar"></span>'
+            f'{_summary_html_text(title)}</div>'
+            f'<div class="mx-sum-row">{"".join(rendered)}</div>',
+            unsafe_allow_html=True,
+        )
 
     _render_metric_group('规模与花费', [
-        ("商品数", f"{int(_as_float(summary.get('商品数', len(products)))):,}"),
-        ("周期GMV", _format_money(summary.get('周期GMV', summary.get('全店GMV', summary.get('GMV', 0))))),
-        ("周期花费", _format_money(summary.get('周期花费', summary.get('全店付费', summary.get('付费', 0))))),
+        ("商品数", f"{int(_as_float(summary.get('商品数', len(products)))):,}",
+         f"{actual_days} 天周期口径" if actual_days else "本期有数据的商品"),
+        ("周期GMV", _format_money(summary.get('周期GMV', summary.get('全店GMV', summary.get('GMV', 0)))),
+         f"投产 {_summary_roi:.2f}"),
+        ("周期花费", _format_money(summary.get('周期花费', summary.get('全店付费', summary.get('付费', 0)))),
+         "占 GMV " + (_summary_ratio_text(_summary_spend, _summary_gmv) or '—')),
     ])
     _render_metric_group('预算（计划列表快照）', [
-        ("当前预算", _format_money(budget_total) if budget_total is not None else '—'),
-        ("往期预算", _format_money(previous_budget) if previous_budget is not None else '—'),
-        ("预算变化", _format_signed_money(budget_change) if budget_change is not None else '—'),
+        ("当前预算", _format_money(budget_total) if budget_total is not None else '—',
+         f"{int(_as_float(budget_summary.get('计划数'))) } 个投放中计划"
+         if budget_summary.get('计划数') is not None else '无快照'),
+        ("往期预算", _format_money(previous_budget) if previous_budget is not None else '—',
+         f"{int(_as_float(budget_summary.get('往期计划数'))) } 个计划"
+         if budget_summary.get('往期计划数') is not None else '无上一份快照'),
+        ("预算变化", _format_signed_money(budget_change) if budget_change is not None else '—',
+         _summary_budget_delta),
     ])
     _render_metric_group('调整建议', [
-        ("待回收金额", _format_money(summary.get('待回收金额', summary.get('待回收预算', 0)))),
-        ("建议增加金额", _format_money(summary.get('建议增加金额', summary.get('建议增加预算', 0)))),
-        ("零GMV消耗", _format_money(summary.get('零GMV消耗', summary.get('零GMV花费', summary.get('零GMV付费', 0))))),
+        ("待回收金额", _format_money(_summary_recover),
+         "占周期花费 " + (_summary_ratio_text(_summary_recover, _summary_spend) or '—')),
+        ("建议增加金额", _format_money(_summary_increase),
+         "占周期花费 " + (_summary_ratio_text(_summary_increase, _summary_spend) or '—')),
+        ("零GMV消耗", _format_money(_summary_zero_gmv),
+         "占周期花费 " + (_summary_ratio_text(_summary_zero_gmv, _summary_spend) or '—')),
     ])
     _budget_note = budget_caption(budget_summary)
     if actual_days:
@@ -4735,7 +4836,7 @@ with tab3:
     with plan_tab:
         st.caption(
             "合集计划只给父级诊断，勿把商品建议重复落成预算；"
-            "「当前预算 / 往期预算 / 出价方式」取自无界目录下的计划列表快照，"
+            "「计划状态 / 当前预算 / 往期预算 / 出价方式」都取自无界目录下的计划列表快照，"
             "按计划ID只读匹配，不做推断。"
         )
         st.caption(
@@ -4744,13 +4845,16 @@ with tab3:
             + plan_config_caption((st.session_state.get('plan_config') or {}).get('previous_source'))
             + "。注意：这些都是**当前配置**，查历史日期时显示的也是最新值，不是历史值；"
             "「预算变化 = 当前预算 − 往期预算」，计划在任一侧缺失时留空。"
+            "「计划状态」只展示、不参与任何指标计算，也不和花费对账 —— 暂停/终止前花过的钱照实显示；"
+            "计划已从后台计划列表移除时状态留空（不推断、不回填旧状态）。"
         )
         if plans.empty:
             st.info("暂无推广计划管理数据。")
         else:
             plan_columns = [
                 column for column in (
-                    '序号', '计划ID', '计划名称', '所属渠道', '商品数', '计划类型', '计划经营结构',
+                    '序号', '计划ID', '计划名称', '计划状态', '所属渠道', '商品数',
+                    '计划类型', '计划经营结构',
                     '当前预算', '往期预算', '预算变化', '出价方式',
                     '周期花费', '归因成交', 'ROI', '日均花费', '方向证据', '计划管理建议',
                 )
@@ -4778,18 +4882,61 @@ with tab3:
                     '日均花费', format='¥%.2f',
                     help='所选周期花费 ÷ 所选周期天数（当日口径即 1 天）',
                 ),
+                '计划状态': st.column_config.TextColumn(
+                    '计划状态',
+                    help='最新计划列表快照里的计划状态（投放中/已暂停/已终止）；'
+                         '计划已从后台列表移除时留空',
+                ),
             }
-            st.dataframe(
-                plan_table,
-                width="stretch",
-                hide_index=True,
-                height=560,
-                column_config={
-                    column: config
-                    for column, config in plan_column_config.items()
-                    if column in plan_table.columns
-                },
-            )
+            @st.fragment
+            def _render_plan_management_table():
+                """状态筛选 + 表格。
+
+                2026-11-19 v2.78：单独装进 fragment —— 切换状态只重跑这一小块（实测 <0.5 秒），
+                不会整页重算，避免"一筛选卡半天"。
+                """
+                frame = plan_table
+                total_rows = len(frame)
+                filter_col, info_col = st.columns([1.1, 3], vertical_alignment="bottom")
+                if '计划状态' in frame.columns:
+                    statuses = [str(value).strip() for value in frame['计划状态'].tolist()]
+                    present = [name for name in ('投放中', '已暂停', '已终止')
+                               if name in statuses]
+                    present += sorted({name for name in statuses if name and name not in present})
+                    options = ['全部'] + present
+                    if any(not name for name in statuses):
+                        options.append('（状态空缺）')
+                    if st.session_state.get('plan_status_filter') not in options:
+                        st.session_state['plan_status_filter'] = '全部'
+                    chosen = filter_col.selectbox(
+                        '计划状态', options, key='plan_status_filter')
+                    if chosen != '全部':
+                        if chosen == '（状态空缺）':
+                            frame = frame[frame['计划状态'].map(
+                                lambda value: not str(value).strip())]
+                        else:
+                            frame = frame[frame['计划状态'].map(
+                                lambda value: str(value).strip() == chosen)]
+                info_col.caption(
+                    f"显示 {len(frame)} / {total_rows} 个计划"
+                    + ("　（计划状态取自最新计划列表快照，移除的计划留空）"
+                       if '计划状态' in plan_table.columns else "")
+                )
+                # 行数少时不留一大片空网格（筛选到 2 行也好看）
+                table_height = max(140, min(560, 38 * len(frame) + 70))
+                st.dataframe(
+                    frame,
+                    width="stretch",
+                    hide_index=True,
+                    height=table_height,
+                    column_config={
+                        column: config
+                        for column, config in plan_column_config.items()
+                        if column in frame.columns
+                    },
+                )
+
+            _render_plan_management_table()
 
 # ── Tab 4: 执行表 ────────────────────────────────────────
 with tab4:

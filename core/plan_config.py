@@ -429,8 +429,9 @@ def plan_config_caption(source) -> str:
     """界面用的一句话来源说明。"""
     source = source or {}
     if not source.get('file'):
-        return str(source.get('reason') or '未找到计划列表文件，预算/出价方式留空')
-    parts = [f"预算/出价方式来自 {source['file']}"]
+        return str(source.get('reason')
+                   or '未找到计划列表文件，计划状态/预算/出价方式留空')
+    parts = [f"计划状态/预算/出价方式来自 {source['file']}"]
     if source.get('folder_date'):
         parts.append(f"目录 {source['folder_date']}")
     if source.get('exported_at'):

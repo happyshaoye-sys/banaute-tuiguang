@@ -834,15 +834,44 @@ class BudgetDecisionDashboardUIContractTests(unittest.TestCase):
         self.assertIn('tier_table = tiers[tier_columns]', tier_view)
         self.assertIn('column in tier_table.columns', tier_view)
 
+    def test_summary_uses_card_layout_and_context_lines(self):
+        """v2.78：摘要从 st.metric 换成卡片式 KPI（标签 / 主数值 / 一行辅助口径）。"""
+        view = self._budget_view_source()
+        self.assertIn('_SUMMARY_CSS', view)
+        self.assertIn('mx-sum-card', view)
+        self.assertIn('mx-sum-value', view)
+        self.assertIn('mx-sum-sub', view)
+        self.assertIn('def _summary_card_parts(', self.source)
+        self.assertIn('def _summary_ratio_text(', self.source)
+        # 每组仍是三张卡，且每张卡都带第三元（辅助口径）
+        self.assertIn('f"投产 {_summary_roi:.2f}"', view)
+        self.assertIn('"占 GMV " + (_summary_ratio_text(_summary_spend, _summary_gmv)', view)
+        self.assertIn("个投放中计划", view)
+        self.assertIn("较上一份快照", view)
+        self.assertIn("占周期花费 ", view)
+        # 不再用 Streamlit 原生 st.metric 排摘要
+        self.assertNotIn('col.metric(label, value)', view)
+
     def test_plan_page_lists_plan_management_contract(self):
         view = self._budget_view_source()
         plan_view = view[view.index('with plan_tab:'):]
         for column in (
-            '序号', '计划ID', '所属渠道', '商品数', '计划类型', '计划经营结构',
+            '序号', '计划ID', '状态', '所属渠道', '商品数', '计划类型', '计划经营结构',
             '当前预算', '往期预算', '预算变化', '出价方式',
             '周期花费', '归因成交', 'ROI', '方向证据', '计划管理建议',
         ):
             self.assertIn(column, plan_view)
+        # 2026-11-19 v2.78：计划名称后加「计划状态」（列名不用裸「状态」，
+        # 那个词在 BUDGET_DECISION_REMOVED_COLUMNS 里会被整列剔除）
+        self.assertIn("'序号', '计划ID', '计划名称', '计划状态'", plan_view)
+        self.assertIn("'计划状态': st.column_config.TextColumn(", plan_view)
+        # 状态筛选必须装在 fragment 里（只重跑这一块，不整页重算）
+        self.assertIn('@st.fragment', plan_view)
+        self.assertIn('def _render_plan_management_table()', plan_view)
+        self.assertIn("key='plan_status_filter'", plan_view)
+        self.assertIn("'（状态空缺）'", plan_view)
+        self.assertIn('显示 {len(frame)} / {total_rows} 个计划', plan_view)
+        self.assertIn('table_height', plan_view)
         self.assertIn("'序号', '计划ID'", plan_view)
         self.assertIn("'序号': st.column_config.NumberColumn('序号', format='%d')", plan_view)
         self.assertIn('合集计划只给父级诊断，勿把商品建议重复落成预算', plan_view)
@@ -874,6 +903,23 @@ class BudgetDecisionDashboardUIContractTests(unittest.TestCase):
     def test_sidebar_supports_30_day_period(self):
         self.assertIn('["当日", "3天", "7天", "15天", "30天", "按月", "自定义"]', self.source)
 
+def build_test_frame_with_plan_detail():
+    """构造一条带「推广计划全量明细」的执行表片段（两个计划、单商品）。"""
+    import pandas as pd
+
+    detail = json.dumps([
+        {'计划ID': 'P1', '计划名称': '关键词A', '所属渠道': '关键词',
+         '当前花费': 60, '归因成交': 240},
+        {'计划ID': 'P2', '计划名称': '人群B', '所属渠道': '人群',
+         '当前花费': 40, '归因成交': 80},
+    ], ensure_ascii=False)
+    return pd.DataFrame([{
+        '宝贝ID': '1001',
+        'GMV': 320.0,
+        '付费': 100.0,
+        '商品访客数': 500,
+        '推广计划全量明细': detail,
+    }])
 
 if __name__ == '__main__':
     unittest.main()
